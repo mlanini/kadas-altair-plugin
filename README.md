@@ -389,12 +389,6 @@ This program is free software; you can redistribute it and/or modify it under th
 
 **📖 Full Documentation**: [GUIDE.md](GUIDE.md) • [ARCHITECTURE.md](ARCHITECTURE.md) • [CONTRIBUTING.md](CONTRIBUTING.md)  
 **🆘 Support**: Built-in Help (`Plugins` → `Altair` → `Help`) • Log Viewer  
-**🐛 Issues**: https://github.com/mlanini/kadas-altair/issues
+**🐛 Issues**: https://github.com/mlanini/kadas-altair-plugin/issues
 
 **© 2026 Michael Lanini** - Open Source Software
-
----
-
-**Version**: 0.2.0  
-**Package**: kadas_altair_plugin_full.zip 
-**Status**: Experimental
