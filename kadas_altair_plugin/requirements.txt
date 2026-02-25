@@ -1,0 +1,10 @@
+PyQt5
+requests
+urllib3
+keyring
+cryptography
+pystac-client>=0.7.0
+earthengine-api
+earthaccess
+pandas
+

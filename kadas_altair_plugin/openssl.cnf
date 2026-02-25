@@ -1,0 +1,22 @@
+# OpenSSL Configuration for KADAS Altair Plugin
+#
+# This configuration enables the legacy provider in OpenSSL 3.0+
+# Required for proxy/VPN environments with SSL inspection that use
+# older cryptographic algorithms.
+#
+# Reference: https://github.com/openssl/openssl/blob/master/doc/man5/config.pod
+
+openssl_conf = openssl_init
+
+[openssl_init]
+providers = provider_sect
+
+[provider_sect]
+default = default_sect
+legacy = legacy_sect
+
+[default_sect]
+activate = 1
+
+[legacy_sect]
+activate = 1

@@ -1,0 +1,61 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# QGIS
+*.qgs~
+*.qgz~
+
+# Secrets and credentials
+secrets/proxy_config.json
+secrets/*.key
+secrets/*.pem
+secrets/*.cert
+
+# Test files
+.pytest_cache/
+.coverage
+htmlcov/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts - do not commit packaged plugins
+# *.zip
+# kadas_altair_plugin_full.zip
+# kadas_altair_plugin_lite.zip
+GIT_COMMANDS.md
+GITHUB_RELEASE_CHECKLIST.md
+PUBLICATION_READY.md
+RELEASE_NOTES.md

@@ -1,0 +1,169 @@
+"""
+Altair EO Data Main Dock Widget
+"""
+from qgis.PyQt.QtWidgets import (
+    QDockWidget, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
+    QLabel, QLineEdit, QPushButton, QComboBox, QSpinBox, QCheckBox,
+    QGroupBox, QTableWidget, QTableWidgetItem, QHeaderView,
+    QAbstractItemView, QSplitter, QMessageBox, QDateEdit, QApplication
+)
+from qgis.PyQt.QtCore import Qt, QDate, QSettings
+from qgis.PyQt.QtGui import QFont
+
+
+class AltairDockWidget(QDockWidget):
+    """Main dockable panel for browsing EO data."""
+
+    def __init__(self, iface, parent=None):
+        """Initialize the dock widget"""
+        super().__init__("Altair EO Data", parent)
+        self.iface = iface
+        self.settings = QSettings()
+        
+        # Setup dockable behavior - kadas-vantor pattern
+        self.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
+        
+        self._setup_ui()
+
+    def _setup_ui(self):
+        """Set up the dock widget UI"""
+        main_widget = QWidget()
+        self.setWidget(main_widget)
+
+        layout = QVBoxLayout(main_widget)
+        layout.setSpacing(10)
+
+        # Header
+        header_label = QLabel("Altair EO Data")
+        header_font = QFont()
+        header_font.setPointSize(12)
+        header_font.setBold(True)
+        header_label.setFont(header_font)
+        header_label.setAlignment(Qt.AlignCenter)
+        header_label.setStyleSheet("color: #ffffff;")
+        layout.addWidget(header_label)
+
+        # Description
+        desc_label = QLabel(
+            "Ricerca e visualizza immagini satellitari da cataloghi OneAtlas, "
+            "Planet, Copernicus e server STAC compatibili."
+        )
+        desc_label.setWordWrap(True)
+        desc_label.setStyleSheet("color: #b0b0b0; font-size: 10px;")
+        layout.addWidget(desc_label)
+
+        # Area selection group
+        area_group = QGroupBox("Area di Ricerca")
+        area_group.setStyleSheet("QGroupBox { color: #ffffff; font-weight: bold; }")
+        area_layout = QVBoxLayout(area_group)
+
+        # Area type selection
+        area_type_layout = QHBoxLayout()
+        self.extent_btn = QPushButton("Usa Estensione Mappa")
+        self.extent_btn.setCheckable(True)
+        self.extent_btn.setToolTip("Usa l'estensione corrente della mappa come area di ricerca")
+        area_type_layout.addWidget(self.extent_btn)
+
+        self.polygon_btn = QPushButton("Disegna Poligono")
+        self.polygon_btn.setCheckable(True)
+        self.polygon_btn.setToolTip("Disegna un poligono sulla mappa per definire l'area")
+        area_type_layout.addWidget(self.polygon_btn)
+
+        area_layout.addLayout(area_type_layout)
+        layout.addWidget(area_group)
+
+        # Filters group
+        filters_group = QGroupBox("Filtri")
+        filters_group.setStyleSheet("QGroupBox { color: #ffffff; font-weight: bold; }")
+        filters_layout = QFormLayout(filters_group)
+
+        # Date range
+        self.start_date = QDateEdit()
+        self.start_date.setDate(QDate.currentDate().addMonths(-1))
+        self.start_date.setCalendarPopup(True)
+        filters_layout.addRow("Data Inizio:", self.start_date)
+
+        self.end_date = QDateEdit()
+        self.end_date.setDate(QDate.currentDate())
+        self.end_date.setCalendarPopup(True)
+        filters_layout.addRow("Data Fine:", self.end_date)
+
+        # Cloud cover
+        self.cloud_cover = QSpinBox()
+        self.cloud_cover.setRange(0, 100)
+        self.cloud_cover.setValue(20)
+        self.cloud_cover.setSuffix(" %")
+        filters_layout.addRow("Copertura Nuvolosa Max:", self.cloud_cover)
+
+        # Collection selector
+        self.collection_combo = QComboBox()
+        self.collection_combo.addItems([
+            "OneAtlas - Pleiades",
+            "OneAtlas - SPOT",
+            "Planet - PlanetScope",
+            "Planet - RapidEye",
+            "Copernicus - Sentinel-2",
+            "Copernicus - Sentinel-1",
+            "STAC Custom"
+        ])
+        filters_layout.addRow("Collezione:", self.collection_combo)
+
+        layout.addWidget(filters_group)
+
+        # Search/Auth buttons
+        button_layout = QHBoxLayout()
+        
+        self.auth_btn = QPushButton("Autentica")
+        self.auth_btn.setToolTip("Configura credenziali per i servizi selezionati")
+        button_layout.addWidget(self.auth_btn)
+
+        self.search_btn = QPushButton("Cerca")
+        self.search_btn.setToolTip("Avvia la ricerca con i parametri selezionati")
+        button_layout.addWidget(self.search_btn)
+
+        layout.addLayout(button_layout)
+
+        # Results table
+        results_group = QGroupBox("Risultati")
+        results_group.setStyleSheet("QGroupBox { color: #ffffff; font-weight: bold; }")
+        results_layout = QVBoxLayout(results_group)
+
+        self.results_table = QTableWidget(0, 5)
+        self.results_table.setHorizontalHeaderLabels([
+            "Data", "Satellite", "Cloud %", "Risoluzione", "ID"
+        ])
+        self.results_table.horizontalHeader().setStretchLastSection(True)
+        self.results_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.results_table.setAlternatingRowColors(True)
+        results_layout.addWidget(self.results_table)
+
+        layout.addWidget(results_group)
+
+        # Preview/Load buttons
+        action_layout = QHBoxLayout()
+        
+        self.preview_btn = QPushButton("Anteprima")
+        self.preview_btn.setEnabled(False)
+        self.preview_btn.setToolTip("Mostra anteprima dell'immagine selezionata")
+        action_layout.addWidget(self.preview_btn)
+
+        self.load_btn = QPushButton("Carica Layer")
+        self.load_btn.setEnabled(False)
+        self.load_btn.setToolTip("Carica l'immagine selezionata come layer KADAS")
+        action_layout.addWidget(self.load_btn)
+
+        layout.addLayout(action_layout)
+
+        # Status label
+        self.status_label = QLabel("Pronto - Seleziona area e criteri di ricerca")
+        self.status_label.setStyleSheet("color: #f0f0f0; font-size: 10px; font-weight: 500;")
+        layout.addWidget(self.status_label)
+
+        # Connect signals
+        self.results_table.itemSelectionChanged.connect(self._on_selection_changed)
+
+    def _on_selection_changed(self):
+        """Enable/disable buttons based on selection"""
+        has_selection = len(self.results_table.selectedItems()) > 0
+        self.preview_btn.setEnabled(has_selection)
+        self.load_btn.setEnabled(has_selection)

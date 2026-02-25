@@ -1,0 +1,23 @@
+[general]
+name=KADAS Altair
+qgisMinimumVersion=3.0
+qgisMaximumVersion=3.99
+version=0.2.0
+author=Michael Lanini
+email=mlanini@proton.me
+description=Multi-source satellite imagery browser for KADAS Albireo 2: 5 production-ready connectors (ICEYE, Umbra, Capella SAR + Maxar Optical + Copernicus Sentinel). Interactive footprint selection, COG loading, OAuth2 auth. 300+ collections available.
+
+about=KADAS Albireo 2 plugin providing unified access to multiple satellite imagery sources through 5 production-ready connectors: (1) ICEYE SAR Open Data - 3 collections with 196 SAR imagery items, global coverage, all-weather/day-night acquisition, (2) Umbra SAR Open Data - high-resolution SAR up to 16cm resolution with recursive STAC catalog (year/month/item structure), GEC/SICD/SIDD/CPHD products, (3) Capella SAR Open Data - ~1000 SAR images organized by product/mode/use-case/capital/datetime/IEEE, X-band radar with GEO/GEC/SLC/SICD/SIDD formats, (4) Maxar Open Data (Vantor STAC) - 55+ disaster event collections with sub-meter resolution optical imagery for emergency response and damage assessment, (5) Copernicus Dataspace - Sentinel-1/2/3/5P collections via OAuth2 authentication and STAC API. Features include: interactive map-based footprint selection with bidirectional table sync, Cloud-Optimized GeoTIFF (COG) loading via GDAL vsicurl, advanced search filters (bbox, date range, cloud cover), OAuth2 client credentials flow, comprehensive logging system, QgsNetworkAccessManager for SSL/proxy handling, and native QGIS network integration. All dependencies bundled for one-click installation. Total 300+ collections across all connectors.
+
+tracker=https://github.com/mlanini/kadas-altair/issues
+repository=https://github.com/mlanini/kadas-altair
+tags=satellite,eo,earth observation,stac,sar,radar,optical,iceye,umbra,capella,maxar,copernicus,sentinel,emergency,disaster,cog,cloud optimized geotiff,oauth2,synthetic aperture radar
+
+homepage=https://github.com/mlanini/kadas-altair
+category=Plugins
+icon=icons/icon.svg
+
+experimental=False
+deprecated=False
+
+hasProcessingProvider=no
