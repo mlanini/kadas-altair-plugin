@@ -146,13 +146,6 @@ python package_plugin_lite.py
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development guidelines.
 
-### Quick Setup
-
-```bash
-git clone https://github.com/mlanini/kadas-altair.git
-cd kadas-altair
-# Install to KADAS plugins directory
-# Reload plugin in KADAS
 ```
 
 ### Testing
