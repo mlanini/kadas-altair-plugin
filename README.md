@@ -146,22 +146,6 @@ python package_plugin_lite.py
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development guidelines.
 
-```
-
-### Testing
-
-Standalone test scripts are available in `test/` directory:
-- `test_copernicus_auth.py` - Validate Copernicus credentials
-- `test_umbra_structure.py` - Explore Umbra catalog structure
-- `test_vantor_search.py` - Test Vantor search logic
-- `verify_network_migration.py` - Check QGIS networking migration
-
-See [CONTRIBUTING.md](CONTRIBUTING.md#testing) for testing guidelines and usage details.
-
-**Note**: While tests can run standalone with QGIS libraries, the plugin is specifically designed for **KADAS Albireo 2** (which is based on QGIS 3.x).
-
----
-
 ## 📄 License
 
 GPL-2.0 License - See [LICENSE](LICENSE) for details.
