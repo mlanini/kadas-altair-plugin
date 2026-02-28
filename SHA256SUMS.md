@@ -19,7 +19,7 @@ shasum -a 256 kadas_altair_plugin_full.zip
 ## Checksums
 
 ### kadas_altair_plugin_full.zip
-- **Size**: 1.59 MB (1,668,436 bytes)
+- **Size**: 1.59 MB (1,671,724 bytes)
 - **SHA256**: `D7C449A13E887991EB8F10E8755BABCF2C2066E86C6A9893701783A148D5AB6D`
 
 ---
