@@ -366,7 +366,7 @@ This program is free software; you can redistribute it and/or modify it under th
 
 ## 📖 Version History
 
-### Version 0.2.0 (January 2026) - Production Release
+### Version 0.2.0 (Febraury 2026) - Production Release
 
 **Production-Ready Connectors**:
 - ✅ ICEYE SAR Open Data (3 collections, 196 items)
