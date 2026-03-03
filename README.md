@@ -1,4 +1,4 @@
-# KADAS Altair - Satellite Imagery Browser Plugin
+# KADAS Altaír - Satellite Imagery Browser Plugin
 
 **Multi-source satellite imagery browser for KADAS Albireo 2**
 
