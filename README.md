@@ -60,7 +60,7 @@ cp -r kadas_altair_plugin ~/.local/share/Kadas/Kadas/profiles/default/python/plu
 | **ICEYE SAR** | Radar | 3 (196 items) | 1-3m | Global |
 | **Umbra SAR** | Radar | Recursive STAC | 16-25cm | Global |
 | **Capella SAR** | Radar | ~1000 images | ~1m | Global |
-| **Maxar Open Data** | Optical | 55+ events | 0.3-0.5m | Disasters |
+| **Vantor Open Data** | Optical | 55+ events | 0.3-0.5m | Disasters |
 | **Copernicus** | Multi | Sentinel 1/2/3/5P | 10m-7km | Global |
 
 **Total: 300+ collections**
@@ -86,7 +86,7 @@ cp -r kadas_altair_plugin ~/.local/share/Kadas/Kadas/profiles/default/python/plu
 - **Capella** - X-band radar, multiple organization types
 
 **Optical:**
-- **Maxar** - Sub-meter resolution for emergency response
+- **Vantor** - Sub-meter resolution for emergency response
 
 **Multi-Sensor:**
 - **Copernicus** - Sentinel constellation (optical + SAR + atmospheric)
@@ -151,7 +151,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development guidelines.
 GPL-2.0 License - See [LICENSE](LICENSE) for details.
 
 This plugin integrates with:
-- Maxar Open Data (CC BY-NC-SA 4.0)
+- Vantor Open Data (CC BY-NC-SA 4.0)
 - ICEYE Open Data (various licenses)
 - Copernicus Sentinel Data (open access)
 
