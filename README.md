@@ -202,20 +202,13 @@ The plugin **automatically inherits** KADAS network settings:
 - **Features**: All-weather, day/night acquisition, cloud-independent
 - **Use Cases**: Change detection, infrastructure monitoring, disaster response
 
-### Maxar Open Data (Vantor STAC)
+### Vantor Open Data (Vantor STAC)
 - **Type**: High-resolution optical imagery
 - **Collections**: 55 disaster/emergency events
 - **Resolution**: Sub-meter (0.3-0.5m)
 - **Coverage**: Disaster response areas worldwide
 - **Features**: Recent events, very high resolution
 - **Use Cases**: Emergency response, damage assessment, humanitarian aid
-
-### swisstopo RapidMapping
-- **Type**: Emergency mapping products
-- **Collections**: BLATTEN + other Swiss events (3+)
-- **Coverage**: Switzerland
-- **Features**: Rapid disaster response, localized
-- **Use Cases**: Swiss emergency planning, disaster coordination
 
 ---
 
@@ -329,7 +322,7 @@ Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for development gu
 
 **Before submitting issues**:
 - Check logs: `Plugins` → `Altair` → `📋 View Log`
-- Include KADAS version, plugin version (0.2.0)
+- Include KADAS version, plugin version (0.3.0)
 - Provide steps to reproduce with error messages
 
 **Development Setup**: See [CONTRIBUTING.md](CONTRIBUTING.md) for development guidelines and [ARCHITECTURE.md](ARCHITECTURE.md) for technical architecture.
@@ -366,7 +359,7 @@ This program is free software; you can redistribute it and/or modify it under th
 
 ## 📖 Version History
 
-### Version 0.2.0 (Febraury 2026) - Production Release
+### Version 0.3.0 (Febraury 2026) - Production Release
 
 **Production-Ready Connectors**:
 - ✅ ICEYE SAR Open Data (3 collections, 196 items)
