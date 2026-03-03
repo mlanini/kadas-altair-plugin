@@ -3337,17 +3337,39 @@ class AltairDockWidget(QDockWidget):
                 logger.info(f"  Format: {format_type}")
                 
                 # Check if Copernicus requires authentication
-                needs_copernicus_auth = 'dataspace.copernicus.eu' in cog_url
-                if needs_copernicus_auth and hasattr(self, 'copernicus_connector'):
-                    # Ensure valid token
-                    if self.copernicus_connector._ensure_valid_token():
-                        token = self.copernicus_connector._access_token
-                        # Configure GDAL to use OAuth2 token
-                        import os
-                        os.environ['GDAL_HTTP_HEADERS'] = f'Authorization: Bearer {token}'
-                        logger.debug("Copernicus: GDAL configured with OAuth2 token for COG access")
+                needs_copernicus_auth = 'dataspace.copernicus.eu' in cog_url or 'eodata.dataspace.copernicus.eu' in cog_url
+                
+                if needs_copernicus_auth:
+                    from osgeo import gdal
+                    
+                    # Get OAuth2 token from Copernicus connector
+                    copernicus_token = None
+                    try:
+                        if hasattr(self, 'connector_manager') and self.connector_manager:
+                            # Access connector instance from manager's internal dict
+                            if 'copernicus' in self.connector_manager._connectors:
+                                copernicus_connector = self.connector_manager._connectors['copernicus']['instance']
+                                if copernicus_connector and hasattr(copernicus_connector, 'access_token'):
+                                    copernicus_token = copernicus_connector.access_token
+                                    logger.debug(f"  Got Copernicus token: {copernicus_token[:20] if copernicus_token else 'None'}...")
+                    except Exception as e:
+                        logger.debug(f"  Could not get Copernicus token: {e}")
+                    
+                    if copernicus_token:
+                        # Configure GDAL to send Bearer token in Authorization header
+                        auth_header = f"Authorization: Bearer {copernicus_token}"
+                        gdal.SetConfigOption('GDAL_HTTP_HEADERS', auth_header)
+                        logger.info("  🔐 Copernicus: Using OAuth2 Bearer token authentication")
                     else:
-                        logger.warning("Copernicus: Failed to get valid token for COG access")
+                        logger.warning("  ⚠️  Copernicus token not available - authentication may fail")
+                    
+                    # CRITICAL: Windows SSL certificate revocation check issue
+                    # Copernicus eodata uses SChannel which fails with CRYPT_E_NO_REVOCATION_CHECK
+                    gdal.SetConfigOption('GDAL_HTTP_UNSAFESSL', 'YES')
+                    gdal.SetConfigOption('CPL_CURL_VERBOSE', 'NO')
+                    
+                    logger.info("  🔐 Copernicus: Using direct HTTPS access (Windows SSL workaround enabled)")
+                    logger.debug("     GDAL_HTTP_UNSAFESSL=YES to bypass certificate revocation check")
                 
                 # Validate URL is HTTP/HTTPS (required for vsicurl)
                 if not cog_url.startswith(('http://', 'https://')):
@@ -3427,14 +3449,35 @@ class AltairDockWidget(QDockWidget):
                             logger.warning("   S3 access denied - bucket may require authentication")
                         elif is_jp2 and "not recognized" in error_msg.lower():
                             logger.warning("   JPEG2000 driver not available - install GDAL with JP2 support")
-                        elif needs_copernicus_auth and "401" in error_msg:
-                            logger.warning("   Copernicus authentication failed - check token validity")
+                        elif needs_copernicus_auth and ("401" in error_msg or "403" in error_msg or "Unauthorized" in error_msg):
+                            logger.error("   ❌ Copernicus authentication failed")
+                            logger.error("   Possible causes:")
+                            logger.error("     1. OAuth2 token expired - try re-authenticating")
+                            logger.error("     2. Token not included in GDAL request")
+                            logger.error("     3. Asset requires different authentication method")
+                            logger.error("   💡 Solution: Go to Settings → Copernicus and re-enter credentials")
+                        elif needs_copernicus_auth:
+                            logger.error("   ❌ Copernicus asset access failed")
+                            logger.error(f"   Error: {error_msg}")
+                            logger.error("   Note: Copernicus Dataspace may require OData API for some assets")
+                            logger.error("   See: https://documentation.dataspace.copernicus.eu/APIs/OData.html")
             
-            # Clean up GDAL environment (remove Copernicus authentication headers only)
-            import os
-            if 'GDAL_HTTP_HEADERS' in os.environ:
-                del os.environ['GDAL_HTTP_HEADERS']
-                logger.debug("Cleaned up GDAL HTTP headers")
+            # Clean up GDAL configuration options
+            from osgeo import gdal
+            
+            # Reset GDAL HTTP/S3 configuration
+            gdal.SetConfigOption('GDAL_HTTP_HEADERS', None)
+            gdal.SetConfigOption('GDAL_HTTP_HEADER_FILE', None)
+            gdal.SetConfigOption('GDAL_HTTP_UNSAFESSL', None)
+            gdal.SetConfigOption('AWS_ACCESS_KEY_ID', None)
+            gdal.SetConfigOption('AWS_SECRET_ACCESS_KEY', None)
+            gdal.SetConfigOption('AWS_S3_ENDPOINT', None)
+            gdal.SetConfigOption('AWS_HTTPS', None)
+            gdal.SetConfigOption('AWS_VIRTUAL_HOSTING', None)
+            gdal.SetConfigOption('CPL_CURL_VERBOSE', None)
+            gdal.SetConfigOption('GDAL_HTTP_UNSAFESSL', None)
+            
+            logger.debug("Reset GDAL HTTP and S3 configuration options")
             
             QApplication.restoreOverrideCursor()
             
@@ -3673,25 +3716,37 @@ class AltairDockWidget(QDockWidget):
                 try:
                     logger.info(f"Downloading {cog_url} to {filepath}")
                     
-                    # Check if Copernicus requires authentication
-                    needs_copernicus_auth = 'dataspace.copernicus.eu' in cog_url
+                    # Check if Copernicus (use direct HTTPS with OAuth2 token)
+                    needs_copernicus_auth = 'eodata.dataspace.copernicus.eu' in cog_url
                     
-                    if needs_copernicus_auth and hasattr(self, 'copernicus_connector'):
-                        # Copernicus requires OAuth2 token
-                        if self.copernicus_connector._ensure_valid_token():
-                            token = self.copernicus_connector._access_token
-                            # Create authenticated request
+                    if needs_copernicus_auth:
+                        # Copernicus: Use direct HTTPS download with Bearer token
+                        logger.info("Copernicus: Using authenticated HTTPS download")
+                        
+                        # Get OAuth2 token from Copernicus connector
+                        copernicus_token = None
+                        try:
+                            if hasattr(self, 'connector_manager') and self.connector_manager:
+                                # Access connector instance from manager's internal dict
+                                if 'copernicus' in self.connector_manager._connectors:
+                                    copernicus_connector = self.connector_manager._connectors['copernicus']['instance']
+                                    if copernicus_connector and hasattr(copernicus_connector, 'access_token'):
+                                        copernicus_token = copernicus_connector.access_token
+                                        logger.debug(f"  Got Copernicus token for download: {copernicus_token[:20] if copernicus_token else 'None'}...")
+                        except Exception as e:
+                            logger.debug(f"  Could not get Copernicus token: {e}")
+                        
+                        if copernicus_token:
+                            # Download with Bearer token
                             import urllib.request
                             req = urllib.request.Request(cog_url)
-                            req.add_header('Authorization', f'Bearer {token}')
-                            logger.debug("Copernicus: Using OAuth2 token for download")
+                            req.add_header('Authorization', f'Bearer {copernicus_token}')
                             
-                            # Download with authentication
                             with urllib.request.urlopen(req) as response:
                                 with open(filepath, 'wb') as out_file:
                                     out_file.write(response.read())
                         else:
-                            logger.warning("Copernicus: Failed to get valid token for download")
+                            logger.warning("  ⚠️  Copernicus token not available - download may fail")
                             import urllib.request
                             urllib.request.urlretrieve(cog_url, filepath)
                     else:

@@ -360,6 +360,16 @@ class SettingsDockWidget(QDockWidget):
         self.copernicus_client_secret.setPlaceholderText("Enter OAuth2 client secret")
         self.copernicus_client_secret.setEchoMode(QLineEdit.Password)
         copernicus_layout.addRow("Client Secret:", self.copernicus_client_secret)
+
+    # Optional user account credentials (required for S3 Keys Manager password grant)
+    self.copernicus_username = QLineEdit()
+    self.copernicus_username.setPlaceholderText("Optional: Copernicus account username")
+    copernicus_layout.addRow("Username:", self.copernicus_username)
+
+    self.copernicus_password = QLineEdit()
+    self.copernicus_password.setPlaceholderText("Optional: Copernicus account password")
+    self.copernicus_password.setEchoMode(QLineEdit.Password)
+    copernicus_layout.addRow("Password:", self.copernicus_password)
         
         # Timeout settings
         self.copernicus_timeout = QSpinBox()
@@ -772,6 +782,13 @@ class SettingsDockWidget(QDockWidget):
                 logger.debug(f"Copernicus client_id length: {len(client_id)}, client_secret length: {len(client_secret)}")
                 self.copernicus_client_id.setText(client_id)
                 self.copernicus_client_secret.setText(client_secret)
+                # load optional username/password if present
+                username = copernicus_creds.get('username', '')
+                password = copernicus_creds.get('password', '')
+                if username:
+                    self.copernicus_username.setText(username)
+                if password:
+                    self.copernicus_password.setText(password)
         
         self.copernicus_timeout.setValue(
             self.settings.value(f"{self.SETTINGS_PREFIX}copernicus_timeout", 15, type=int)
@@ -900,12 +917,23 @@ class SettingsDockWidget(QDockWidget):
         if self.secure_storage:
             copernicus_client_id = self.copernicus_client_id.text().strip()
             copernicus_client_secret = self.copernicus_client_secret.text().strip()
-            if copernicus_client_id and copernicus_client_secret:
-                logger.info(f"Saving Copernicus credentials - client_id length: {len(copernicus_client_id)}")
-                self.secure_storage.store_credentials('copernicus', {
-                    'client_id': copernicus_client_id,
-                    'client_secret': copernicus_client_secret
-                })
+            # Save both OAuth client credentials and optional account username/password
+            creds_to_store = {}
+            if copernicus_client_id:
+                creds_to_store['client_id'] = copernicus_client_id
+            if copernicus_client_secret:
+                creds_to_store['client_secret'] = copernicus_client_secret
+
+            copernicus_username = self.copernicus_username.text().strip()
+            copernicus_password = self.copernicus_password.text().strip()
+            if copernicus_username:
+                creds_to_store['username'] = copernicus_username
+            if copernicus_password:
+                creds_to_store['password'] = copernicus_password
+
+            if creds_to_store:
+                logger.info(f"Saving Copernicus credentials - keys: {', '.join(creds_to_store.keys())}")
+                self.secure_storage.store_credentials('copernicus', creds_to_store)
                 logger.info("Copernicus credentials saved to secure storage")
             else:
                 logger.debug("Copernicus credentials empty, not saving")

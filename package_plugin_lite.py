@@ -19,7 +19,7 @@ from datetime import datetime
 
 # Configuration
 PLUGIN_NAME = "kadas_altair_plugin"
-OUTPUT_ZIP = "kadas_altair_plugin.zip"
+OUTPUT_ZIP = None  # Will be set after reading version from metadata.txt
 
 # Files/folders to exclude
 EXCLUDE_PATTERNS = [
@@ -84,6 +84,8 @@ def should_exclude(path, base_path):
 
 def check_requirements():
     """Check if plugin directory exists."""
+    global OUTPUT_ZIP
+    
     print_step(1, "Checking requirements")
     
     if not os.path.isdir(PLUGIN_NAME):
@@ -107,6 +109,12 @@ def check_requirements():
     
     if version:
         print_info(f"Plugin version: {version}")
+        # Set output ZIP filename with version
+        OUTPUT_ZIP = f"kadas_altair_plugin_lite_v{version}.zip"
+        print_info(f"Output package: {OUTPUT_ZIP}")
+    else:
+        print_error("Could not read version from metadata.txt")
+        return False
     
     return True
 

@@ -213,12 +213,20 @@ class SecureStorage:
                 credentials['client_id'] = client_id
                 credentials['client_secret'] = client_secret
         elif service == 'copernicus':
-            # Copernicus uses OAuth2 client credentials (same as OneAtlas)
+            # Copernicus: can store either OAuth2 client credentials (client_id/client_secret)
+            # or user account credentials (username/password) which are required for S3 keys manager
             client_id = self.retrieve_credential(service, 'client_id')
             client_secret = self.retrieve_credential(service, 'client_secret')
             if client_id or client_secret:
                 credentials['client_id'] = client_id
                 credentials['client_secret'] = client_secret
+
+            # Also check for user account credentials (username/password)
+            username = self.retrieve_credential(service, 'username')
+            password = self.retrieve_credential(service, 'password')
+            if username or password:
+                credentials['username'] = username
+                credentials['password'] = password
         elif service == 'planet':
             api_key = self.retrieve_credential(service, 'api_key')
             if api_key:

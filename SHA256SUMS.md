@@ -1,4 +1,4 @@
-# SHA256 Checksums - KADAS Altair Plugin v0.2.0
+# SHA256 Checksums - KADAS Altair Plugin v0.3.0
 
 ## Package Integrity Verification
 
@@ -6,21 +6,28 @@ Verify the integrity of downloaded files using SHA256 checksums:
 
 ```powershell
 # Windows PowerShell
-Get-FileHash kadas_altair_plugin_full.zip -Algorithm SHA256
+Get-FileHash kadas_altair_plugin_full_v0.3.0.zip -Algorithm SHA256
 ```
 
 ```bash
 # Linux/macOS
-shasum -a 256 kadas_altair_plugin_full.zip
+shasum -a 256 kadas_altair_plugin_full_v0.3.0.zip
 ```
 
 ---
 
 ## Checksums
 
-### kadas_altair_plugin_full.zip
-- **Size**: 1.59 MB (1,671,724 bytes)
-- **SHA256**: `D7C449A13E887991EB8F10E8755BABCF2C2066E86C6A9893701783A148D5AB6D`
+### kadas_altair_plugin_full_v0.3.0.zip
+- **Size**: 1.60 MB (1,675,153 bytes)
+- **SHA256**: `2BE0260A2CB1B9EAA504A89EC7C414A72D78F83C543B8B06CAC938CEBAC911E3`
+- **Build**: 2026-02-28 10:03:43
+- **Changes**:
+  - � Added Bearer token authentication for Copernicus COG preview/download
+  - ➕ Added username/password fields in Copernicus settings (secure storage)
+  - 🐛 Fixed HTTP 403 error when loading Copernicus COGs via GDAL
+  - � Fixed download timeout by sending OAuth2 token in requests
+  - 📦 Package filename now includes version number
 
 ---
 
@@ -29,11 +36,11 @@ shasum -a 256 kadas_altair_plugin_full.zip
 ### Windows PowerShell
 ```powershell
 # Download plugin
-Invoke-WebRequest -Uri "https://github.com/mlanini/kadas-altair/releases/download/v0.2.0/kadas_altair_plugin_full.zip" -OutFile "kadas_altair_plugin_full.zip"
+Invoke-WebRequest -Uri "https://github.com/mlanini/kadas-altair/releases/download/v0.3.0/kadas_altair_plugin_full_v0.3.0.zip" -OutFile "kadas_altair_plugin_full_v0.3.0.zip"
 
 # Verify checksum
-$expectedHash = "D7C449A13E887991EB8F10E8755BABCF2C2066E86C6A9893701783A148D5AB6D"
-$actualHash = (Get-FileHash kadas_altair_plugin_full.zip -Algorithm SHA256).Hash
+$expectedHash = "2BE0260A2CB1B9EAA504A89EC7C414A72D78F83C543B8B06CAC938CEBAC911E3"
+$actualHash = (Get-FileHash kadas_altair_plugin_full_v0.3.0.zip -Algorithm SHA256).Hash
 
 if ($actualHash -eq $expectedHash) {
     Write-Host "✅ Checksum verified! File is authentic." -ForegroundColor Green

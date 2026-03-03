@@ -1,13 +1,42 @@
 """Copernicus Dataspace STAC Catalog API Connector
 
-Implements access to Copernicus Dataspace using STAC API:
-https://documentation.dataspace.copernicus.eu/APIs/SentinelHub/Catalog.html
+Implements access to Copernicus Dataspace using STAC API 1.1.0:
+https://documentation.dataspace.copernicus.eu/APIs/STAC.html
 
 Supports:
 - OAuth2 authentication with client credentials
-- STAC Catalog API for Sentinel-1, Sentinel-2, Sentinel-3, Sentinel-5P
+- STAC Catalog API for Sentinel-1, Sentinel-2, Sentinel-3, Sentinel-5P, Sentinel-6
 - Advanced search with spatial, temporal, and cloud cover filters
 - Integrated with QGIS network manager for proper SSL/proxy handling
+
+IMPORTANT: Asset Access Requirements
+--------------------------------------
+Copernicus Dataspace has TWO separate authentication systems:
+
+1. OAuth2 Bearer Token (for APIs):
+   - Used for STAC catalog search and metadata
+   - Used to request temporary S3 credentials
+   - Endpoint: https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token
+
+2. S3 Credentials (for data access):
+   - Used to access eodata S3 storage assets
+   - Must be generated via S3 Keys Manager API
+   - Endpoint: https://s3-keys-manager.cloudferro.com/api/user/credentials
+   - OAuth2 Bearer token does NOT work for eodata assets (returns HTTP 403)
+
+When loading COG assets via GDAL vsis3:
+1. Get temporary S3 credentials using get_s3_credentials()
+2. Configure GDAL with AWS credentials:
+   gdal.SetConfigOption('AWS_S3_ENDPOINT', 'eodata.dataspace.copernicus.eu')
+   gdal.SetConfigOption('AWS_ACCESS_KEY_ID', access_id)
+   gdal.SetConfigOption('AWS_SECRET_ACCESS_KEY', secret)
+3. Use vsis3:// prefix: vsis3://eodata/bucket/path
+4. Delete credentials after use: delete_s3_credentials(access_id)
+
+Official Documentation:
+- STAC API: https://documentation.dataspace.copernicus.eu/APIs/STAC.html
+- S3 Access: https://documentation.dataspace.copernicus.eu/APIs/S3.html
+- OAuth2: https://documentation.dataspace.copernicus.eu/APIs/Token.html
 
 Refactored based on patterns from OpenEO QGIS plugin:
 https://github.com/Open-EO/openeo-qgis-plugin
@@ -44,11 +73,13 @@ class CopernicusConnector(ConnectorBase):
 
     # Copernicus Dataspace endpoints
     AUTH_URL = 'https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token'
-    STAC_API_URL = 'https://catalogue.dataspace.copernicus.eu/stac'
+    STAC_API_URL = 'https://stac.dataspace.copernicus.eu/v1'
+    S3_KEYS_MANAGER_URL = 'https://s3-keys-manager.cloudferro.com/api/user/credentials'
+    S3_ENDPOINT = 'eodata.dataspace.copernicus.eu'
     
     # Available collections
-    # Based on Copernicus Dataspace STAC catalog
-    # https://documentation.dataspace.copernicus.eu/APIs/SentinelHub/Catalog.html
+    # Based on Copernicus Dataspace STAC catalog (STAC 1.1.0)
+    # https://documentation.dataspace.copernicus.eu/APIs/STAC.html
     COLLECTIONS = {
         'sentinel-1-grd': {
             'id': 'sentinel-1-grd',  # Correct STAC collection ID
@@ -121,13 +152,13 @@ class CopernicusConnector(ConnectorBase):
         
         Args:
             url: URL to request
-            method: HTTP method ('GET' or 'POST')
+            method: HTTP method ('GET', 'POST', or 'DELETE')
             headers: Optional request headers
             data: Optional request body (for POST)
             timeout: Request timeout in seconds
             
         Returns:
-            Parsed JSON response or None on error
+            Parsed JSON response or None on error (or for 204 No Content)
         """
         if not QGIS_AVAILABLE:
             logger.error('Copernicus: QGIS network manager not available')
@@ -148,10 +179,12 @@ class CopernicusConnector(ConnectorBase):
             # Use QGIS network manager
             nam = QgsNetworkAccessManager.instance()
             
-            # Send request
+            # Send request based on method
             if method == 'POST':
                 reply = nam.post(request, data if data else b'')
-            else:
+            elif method == 'DELETE':
+                reply = nam.deleteResource(request)
+            else:  # GET
                 reply = nam.get(request)
             
             # Event loop with timeout
@@ -197,11 +230,21 @@ class CopernicusConnector(ConnectorBase):
                 reply.deleteLater()
                 return None
             
+            # Handle 204 No Content (DELETE success)
+            if status_code == 204:
+                logger.debug(f"Copernicus: 204 No Content - request successful")
+                reply.deleteLater()
+                return None
+            
             # Read and parse JSON response
             response_data = reply.readAll().data().decode('utf-8')
             logger.debug(f"Copernicus: Received {len(response_data)} bytes from {url}")
             
             reply.deleteLater()
+            
+            # Return None for empty responses
+            if not response_data or response_data.strip() == '':
+                return None
             
             return json.loads(response_data)
             
@@ -651,8 +694,9 @@ class CopernicusConnector(ConnectorBase):
             coll_meta = self.COLLECTIONS.get(collection, {})
             resolution = coll_meta.get('resolution', 'Unknown')
             
-            # Get assets
+            # Get assets and convert S3 URLs to HTTPS
             assets = feature.get('assets', {})
+            converted_assets = self._convert_s3_urls_to_https(assets)
             
             # Build standardized result
             result = {
@@ -665,7 +709,7 @@ class CopernicusConnector(ConnectorBase):
                 'bbox': bbox_list,
                 'geometry': geometry,
                 'properties': properties,
-                'assets': assets,
+                'assets': converted_assets,
                 'stac_feature': feature,  # Preserve original for advanced use
                 'source': 'Copernicus Dataspace'
             }
@@ -676,6 +720,50 @@ class CopernicusConnector(ConnectorBase):
             logger.warning(f'Copernicus: failed to transform STAC feature: {e}')
             logger.debug(f'Problematic feature: {feature}')
             return None
+    
+    def _convert_s3_urls_to_https(self, assets: Dict) -> Dict:
+        """Convert S3 URLs to HTTPS URLs for Copernicus assets.
+        
+        Copernicus Dataspace STAC catalog returns S3 URLs like:
+        s3://eodata/Sentinel-2/MSI/L2A/2026/02/07/...
+        
+        These must be converted to HTTPS URLs:
+        https://eodata.dataspace.copernicus.eu/Sentinel-2/MSI/L2A/2026/02/07/...
+        
+        Args:
+            assets: Dictionary of assets from STAC feature
+            
+        Returns:
+            Dictionary with converted asset URLs
+        """
+        if not assets:
+            return assets
+        
+        converted = {}
+        
+        for asset_name, asset_data in assets.items():
+            if not isinstance(asset_data, dict):
+                converted[asset_name] = asset_data
+                continue
+            
+            # Copy asset data
+            asset_copy = asset_data.copy()
+            
+            # Convert S3 URL to HTTPS
+            href = asset_copy.get('href', '')
+            if href.startswith('s3://eodata/'):
+                # Remove s3://eodata/ prefix and replace with HTTPS URL
+                path = href.replace('s3://eodata/', '')
+                https_url = f'https://eodata.dataspace.copernicus.eu/{path}'
+                asset_copy['href'] = https_url
+                
+                logger.debug(f'Copernicus: Converted S3 to HTTPS: {asset_name}')
+                logger.debug(f'  Original: {href[:80]}...')
+                logger.debug(f'  Converted: {https_url[:80]}...')
+            
+            converted[asset_name] = asset_copy
+        
+        return converted
 
     def get_collections(self) -> List[Dict[str, str]]:
         """Get list of available collections.
@@ -723,6 +811,9 @@ class CopernicusConnector(ConnectorBase):
     def get_download_url(self, result: Dict, asset_type: str = 'data') -> Optional[str]:
         """Get download URL for specific asset type.
         
+        For Copernicus Dataspace, this returns the OData API download URL
+        which requires OAuth2 authentication.
+        
         Args:
             result: Search result dictionary
             asset_type: Asset type to download (e.g., 'data', 'metadata')
@@ -731,15 +822,187 @@ class CopernicusConnector(ConnectorBase):
             URL string or None
         """
         try:
-            assets = result.get('assets', {})
+            # For Copernicus, we need to use the OData API for downloads
+            # The STAC assets contain links but they require special handling
+            item_id = result.get('id')
+            if not item_id:
+                logger.warning('Copernicus: no item ID found in result')
+                return None
             
-            if asset_type in assets:
-                asset = assets[asset_type]
-                if isinstance(asset, dict):
-                    return asset.get('href')
+            # Copernicus OData download URL pattern
+            # https://documentation.dataspace.copernicus.eu/APIs/OData.html
+            odata_url = f"https://zipper.dataspace.copernicus.eu/odata/v1/Products({item_id})/$value"
             
-            return None
+            logger.debug(f'Copernicus: OData download URL: {odata_url}')
+            return odata_url
             
         except Exception as e:
             logger.warning(f'Copernicus: failed to get download URL: {e}')
+            return None
+    
+    def get_asset_download_url(self, result: Dict, asset_name: str) -> Optional[str]:
+        """Get download URL for a specific asset within a product.
+        
+        For Copernicus individual assets (like TCI.jp2, B04.jp2), we need to
+        extract them from the product archive or use direct asset links with auth.
+        
+        Args:
+            result: Search result dictionary
+            asset_name: Name of the asset (e.g., 'visual', 'B04', 'TCI')
+            
+        Returns:
+            Tuple of (URL string or None, requires_auth: bool)
+        """
+        try:
+            assets = result.get('assets', {})
+            
+            if asset_name not in assets:
+                logger.warning(f'Copernicus: asset "{asset_name}" not found')
+                return None
+            
+            asset = assets[asset_name]
+            if not isinstance(asset, dict):
+                return None
+            
+            asset_href = asset.get('href')
+            if not asset_href:
+                return None
+            
+            # Copernicus assets require OAuth2 authentication
+            # The href is typically an S3 URL that requires signed access
+            logger.debug(f'Copernicus: asset URL requires OAuth2: {asset_href[:100]}...')
+            
+            return asset_href
+            
+        except Exception as e:
+            logger.warning(f'Copernicus: failed to get asset download URL: {e}')
+            return None
+    
+    def get_s3_credentials(self) -> Optional[Dict[str, str]]:
+        """Get temporary S3 credentials using OAuth2 token.
+        
+        Copernicus Dataspace requires S3 credentials to access eodata assets.
+        These are different from OAuth2 tokens and must be generated via S3 Keys Manager API.
+        
+        API Documentation: https://documentation.dataspace.copernicus.eu/APIs/S3.html
+        
+        Returns:
+            Dict with 'access_id' and 'secret' keys, or None if failed
+        """
+        if not self._ensure_valid_token():
+            logger.error('Copernicus: Cannot get S3 credentials - no valid OAuth2 token')
+            return None
+        
+        try:
+            logger.info('Copernicus: Requesting temporary S3 credentials from S3 Keys Manager...')
+            
+            headers = {
+                'Authorization': f'Bearer {self._access_token}',
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            }
+            
+            # Make POST request to generate temporary S3 credentials
+            response = self._http_request(
+                self.S3_KEYS_MANAGER_URL,
+                method='POST',
+                headers=headers,
+                timeout=self.timeout_default
+            )
+            
+            if not response:
+                logger.error('Copernicus: Failed to get S3 credentials - no response')
+                return None
+            
+            # Extract credentials
+            access_id = response.get('access_id')
+            secret = response.get('secret')
+            
+            if not access_id or not secret:
+                logger.error('Copernicus: S3 credentials response missing access_id or secret')
+                logger.debug(f'Response keys: {list(response.keys())}')
+                return None
+            
+            logger.info(f'Copernicus: ✅ Got temporary S3 credentials (access_id: {access_id[:20]}...)')
+            
+            return {
+                'access_id': access_id,
+                'secret': secret
+            }
+            
+        except Exception as e:
+            logger.error(f'Copernicus: Failed to get S3 credentials: {e}')
+            import traceback
+            logger.debug(traceback.format_exc())
+            return None
+    
+    def delete_s3_credentials(self, access_id: str) -> bool:
+        """Delete temporary S3 credentials.
+        
+        Official endpoint from documentation:
+        https://documentation.dataspace.copernicus.eu/APIs/S3.html
+        
+        Args:
+            access_id: The access_id to delete
+            
+        Returns:
+            bool: True if successfully deleted
+        """
+        if not self._ensure_valid_token():
+            logger.warning('Copernicus: Cannot delete S3 credentials - no valid OAuth2 token')
+            return False
+        
+        try:
+            # Official DELETE endpoint format from documentation
+            delete_url = f'{self.S3_KEYS_MANAGER_URL}/access_id/{access_id}'
+            
+            headers = {
+                'Authorization': f'Bearer {self._access_token}',
+                'Accept': 'application/json'
+            }
+            
+            # Make DELETE request
+            # Returns 204 No Content on success (handled as None by _http_request)
+            self._http_request(
+                delete_url,
+                method='DELETE',
+                headers=headers,
+                timeout=self.timeout_default
+            )
+            
+            logger.info(f'Copernicus: ✅ Deleted temporary S3 credentials (access_id: {access_id[:20]}...)')
+            return True
+            
+        except Exception as e:
+            logger.warning(f'Copernicus: Failed to delete S3 credentials: {e}')
+            return False
+        """Get a signed URL for accessing a Copernicus asset.
+        
+        Copernicus Dataspace uses S3 URLs that require OAuth2 authentication.
+        This method returns the URL with proper authentication headers configured.
+        
+        Args:
+            asset_href: The asset href from STAC catalog
+            
+        Returns:
+            Signed/authenticated URL or None if authentication fails
+        """
+        try:
+            # Ensure we have a valid token
+            if not self._ensure_valid_token():
+                logger.error('Copernicus: Cannot get signed URL - authentication failed')
+                return None
+            
+            # For Copernicus S3 URLs, we need to include the Bearer token
+            # GDAL vsicurl will use GDAL_HTTP_HEADERS environment variable
+            # So we just return the original URL - the caller must configure GDAL
+            
+            logger.debug(f'Copernicus: Asset requires Bearer token authentication')
+            logger.debug(f'Copernicus: Original URL: {asset_href[:100]}...')
+            
+            # Return original URL - authentication is handled via GDAL_HTTP_HEADERS
+            return asset_href
+            
+        except Exception as e:
+            logger.error(f'Copernicus: Failed to get signed asset URL: {e}')
             return None

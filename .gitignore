@@ -52,10 +52,17 @@ htmlcov/
 Thumbs.db
 
 # Build artifacts - do not commit packaged plugins
-# *.zip
-# kadas_altair_plugin_full.zip
+*.zip
+kadas_altair_plugin_full.zip
 # kadas_altair_plugin_lite.zip
+
 GIT_COMMANDS.md
 GITHUB_RELEASE_CHECKLIST.md
 PUBLICATION_READY.md
 RELEASE_NOTES.md
+COPERNICUS_COG_ACCESS.md
+COPERNICUS_403_FIX.md
+COPERNICUS_API_UPDATE.md
+COPERNICUS_AUTH_FIX.md
+COPERNICUS_S3_FUTURE.md
+TESTING_S3_CREDENTIALS.md
