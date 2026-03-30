@@ -9,7 +9,8 @@ from qgis.PyQt.QtWidgets import (
     QLabel, QLineEdit, QPushButton, QComboBox, QSpinBox, QCheckBox,
     QGroupBox, QTableWidget, QTableWidgetItem, QHeaderView,
     QAbstractItemView, QSplitter, QMessageBox, QDateEdit, QApplication,
-    QProgressBar, QSlider, QFileDialog, QTabWidget, QTreeWidget, QTreeWidgetItem
+    QProgressBar, QSlider, QFileDialog, QTabWidget, QTreeWidget, QTreeWidgetItem,
+    QScrollArea
 )
 from qgis.PyQt.QtCore import Qt, QDate, QSettings, QTimer, QModelIndex, QVariant
 from qgis.PyQt.QtGui import QFont, QColor
@@ -290,11 +291,17 @@ class AltairDockWidget(QDockWidget):
 
     def _setup_ui(self):
         """Set up the dock widget UI"""
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        self.setWidget(scroll)
+
         main_widget = QWidget()
-        self.setWidget(main_widget)
+        scroll.setWidget(main_widget)
 
         layout = QVBoxLayout(main_widget)
-        layout.setSpacing(10)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(6)
+        layout.setAlignment(Qt.AlignTop)
 
         # Header
         header_label = QLabel("Open Data Search")

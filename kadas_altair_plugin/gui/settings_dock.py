@@ -4,7 +4,7 @@ Altair EO Data Settings Dock Widget
 from qgis.PyQt.QtWidgets import (
     QDockWidget, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLabel, QLineEdit, QPushButton, QCheckBox, QSpinBox, QComboBox,
-    QTabWidget, QGroupBox, QFileDialog, QMessageBox, QApplication
+    QTabWidget, QGroupBox, QFileDialog, QMessageBox, QApplication, QScrollArea
 )
 from qgis.PyQt.QtCore import QSettings, Qt, pyqtSignal
 from qgis.PyQt.QtGui import QFont
@@ -45,11 +45,17 @@ class SettingsDockWidget(QDockWidget):
 
     def _setup_ui(self):
         """Set up the settings UI"""
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        self.setWidget(scroll)
+
         widget = QWidget()
-        self.setWidget(widget)
+        scroll.setWidget(widget)
         
         layout = QVBoxLayout(widget)
-        layout.setSpacing(10)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(6)
+        layout.setAlignment(Qt.AlignTop)
         
         # Header
         header_label = QLabel("Plugin Settings")

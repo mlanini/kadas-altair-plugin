@@ -22,6 +22,7 @@ from qgis.PyQt.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -75,8 +76,12 @@ class TaskingDockWidget(QDockWidget):
     _LABEL_COLOR = '#b0b0b0'
 
     def _setup_ui(self):
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        self.setWidget(scroll)
+
         widget = QWidget()
-        self.setWidget(widget)
+        scroll.setWidget(widget)
 
         # Apply light text tone to all labels and group-box titles uniformly,
         # matching the subtitle style.
@@ -86,7 +91,9 @@ class TaskingDockWidget(QDockWidget):
         )
 
         layout = QVBoxLayout(widget)
-        layout.setSpacing(10)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(6)
+        layout.setAlignment(Qt.AlignTop)
 
         header = QLabel('TEST Satellite Tasking Request')
         header_font = QFont()
@@ -104,7 +111,6 @@ class TaskingDockWidget(QDockWidget):
         subtitle.setWordWrap(True)
         subtitle.setStyleSheet('color: #b0b0b0; font-size: 10px;')
         layout.addWidget(subtitle)
-        layout.addStretch(1)
 
         requester_group = QGroupBox('Requester')
         requester_form = QFormLayout(requester_group)
@@ -122,7 +128,6 @@ class TaskingDockWidget(QDockWidget):
         requester_form.addRow('Organization:', self.requester_org)
 
         layout.addWidget(requester_group)
-        layout.addStretch(1)
 
         mission_group = QGroupBox('Mission & Provider')
         mission_form = QFormLayout(mission_group)
@@ -153,7 +158,6 @@ class TaskingDockWidget(QDockWidget):
         mission_form.addRow('Desired Delivery Date:', self.delivery_date)
 
         layout.addWidget(mission_group)
-        layout.addStretch(1)
 
         aoi_group = QGroupBox('Area Of Interest (AOI)')
         aoi_form = QFormLayout(aoi_group)
@@ -184,7 +188,6 @@ class TaskingDockWidget(QDockWidget):
         # aoi_form.addRow('AOI WKT (optional):', self.aoi_wkt)
 
         layout.addWidget(aoi_group)
-        layout.addStretch(1)
 
         acquisition_group = QGroupBox('Acquisition Requirements')
         acquisition_form = QFormLayout(acquisition_group)
@@ -237,7 +240,6 @@ class TaskingDockWidget(QDockWidget):
         acquisition_form.addRow('Day/Night:', self.day_night_combo)
 
         layout.addWidget(acquisition_group)
-        layout.addStretch(1)
 
         product_group = QGroupBox('Delivery & Product')
         product_form = QFormLayout(product_group)
@@ -260,7 +262,6 @@ class TaskingDockWidget(QDockWidget):
         product_form.addRow('Notes:', self.notes)
 
         layout.addWidget(product_group)
-        layout.addStretch(1)
 
         buttons = QHBoxLayout()
         self.send_btn = QPushButton('Compose Email Order (DEMO ONLY)')

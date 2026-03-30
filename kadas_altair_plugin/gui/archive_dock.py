@@ -38,6 +38,7 @@ from qgis.PyQt.QtWidgets import (
     QLabel,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSlider,
     QSplitter,
     QTableWidget,
@@ -268,8 +269,12 @@ class ArchiveDockWidget(QDockWidget):
     # ------------------------------------------------------------------
 
     def _setup_ui(self):
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        self.setWidget(scroll)
+
         root = QWidget()
-        self.setWidget(root)
+        scroll.setWidget(root)
 
         root.setStyleSheet(
             f'QLabel {{ color: {self._LABEL_COLOR}; }}'
@@ -278,7 +283,9 @@ class ArchiveDockWidget(QDockWidget):
         )
 
         layout = QVBoxLayout(root)
-        layout.setSpacing(8)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(6)
+        layout.setAlignment(Qt.AlignTop)
 
         # --- Header ---
         header = QLabel('TEST Archive Search')
@@ -439,7 +446,7 @@ class ArchiveDockWidget(QDockWidget):
 
         self.quicklook_preview = QLabel('No scene selected')
         self.quicklook_preview.setAlignment(Qt.AlignCenter)
-        self.quicklook_preview.setMinimumHeight(180)
+        self.quicklook_preview.setMinimumHeight(120)
         self.quicklook_preview.setWordWrap(True)
         self.quicklook_preview.setStyleSheet(
             f'color: {self._LABEL_COLOR}; background-color: rgba(255,255,255,0.04); '
