@@ -78,6 +78,8 @@ class TaskingDockWidget(QDockWidget):
     def _setup_ui(self):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setStyleSheet('QScrollArea { background: transparent; border: none; }')
+        scroll.viewport().setStyleSheet('background: transparent;')
         self.setWidget(scroll)
 
         widget = QWidget()

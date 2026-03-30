@@ -47,6 +47,8 @@ class SettingsDockWidget(QDockWidget):
         """Set up the settings UI"""
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setStyleSheet('QScrollArea { background: transparent; border: none; }')
+        scroll.viewport().setStyleSheet('background: transparent;')
         self.setWidget(scroll)
 
         widget = QWidget()

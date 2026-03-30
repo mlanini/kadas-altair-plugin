@@ -293,6 +293,8 @@ class AltairDockWidget(QDockWidget):
         """Set up the dock widget UI"""
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setStyleSheet('QScrollArea { background: transparent; border: none; }')
+        scroll.viewport().setStyleSheet('background: transparent;')
         self.setWidget(scroll)
 
         main_widget = QWidget()
