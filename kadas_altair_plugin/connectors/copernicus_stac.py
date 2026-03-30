@@ -3,6 +3,9 @@
 Implements access to Copernicus Dataspace using STAC API 1.1.0:
 https://documentation.dataspace.copernicus.eu/APIs/STAC.html
 
+This connector uses the STAC (SpatioTemporal Asset Catalog) API with OAuth2
+client credentials for authentication.
+
 Supports:
 - OAuth2 authentication with client credentials
 - STAC Catalog API for Sentinel-1, Sentinel-2, Sentinel-3, Sentinel-5P, Sentinel-6
@@ -58,10 +61,10 @@ except ImportError:
 from .base import ConnectorBase
 from ..logger import get_logger
 
-logger = get_logger('connectors.copernicus')
+logger = get_logger('connectors.copernicus_stac')
 
 
-class CopernicusConnector(ConnectorBase):
+class CopernicusStacConnector(ConnectorBase):
     """Copernicus Dataspace STAC Catalog connector with OAuth2 support.
     
     Authentication: OAuth2 client credentials flow
@@ -526,6 +529,32 @@ class CopernicusConnector(ConnectorBase):
             return self._obtain_access_token()
         
         return True
+
+    def search_unified(
+        self,
+        bbox=None,
+        start_date=None,
+        end_date=None,
+        max_cloud_cover=None,
+        collection=None,
+        text_query=None,
+        limit: int = 100,
+    ) -> tuple:
+        """Normalized entrypoint for ConnectorManager.
+
+        Translates the standard ``search_unified`` signature into the
+        Copernicus ``search(query, **kwargs)`` pattern.
+        """
+        results = self.search(
+            query="",
+            bbox=bbox,
+            start_date=start_date,
+            end_date=end_date,
+            max_cloud_cover=int(max_cloud_cover) if max_cloud_cover is not None else 100,
+            collection=collection or 'sentinel-2-l2a',
+            limit=limit,
+        )
+        return results, None
 
     def search(self, query: str, **kwargs) -> List[Dict]:
         """Search Copernicus STAC catalog for imagery.

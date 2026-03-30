@@ -44,6 +44,11 @@ EXTERNAL_DEPS = [
     "pystac-client>=0.7.0",
 ]
 
+# Set KADAS_SKIP_PIP=1 to package without attempting pip installs
+SKIP_DEP_INSTALL = os.environ.get("KADAS_SKIP_PIP", "0").strip().lower() in {
+    "1", "true", "yes", "on"
+}
+
 # QGIS built-in packages (don't bundle these)
 QGIS_BUILTIN = [
     "PyQt5",
@@ -79,6 +84,29 @@ def print_error(text):
 def print_info(text):
     """Print info message."""
     print(f"ℹ️  {text}")
+
+
+def print_warning(text):
+    """Print warning message."""
+    print(f"⚠️  {text}")
+
+
+def is_group_policy_block(error_text: str) -> bool:
+    """Return True when pip execution appears blocked by corporate policy.
+
+    Typical signatures include AppLocker / Group Policy / execution denied
+    messages from managed Windows environments.
+    """
+    text = (error_text or "").lower()
+    markers = [
+        "group policy",
+        "applocker",
+        "execution is blocked",
+        "has been blocked",
+        "administrator has blocked",
+        "not digitally signed",
+    ]
+    return any(marker in text for marker in markers)
 
 
 def check_requirements():
@@ -140,6 +168,10 @@ def should_exclude(path, base_path):
 def install_dependencies(temp_dir):
     """Install external dependencies to temporary directory."""
     print_step(2, "Installing external dependencies")
+
+    if SKIP_DEP_INSTALL:
+        print_warning("KADAS_SKIP_PIP=1 detected: skipping dependency installation")
+        return True
     
     if not EXTERNAL_DEPS:
         print_info("No external dependencies to install")
@@ -175,8 +207,20 @@ def install_dependencies(temp_dir):
             print_success(f"Installed {dep}")
             
         except subprocess.CalledProcessError as e:
+            stderr = e.stderr or ""
+            stdout = e.stdout or ""
+            combined = f"{stderr}\n{stdout}".strip()
+
+            if is_group_policy_block(combined):
+                print_warning(
+                    "pip blocked by Group Policy/AppLocker. "
+                    "Continuing without bundled dependencies."
+                )
+                print_info("Set KADAS_SKIP_PIP=1 to skip this step explicitly")
+                return True
+
             print_error(f"Failed to install {dep}")
-            print(f"Error: {e.stderr}")
+            print(f"Error: {stderr}")
             return False
     
     # Clean up unnecessary files in lib
@@ -408,8 +452,11 @@ def print_package_info():
         print(f"   • Total files: {len(file_list)}")
     
     print("\n🔌 Bundled Dependencies:")
-    for dep in EXTERNAL_DEPS:
-        print(f"   • {dep}")
+    if lib_files:
+        for dep in EXTERNAL_DEPS:
+            print(f"   • {dep}")
+    else:
+        print("   • none (dependency install skipped or unavailable)")
     
     print("\n📚 Installation:")
     print("   1. Open QGIS/KADAS")

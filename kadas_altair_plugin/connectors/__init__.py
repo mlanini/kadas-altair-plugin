@@ -7,7 +7,7 @@ from .vantor import VantorConnector
 from .iceye_stac import IceyeStacConnector
 from .umbra_stac import UmbraSTACConnector
 from .capella_stac import CapellaSTACConnector
-from .gee import GeeConnector
+from .copernicus_stac import CopernicusStacConnector
 from .nasa_earthdata import NasaEarthdataConnector
 
 __all__ = [
@@ -21,6 +21,6 @@ __all__ = [
 	"IceyeStacConnector",
 	"UmbraSTACConnector",
 	"CapellaSTACConnector",
-	"GeeConnector",
+	"CopernicusStacConnector",
 	"NasaEarthdataConnector",
 ]

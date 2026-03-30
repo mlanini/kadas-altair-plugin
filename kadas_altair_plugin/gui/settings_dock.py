@@ -30,7 +30,7 @@ class SettingsDockWidget(QDockWidget):
     SETTINGS_PREFIX = "AltairEOData/"
 
     def __init__(self, iface, parent=None):
-        super().__init__("Altair Settings", parent)
+        super().__init__("Settings", parent)
         logger.info("Initializing settings dock widget")
         
         self.setObjectName("AltairEODataSettingsDock")
@@ -87,19 +87,23 @@ class SettingsDockWidget(QDockWidget):
         # ICEYE tab
         iceye_tab = self._create_iceye_tab()
         tab_widget.addTab(iceye_tab, "ICEYE SAR")
+
+        # Umbra tab
+        umbra_tab = self._create_umbra_tab()
+        tab_widget.addTab(umbra_tab, "Umbra SAR")
         
         # Copernicus tab
         copernicus_tab = self._create_copernicus_tab()
         tab_widget.addTab(copernicus_tab, "Copernicus")
         
-        # Google Earth Engine tab
-        gee_tab = self._create_gee_tab()
-        tab_widget.addTab(gee_tab, "Google Earth Engine")
-        
         # NASA EarthData tab
         nasa_tab = self._create_nasa_tab()
         tab_widget.addTab(nasa_tab, "NASA EarthData")
-        
+
+        # Capella Space tab
+        capella_tab = self._create_capella_tab()
+        tab_widget.addTab(capella_tab, "Capella Space")
+
         # Display settings tab
         display_tab = self._create_display_tab()
         tab_widget.addTab(display_tab, "Display")
@@ -175,7 +179,7 @@ class SettingsDockWidget(QDockWidget):
         return widget
 
     def _create_planet_tab(self):
-        """Create Planet API key settings tab"""
+        """Create Planet Catalog API settings tab"""
         widget = QWidget()
         layout = QVBoxLayout(widget)
         
@@ -185,21 +189,28 @@ class SettingsDockWidget(QDockWidget):
         
         # Info label
         info_label = QLabel(
-            "Get your Planet API key from <a href='https://www.planet.com/account/'>Planet Account Settings</a>."
+            "Planet Catalog API uses OAuth2 Bearer token. "
+            "See <a href='https://docs.planet.com/develop/apis/catalog/reference/'>Catalog API Reference</a>."
         )
         info_label.setOpenExternalLinks(True)
         info_label.setWordWrap(True)
         info_label.setStyleSheet("color: #cccccc; font-size: 9px;")
         planet_layout.addRow("", info_label)
+
+        # API base URL
+        self.planet_api_base_url = QLineEdit()
+        self.planet_api_base_url.setPlaceholderText("https://services.sentinel-hub.com")
+        self.planet_api_base_url.setText("https://services.sentinel-hub.com")
+        planet_layout.addRow("API Base URL:", self.planet_api_base_url)
         
-        # API Key
-        self.planet_api_key = QLineEdit()
-        self.planet_api_key.setPlaceholderText("Enter API Key (PLAKxxxxxxxxxxxxxxxx)")
-        self.planet_api_key.setEchoMode(QLineEdit.Password)
-        planet_layout.addRow("API Key:", self.planet_api_key)
+        # Access token
+        self.planet_access_token = QLineEdit()
+        self.planet_access_token.setPlaceholderText("Enter OAuth2 Access Token")
+        self.planet_access_token.setEchoMode(QLineEdit.Password)
+        planet_layout.addRow("Access Token:", self.planet_access_token)
         
         # Test connection button
-        test_planet_btn = QPushButton("Verify API Key")
+        test_planet_btn = QPushButton("Verify Token")
         test_planet_btn.clicked.connect(self._test_planet_connection)
         planet_layout.addRow("", test_planet_btn)
         
@@ -234,10 +245,10 @@ class SettingsDockWidget(QDockWidget):
         info_label.setStyleSheet("color: #cccccc; font-size: 9px;")
         vantor_layout.addRow("", info_label)
         
-        # STAC Endpoint URL
+        # Open Data STAC URL
         self.vantor_endpoint = QLineEdit()
         self.vantor_endpoint.setPlaceholderText("https://maxar-opendata.s3.amazonaws.com/events/catalog.json")
-        vantor_layout.addRow("STAC Endpoint:", self.vantor_endpoint)
+        vantor_layout.addRow("Open Data STAC URL:", self.vantor_endpoint)
         
         # Timeout settings
         self.vantor_catalog_timeout = QSpinBox()
@@ -274,27 +285,43 @@ class SettingsDockWidget(QDockWidget):
         return widget
     
     def _create_iceye_tab(self):
-        """Create ICEYE SAR Open Data settings tab"""
+        """Create ICEYE Catalog API settings tab"""
         widget = QWidget()
         layout = QVBoxLayout(widget)
         
         # ICEYE configuration group
-        iceye_group = QGroupBox("ICEYE SAR Open Data Configuration")
+        iceye_group = QGroupBox("ICEYE Catalog API Configuration")
         iceye_layout = QFormLayout(iceye_group)
         
         # Info label
         info_label = QLabel(
-            "ICEYE SAR Open Data provides free SAR imagery via STAC API. "
-            "No authentication required."
+            "ICEYE commercial archive search uses Catalog API v2. "
+            "Requires a valid API access token (Bearer) and optional contract/collection scope."
         )
         info_label.setWordWrap(True)
         info_label.setStyleSheet("color: #cccccc; font-size: 9px;")
         iceye_layout.addRow("", info_label)
         
-        # STAC Endpoint URL
+        # API base URL
         self.iceye_endpoint = QLineEdit()
-        self.iceye_endpoint.setPlaceholderText("https://iceye-open-data-catalog.s3.amazonaws.com/catalog.json")
-        iceye_layout.addRow("STAC Endpoint:", self.iceye_endpoint)
+        self.iceye_endpoint.setPlaceholderText("https://api.iceye.com")
+        iceye_layout.addRow("Open Data STAC URL:", self.iceye_endpoint)
+
+        # Access token (secure)
+        self.iceye_access_token = QLineEdit()
+        self.iceye_access_token.setEchoMode(QLineEdit.Password)
+        self.iceye_access_token.setPlaceholderText("Paste ICEYE API access token")
+        iceye_layout.addRow("Access Token:", self.iceye_access_token)
+
+        # Optional contract scope
+        self.iceye_contract_id = QLineEdit()
+        self.iceye_contract_id.setPlaceholderText("Optional contractID")
+        iceye_layout.addRow("Contract ID:", self.iceye_contract_id)
+
+        # Optional collections filter
+        self.iceye_collections = QLineEdit()
+        self.iceye_collections.setPlaceholderText("public,private (optional)")
+        iceye_layout.addRow("Collections:", self.iceye_collections)
         
         # Timeout settings
         self.iceye_catalog_timeout = QSpinBox()
@@ -315,7 +342,7 @@ class SettingsDockWidget(QDockWidget):
         iceye_layout.addRow("", default_btn)
         
         # Test connection button
-        test_btn = QPushButton("Test STAC Connection")
+        test_btn = QPushButton("Test Catalog API Connection")
         test_btn.clicked.connect(self._test_iceye_connection)
         iceye_layout.addRow("", test_btn)
         
@@ -329,178 +356,211 @@ class SettingsDockWidget(QDockWidget):
         layout.addStretch()
         
         return widget
+
+    def _create_umbra_tab(self):
+        """Create Umbra Canopy STAC v2 settings tab"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+
+        umbra_group = QGroupBox("Umbra Canopy STAC v2 Configuration")
+        umbra_layout = QFormLayout(umbra_group)
+
+        info_label = QLabel(
+            "Umbra commercial archive search uses STAC API v2 with Bearer token. "
+            "Reference: <a href='https://docs.canopy.umbra.space/reference/v2-stac-overview'>Umbra STAC v2 overview</a>."
+        )
+        info_label.setOpenExternalLinks(True)
+        info_label.setWordWrap(True)
+        info_label.setStyleSheet("color: #cccccc; font-size: 9px;")
+        umbra_layout.addRow("", info_label)
+
+        self.umbra_api_base_url = QLineEdit()
+        self.umbra_api_base_url.setPlaceholderText("https://api.canopy.umbra.space")
+        self.umbra_api_base_url.setText("https://api.canopy.umbra.space")
+        umbra_layout.addRow("API Base URL:", self.umbra_api_base_url)
+
+        self.umbra_access_token = QLineEdit()
+        self.umbra_access_token.setEchoMode(QLineEdit.Password)
+        self.umbra_access_token.setPlaceholderText("Paste Umbra Bearer access token")
+        umbra_layout.addRow("Access Token:", self.umbra_access_token)
+
+        self.umbra_client_id = QLineEdit()
+        self.umbra_client_id.setPlaceholderText("Umbra OAuth2 client_id (optional)")
+        umbra_layout.addRow("Client ID:", self.umbra_client_id)
+
+        self.umbra_client_secret = QLineEdit()
+        self.umbra_client_secret.setEchoMode(QLineEdit.Password)
+        self.umbra_client_secret.setPlaceholderText("Umbra OAuth2 client_secret (optional)")
+        umbra_layout.addRow("Client Secret:", self.umbra_client_secret)
+
+        self.umbra_catalog_timeout = QSpinBox()
+        self.umbra_catalog_timeout.setRange(5, 60)
+        self.umbra_catalog_timeout.setValue(12)
+        self.umbra_catalog_timeout.setSuffix(" sec")
+        umbra_layout.addRow("Catalog Timeout:", self.umbra_catalog_timeout)
+
+        self.umbra_search_timeout = QSpinBox()
+        self.umbra_search_timeout.setRange(5, 60)
+        self.umbra_search_timeout.setValue(15)
+        self.umbra_search_timeout.setSuffix(" sec")
+        umbra_layout.addRow("Search Timeout:", self.umbra_search_timeout)
+
+        default_btn = QPushButton("Restore Defaults")
+        default_btn.clicked.connect(self._restore_default_umbra)
+        umbra_layout.addRow("", default_btn)
+
+        test_btn = QPushButton("Test STAC v2 Connection")
+        test_btn.clicked.connect(self._test_umbra_connection)
+        umbra_layout.addRow("", test_btn)
+
+        self.umbra_results = QLabel("")
+        self.umbra_results.setWordWrap(True)
+        self.umbra_results.setStyleSheet("color: #cccccc; font-size: 9px; font-family: monospace;")
+        umbra_layout.addRow("", self.umbra_results)
+
+        layout.addWidget(umbra_group)
+        layout.addStretch()
+
+        return widget
     
     def _create_copernicus_tab(self):
         """Create Copernicus Dataspace settings tab"""
         widget = QWidget()
         layout = QVBoxLayout(widget)
         
-        # Copernicus configuration group
-        copernicus_group = QGroupBox("Copernicus Dataspace Configuration")
-        copernicus_layout = QFormLayout(copernicus_group)
+        # === COPERNICUS (Data Space Ecosystem) ===
+        copernicus_stac_group = QGroupBox("Copernicus (Data Space Ecosystem)")
+        copernicus_stac_layout = QFormLayout(copernicus_stac_group)
         
         # Info label
-        info_label = QLabel(
-            "Copernicus Dataspace provides Sentinel-1/2 data via Sentinel Hub API. "
+        stac_info_label = QLabel(
+            "Copernicus Dataspace provides Sentinel-1/2/3/5P data via STAC API. "
             "Requires free account registration at dataspace.copernicus.eu. "
             "Create OAuth2 credentials (client_id/client_secret) in your account settings."
         )
-        info_label.setWordWrap(True)
-        info_label.setStyleSheet("color: #cccccc; font-size: 9px;")
-        copernicus_layout.addRow("", info_label)
+        stac_info_label.setWordWrap(True)
+        stac_info_label.setStyleSheet("color: #cccccc; font-size: 9px;")
+        copernicus_stac_layout.addRow("", stac_info_label)
         
         # Client ID (NOT secret - should be visible)
         self.copernicus_client_id = QLineEdit()
         self.copernicus_client_id.setPlaceholderText("Enter OAuth2 client ID (e.g., sh-1234abcd-...)")
         # Client ID is NOT secret - do not mask it
-        copernicus_layout.addRow("Client ID:", self.copernicus_client_id)
+        copernicus_stac_layout.addRow("Client ID:", self.copernicus_client_id)
         
         # Client Secret (this IS secret - mask it)
         self.copernicus_client_secret = QLineEdit()
         self.copernicus_client_secret.setPlaceholderText("Enter OAuth2 client secret")
         self.copernicus_client_secret.setEchoMode(QLineEdit.Password)
-        copernicus_layout.addRow("Client Secret:", self.copernicus_client_secret)
+        copernicus_stac_layout.addRow("Client Secret:", self.copernicus_client_secret)
 
-    # Optional user account credentials (required for S3 Keys Manager password grant)
-    self.copernicus_username = QLineEdit()
-    self.copernicus_username.setPlaceholderText("Optional: Copernicus account username")
-    copernicus_layout.addRow("Username:", self.copernicus_username)
-
-    self.copernicus_password = QLineEdit()
-    self.copernicus_password.setPlaceholderText("Optional: Copernicus account password")
-    self.copernicus_password.setEchoMode(QLineEdit.Password)
-    copernicus_layout.addRow("Password:", self.copernicus_password)
+        # Timeout settings for STAC
+        self.copernicus_stac_timeout = QSpinBox()
+        self.copernicus_stac_timeout.setRange(5, 60)
+        self.copernicus_stac_timeout.setValue(15)
+        self.copernicus_stac_timeout.setSuffix(" sec")
+        copernicus_stac_layout.addRow("Request Timeout:", self.copernicus_stac_timeout)
         
-        # Timeout settings
-        self.copernicus_timeout = QSpinBox()
-        self.copernicus_timeout.setRange(5, 60)
-        self.copernicus_timeout.setValue(15)
-        self.copernicus_timeout.setSuffix(" sec")
-        copernicus_layout.addRow("Request Timeout:", self.copernicus_timeout)
+        # Default button for STAC
+        stac_default_btn = QPushButton("Restore Defaults")
+        stac_default_btn.clicked.connect(self._restore_default_copernicus_stac)
+        copernicus_stac_layout.addRow("", stac_default_btn)
         
-        # Default button
-        default_btn = QPushButton("Restore Defaults")
-        default_btn.clicked.connect(self._restore_default_copernicus)
-        copernicus_layout.addRow("", default_btn)
+        # Test connection button for STAC
+        stac_test_btn = QPushButton("Test STAC Connection")
+        stac_test_btn.clicked.connect(self._test_copernicus_stac_connection)
+        copernicus_stac_layout.addRow("", stac_test_btn)
         
-        # Test connection button
-        test_btn = QPushButton("Test Connection")
-        test_btn.clicked.connect(self._test_copernicus_connection)
-        copernicus_layout.addRow("", test_btn)
+        # Results display for STAC
+        self.copernicus_stac_results = QLabel("")
+        self.copernicus_stac_results.setWordWrap(True)
+        self.copernicus_stac_results.setStyleSheet("color: #cccccc; font-size: 9px; font-family: monospace;")
+        copernicus_stac_layout.addRow("", self.copernicus_stac_results)
         
-        # Results display
-        self.copernicus_results = QLabel("")
-        self.copernicus_results.setWordWrap(True)
-        self.copernicus_results.setStyleSheet("color: #cccccc; font-size: 9px; font-family: monospace;")
-        copernicus_layout.addRow("", self.copernicus_results)
-        
-        layout.addWidget(copernicus_group)
+        layout.addWidget(copernicus_stac_group)
         layout.addStretch()
         
         return widget
 
-    def _create_gee_tab(self):
-        """Create Google Earth Engine settings tab"""
+    def _create_capella_tab(self):
+        """Create Capella Space API credentials settings tab"""
         widget = QWidget()
         layout = QVBoxLayout(widget)
-        
-        # GEE configuration group
-        gee_group = QGroupBox("Google Earth Engine Configuration")
-        gee_layout = QFormLayout(gee_group)
-        
-        # Info label with setup instructions
+
+        capella_group = QGroupBox("Capella Space STAC / API Credentials")
+        capella_layout = QFormLayout(capella_group)
+
         info_label = QLabel(
-            "Google Earth Engine provides access to 5,140+ Earth observation datasets "
-            "(Landsat, Sentinel, MODIS, etc.). Requires free Google account and Google Cloud Project."
+            "Capella Space provides SAR satellite imagery via STAC API. "
+            "Obtain credentials from "
+            "<a href='https://console.capellaspace.com/'>Capella Console</a>."
         )
+        info_label.setOpenExternalLinks(True)
         info_label.setWordWrap(True)
         info_label.setStyleSheet("color: #cccccc; font-size: 9px;")
-        gee_layout.addRow("", info_label)
-        
-        # Setup instructions link
-        setup_label = QLabel(
-            "📖 <a href='https://developers.google.com/earth-engine/guides/getstarted'>GEE Setup Guide</a> | "
-            "<a href='https://console.cloud.google.com/'>Google Cloud Console</a>"
+        capella_layout.addRow("", info_label)
+
+        self.capella_username = QLineEdit()
+        self.capella_username.setPlaceholderText("Capella account email")
+        capella_layout.addRow("Username:", self.capella_username)
+
+        self.capella_password = QLineEdit()
+        self.capella_password.setPlaceholderText("Capella account password")
+        self.capella_password.setEchoMode(QLineEdit.Password)
+        capella_layout.addRow("Password:", self.capella_password)
+
+        self.capella_stac_url = QLineEdit()
+        self.capella_stac_url.setPlaceholderText(
+            "https://api.capellaspace.com/catalog/stac/v1"
         )
-        setup_label.setOpenExternalLinks(True)
-        setup_label.setStyleSheet("color: #4CAF50; font-size: 9px;")
-        gee_layout.addRow("", setup_label)
-        
-        # Google Cloud Project ID (required)
-        self.gee_project_id = QLineEdit()
-        self.gee_project_id.setPlaceholderText("your-gcp-project-id")
-        gee_layout.addRow("Project ID*:", self.gee_project_id)
-        
-        project_info = QLabel(
-            "* Required: Your Google Cloud Project ID (not the project name). "
-            "Enable 'Earth Engine API' in the project."
+        capella_layout.addRow("Open Data STAC URL:", self.capella_stac_url)
+
+        test_capella_btn = QPushButton("Test Connection")
+        test_capella_btn.clicked.connect(self._test_capella_connection)
+        capella_layout.addRow("", test_capella_btn)
+
+        commercial_label = QLabel(
+            "\u26a0\ufe0f Capella Space is a commercial service. Valid subscription required."
         )
-        project_info.setWordWrap(True)
-        project_info.setStyleSheet("color: #ffaa00; font-size: 9px; font-style: italic;")
-        gee_layout.addRow("", project_info)
-        
-        # Catalog cache timeout
-        self.gee_cache_timeout = QSpinBox()
-        self.gee_cache_timeout.setRange(5, 120)
-        self.gee_cache_timeout.setValue(60)
-        self.gee_cache_timeout.setSuffix(" minutes")
-        gee_layout.addRow("Catalog Cache:", self.gee_cache_timeout)
-        
-        cache_info = QLabel("How long to cache the GEE catalog locally (reduces loading time)")
-        cache_info.setStyleSheet("color: gray; font-size: 8px; font-style: italic;")
-        gee_layout.addRow("", cache_info)
-        
-        # Authentication status
-        self.gee_auth_status = QLabel("")
-        self.gee_auth_status.setWordWrap(True)
-        self.gee_auth_status.setStyleSheet("color: #cccccc; font-size: 9px;")
-        gee_layout.addRow("Auth Status:", self.gee_auth_status)
-        
-        # Authentication button
-        auth_btn = QPushButton("Authenticate with Google")
-        auth_btn.clicked.connect(self._authenticate_gee)
-        auth_btn.setStyleSheet("background-color: #4CAF50; font-weight: bold;")
-        gee_layout.addRow("", auth_btn)
-        
-        auth_info = QLabel(
-            "⚠️ First-time setup: Click 'Authenticate' to login with your Google account. "
-            "This opens a browser window for OAuth2 authentication."
+        commercial_label.setStyleSheet(
+            "color: #ff9900; font-size: 10px; font-weight: bold;"
         )
-        auth_info.setWordWrap(True)
-        auth_info.setStyleSheet("color: #ffaa00; font-size: 9px;")
-        gee_layout.addRow("", auth_info)
-        
-        # Test connection button
-        test_btn = QPushButton("Test Connection")
-        test_btn.clicked.connect(self._test_gee_connection)
-        gee_layout.addRow("", test_btn)
-        
-        # Results display
-        self.gee_results = QLabel("")
-        self.gee_results.setWordWrap(True)
-        self.gee_results.setStyleSheet("color: #cccccc; font-size: 9px; font-family: monospace;")
-        gee_layout.addRow("", self.gee_results)
-        
-        layout.addWidget(gee_group)
-        
-        # Installation instructions group
-        install_group = QGroupBox("Installation")
-        install_layout = QVBoxLayout(install_group)
-        
-        install_info = QLabel(
-            "The Google Earth Engine connector requires the 'earthengine-api' Python package.\n\n"
-            "To install in QGIS Python Console:\n"
-            ">>> import subprocess, sys\n"
-            ">>> subprocess.check_call([sys.executable, '-m', 'pip', 'install', 'earthengine-api'])"
+        commercial_label.setWordWrap(True)
+        capella_layout.addRow("", commercial_label)
+
+        self.capella_results = QLabel("")
+        self.capella_results.setWordWrap(True)
+        self.capella_results.setStyleSheet(
+            "color: #cccccc; font-size: 9px; font-family: monospace;"
         )
-        install_info.setWordWrap(True)
-        install_info.setStyleSheet("color: #cccccc; font-size: 9px; font-family: monospace;")
-        install_layout.addWidget(install_info)
-        
-        layout.addWidget(install_group)
+        capella_layout.addRow("", self.capella_results)
+
+        layout.addWidget(capella_group)
         layout.addStretch()
-        
         return widget
+
+    def _test_capella_connection(self):
+        """Quick connectivity test for the Capella STAC endpoint."""
+        import requests
+        url = self.capella_stac_url.text().strip() or \
+            "https://api.capellaspace.com/catalog/stac/v1"
+        try:
+            resp = requests.get(url, timeout=10)
+            if resp.status_code < 400:
+                self.capella_results.setText(f"\u2705 Reachable (HTTP {resp.status_code})")
+                self.capella_results.setStyleSheet(
+                    "color: #00ff00; font-size: 9px; font-family: monospace;"
+                )
+            else:
+                self.capella_results.setText(f"\u26a0\ufe0f HTTP {resp.status_code}")
+                self.capella_results.setStyleSheet(
+                    "color: #ffaa00; font-size: 9px; font-family: monospace;"
+                )
+        except Exception as exc:
+            self.capella_results.setText(f"\u274c {exc}")
+            self.capella_results.setStyleSheet(
+                "color: #ff6b6b; font-size: 9px; font-family: monospace;"
+            )
 
     def _create_nasa_tab(self):
         """Create NASA EarthData settings tab"""
@@ -746,7 +806,13 @@ class SettingsDockWidget(QDockWidget):
         if self.secure_storage:
             planet_creds = self.secure_storage.get_credentials('planet')
             if planet_creds:
-                self.planet_api_key.setText(planet_creds.get('api_key', ''))
+                token = planet_creds.get('access_token', '') or planet_creds.get('api_key', '')
+                self.planet_access_token.setText(token)
+
+        default_planet_api_base_url = 'https://services.sentinel-hub.com'
+        self.planet_api_base_url.setText(
+            self.settings.value(f"{self.SETTINGS_PREFIX}planet_api_base_url", default_planet_api_base_url)
+        )
         
         # Vantor STAC
         default_vantor_endpoint = 'https://maxar-opendata.s3.amazonaws.com/events/catalog.json'
@@ -761,50 +827,63 @@ class SettingsDockWidget(QDockWidget):
         )
         
         # ICEYE
-        default_iceye_endpoint = 'https://iceye-open-data-catalog.s3.amazonaws.com/catalog.json'
+        default_iceye_endpoint = 'https://api.iceye.com'
         self.iceye_endpoint.setText(
             self.settings.value(f"{self.SETTINGS_PREFIX}iceye_endpoint", default_iceye_endpoint)
         )
+        self.iceye_contract_id.setText(
+            self.settings.value(f"{self.SETTINGS_PREFIX}iceye_contract_id", "")
+        )
+        self.iceye_collections.setText(
+            self.settings.value(f"{self.SETTINGS_PREFIX}iceye_collections", "")
+        )
+
+        if self.secure_storage:
+            iceye_creds = self.secure_storage.get_credentials('iceye')
+            if iceye_creds:
+                self.iceye_access_token.setText(iceye_creds.get('access_token', ''))
+
         self.iceye_catalog_timeout.setValue(
             self.settings.value(f"{self.SETTINGS_PREFIX}iceye_catalog_timeout", 12, type=int)
         )
         self.iceye_search_timeout.setValue(
             self.settings.value(f"{self.SETTINGS_PREFIX}iceye_search_timeout", 15, type=int)
         )
-        
-        # Copernicus (credentials from secure storage)
+
+        # Umbra
+        default_umbra_endpoint = 'https://api.canopy.umbra.space'
+        self.umbra_api_base_url.setText(
+            self.settings.value(f"{self.SETTINGS_PREFIX}umbra_api_base_url", default_umbra_endpoint)
+        )
+
         if self.secure_storage:
-            copernicus_creds = self.secure_storage.get_credentials('copernicus')
-            logger.debug(f"Loading Copernicus credentials from secure storage: {copernicus_creds is not None}")
-            if copernicus_creds:
-                client_id = copernicus_creds.get('client_id', '')
-                client_secret = copernicus_creds.get('client_secret', '')
-                logger.debug(f"Copernicus client_id length: {len(client_id)}, client_secret length: {len(client_secret)}")
+            umbra_creds = self.secure_storage.get_credentials('umbra')
+            if umbra_creds:
+                self.umbra_access_token.setText(umbra_creds.get('access_token', ''))
+                self.umbra_client_id.setText(umbra_creds.get('client_id', ''))
+                self.umbra_client_secret.setText(umbra_creds.get('client_secret', ''))
+
+        self.umbra_catalog_timeout.setValue(
+            self.settings.value(f"{self.SETTINGS_PREFIX}umbra_catalog_timeout", 12, type=int)
+        )
+        self.umbra_search_timeout.setValue(
+            self.settings.value(f"{self.SETTINGS_PREFIX}umbra_search_timeout", 15, type=int)
+        )
+        
+        # Copernicus STAC (OAuth2 credentials from secure storage service 'copernicus')
+        if self.secure_storage:
+            copernicus_stac_creds = self.secure_storage.get_credentials('copernicus')
+            logger.debug(f"Loading Copernicus STAC credentials from secure storage: {copernicus_stac_creds is not None}")
+            if copernicus_stac_creds:
+                client_id = copernicus_stac_creds.get('client_id', '')
+                client_secret = copernicus_stac_creds.get('client_secret', '')
+                logger.debug(f"Copernicus STAC client_id length: {len(client_id)}, client_secret length: {len(client_secret)}")
                 self.copernicus_client_id.setText(client_id)
                 self.copernicus_client_secret.setText(client_secret)
-                # load optional username/password if present
-                username = copernicus_creds.get('username', '')
-                password = copernicus_creds.get('password', '')
-                if username:
-                    self.copernicus_username.setText(username)
-                if password:
-                    self.copernicus_password.setText(password)
         
-        self.copernicus_timeout.setValue(
-            self.settings.value(f"{self.SETTINGS_PREFIX}copernicus_timeout", 15, type=int)
+        self.copernicus_stac_timeout.setValue(
+            self.settings.value(f"{self.SETTINGS_PREFIX}copernicus_stac_timeout", 15, type=int)
         )
-        
-        # Google Earth Engine
-        gee_project_id = self.settings.value("altair/gee_project_id", "")
-        if gee_project_id:
-            self.gee_project_id.setText(gee_project_id)
-        
-        self.gee_cache_timeout.setValue(
-            self.settings.value(f"{self.SETTINGS_PREFIX}gee_cache_timeout", 60, type=int)
-        )
-        
-        # Check GEE authentication status
-        self._check_gee_auth_status()
         
         # NASA EarthData
         nasa_username = self.settings.value("altair/nasa_username", "")
@@ -828,6 +907,17 @@ class SettingsDockWidget(QDockWidget):
         
         # Check NASA authentication status
         self._check_nasa_auth_status()
+
+        # Capella Space (credentials from secure storage)
+        if self.secure_storage:
+            capella_creds = self.secure_storage.get_credentials('capella')
+            if capella_creds:
+                self.capella_username.setText(capella_creds.get('username', ''))
+                self.capella_password.setText(capella_creds.get('password', ''))
+        default_capella_url = 'https://api.capellaspace.com/catalog/stac/v1'
+        self.capella_stac_url.setText(
+            self.settings.value(f"{self.SETTINGS_PREFIX}capella_stac_url", default_capella_url)
+        )
 
     def _save_settings(self):
         """Save settings to QSettings and SecureStorage"""
@@ -877,13 +967,18 @@ class SettingsDockWidget(QDockWidget):
                 logger.debug("OneAtlas credentials empty, not saving")
         
         # Planet (save to secure storage)
+        self.settings.setValue(
+            f"{self.SETTINGS_PREFIX}planet_api_base_url",
+            self.planet_api_base_url.text().strip()
+        )
+
         if self.secure_storage:
-            planet_api_key = self.planet_api_key.text().strip()
-            if planet_api_key:
+            planet_access_token = self.planet_access_token.text().strip()
+            if planet_access_token:
                 self.secure_storage.store_credentials('planet', {
-                    'api_key': planet_api_key
+                    'access_token': planet_access_token
                 })
-                logger.info("Planet API key saved to secure storage")
+                logger.info("Planet access token saved to secure storage")
         
         # Vantor STAC
         self.settings.setValue(
@@ -902,7 +997,15 @@ class SettingsDockWidget(QDockWidget):
         # ICEYE
         self.settings.setValue(
             f"{self.SETTINGS_PREFIX}iceye_endpoint",
-            self.iceye_endpoint.text()
+            self.iceye_endpoint.text().strip()
+        )
+        self.settings.setValue(
+            f"{self.SETTINGS_PREFIX}iceye_contract_id",
+            self.iceye_contract_id.text().strip()
+        )
+        self.settings.setValue(
+            f"{self.SETTINGS_PREFIX}iceye_collections",
+            self.iceye_collections.text().strip()
         )
         self.settings.setValue(
             f"{self.SETTINGS_PREFIX}iceye_catalog_timeout",
@@ -912,49 +1015,58 @@ class SettingsDockWidget(QDockWidget):
             f"{self.SETTINGS_PREFIX}iceye_search_timeout",
             self.iceye_search_timeout.value()
         )
-        
-        # Copernicus (save to secure storage)
+
         if self.secure_storage:
-            copernicus_client_id = self.copernicus_client_id.text().strip()
-            copernicus_client_secret = self.copernicus_client_secret.text().strip()
-            # Save both OAuth client credentials and optional account username/password
-            creds_to_store = {}
-            if copernicus_client_id:
-                creds_to_store['client_id'] = copernicus_client_id
-            if copernicus_client_secret:
-                creds_to_store['client_secret'] = copernicus_client_secret
+            iceye_access_token = self.iceye_access_token.text().strip()
+            if iceye_access_token:
+                self.secure_storage.store_credentials('iceye', {
+                    'access_token': iceye_access_token
+                })
 
-            copernicus_username = self.copernicus_username.text().strip()
-            copernicus_password = self.copernicus_password.text().strip()
-            if copernicus_username:
-                creds_to_store['username'] = copernicus_username
-            if copernicus_password:
-                creds_to_store['password'] = copernicus_password
-
-            if creds_to_store:
-                logger.info(f"Saving Copernicus credentials - keys: {', '.join(creds_to_store.keys())}")
-                self.secure_storage.store_credentials('copernicus', creds_to_store)
-                logger.info("Copernicus credentials saved to secure storage")
-            else:
-                logger.debug("Copernicus credentials empty, not saving")
-        
+        # Umbra
         self.settings.setValue(
-            f"{self.SETTINGS_PREFIX}copernicus_timeout",
-            self.copernicus_timeout.value()
+            f"{self.SETTINGS_PREFIX}umbra_api_base_url",
+            self.umbra_api_base_url.text().strip()
         )
+        self.settings.setValue(
+            f"{self.SETTINGS_PREFIX}umbra_catalog_timeout",
+            self.umbra_catalog_timeout.value()
+        )
+        self.settings.setValue(
+            f"{self.SETTINGS_PREFIX}umbra_search_timeout",
+            self.umbra_search_timeout.value()
+        )
+        if self.secure_storage:
+            umbra_access_token = self.umbra_access_token.text().strip()
+            umbra_client_id = self.umbra_client_id.text().strip()
+            umbra_client_secret = self.umbra_client_secret.text().strip()
+            umbra_payload = {}
+            if umbra_access_token:
+                umbra_payload['access_token'] = umbra_access_token
+            if umbra_client_id:
+                umbra_payload['client_id'] = umbra_client_id
+            if umbra_client_secret:
+                umbra_payload['client_secret'] = umbra_client_secret
+            if umbra_payload:
+                self.secure_storage.store_credentials('umbra', umbra_payload)
         
-        # Google Earth Engine
-        gee_project_id = self.gee_project_id.text().strip()
-        if gee_project_id:
-            self.settings.setValue("altair/gee_project_id", gee_project_id)
-            logger.info(f"GEE Project ID saved: {gee_project_id}")
-        else:
-            self.settings.remove("altair/gee_project_id")
-            logger.info("GEE Project ID cleared")
+        # Copernicus STAC (save OAuth2 to secure storage service 'copernicus')
+        if self.secure_storage:
+            copernicus_stac_client_id = self.copernicus_client_id.text().strip()
+            copernicus_stac_client_secret = self.copernicus_client_secret.text().strip()
+            if copernicus_stac_client_id and copernicus_stac_client_secret:
+                logger.info(f"Saving Copernicus STAC credentials - client_id length: {len(copernicus_stac_client_id)}")
+                self.secure_storage.store_credentials('copernicus', {
+                    'client_id': copernicus_stac_client_id,
+                    'client_secret': copernicus_stac_client_secret
+                })
+                logger.info("Copernicus STAC credentials saved to secure storage")
+            else:
+                logger.debug("Copernicus STAC credentials empty, not saving")
         
         self.settings.setValue(
-            f"{self.SETTINGS_PREFIX}gee_cache_timeout",
-            self.gee_cache_timeout.value()
+            f"{self.SETTINGS_PREFIX}copernicus_stac_timeout",
+            self.copernicus_stac_timeout.value()
         )
         
         # NASA EarthData
@@ -980,6 +1092,21 @@ class SettingsDockWidget(QDockWidget):
             if self.secure_storage:
                 self.secure_storage.store_credentials('nasa_earthdata', {})
             logger.info("NASA EarthData credentials cleared")
+
+        # Capella Space
+        if self.secure_storage:
+            capella_username = self.capella_username.text().strip()
+            capella_password = self.capella_password.text().strip()
+            if capella_username and capella_password:
+                self.secure_storage.store_credentials('capella', {
+                    'username': capella_username,
+                    'password': capella_password,
+                })
+                logger.info('Capella credentials saved to secure storage')
+        self.settings.setValue(
+            f"{self.SETTINGS_PREFIX}capella_stac_url",
+            self.capella_stac_url.text().strip()
+        )
         
         self.settings.setValue(
             f"{self.SETTINGS_PREFIX}nasa_cache_timeout",
@@ -1020,6 +1147,9 @@ class SettingsDockWidget(QDockWidget):
         
         # ICEYE
         self._restore_default_iceye()
+
+        # Umbra
+        self._restore_default_umbra()
         
         # Copernicus
         self._restore_default_copernicus()
@@ -1262,14 +1392,15 @@ class SettingsDockWidget(QDockWidget):
             )
     
     def _test_planet_connection(self):
-        """Test Planet API key"""
-        api_key = self.planet_api_key.text().strip()
+        """Test Planet Catalog API access token"""
+        access_token = self.planet_access_token.text().strip()
+        api_base_url = self.planet_api_base_url.text().strip() or 'https://services.sentinel-hub.com'
         
-        if not api_key:
+        if not access_token:
             QMessageBox.warning(
                 self,
-                "Missing API Key",
-                "Please enter your Planet API Key."
+                "Missing Access Token",
+                "Please enter your Planet OAuth2 Access Token."
             )
             return
         
@@ -1277,7 +1408,10 @@ class SettingsDockWidget(QDockWidget):
             from ..connectors import PlanetConnector
             
             connector = PlanetConnector()
-            credentials = {'api_key': api_key}
+            credentials = {
+                'access_token': access_token,
+                'api_base_url': api_base_url,
+            }
             
             # Test authentication with network verification
             success = connector.authenticate(credentials, verify=True)
@@ -1285,53 +1419,80 @@ class SettingsDockWidget(QDockWidget):
             if success:
                 QMessageBox.information(
                     self,
-                    "API Key Valid",
-                    "✅ Planet API key verified!\n\n"
-                    "Your API key is valid and active."
+                    "Token Valid",
+                    "✅ Planet Catalog token verified!\n\n"
+                    "Token accepted by Catalog API."
                 )
-                logger.info("Planet API key verification successful")
+                logger.info("Planet token verification successful")
             else:
                 QMessageBox.warning(
                     self,
                     "Verification Failed",
-                    "❌ Planet API key verification failed.\n\n"
-                    "Please check your API key and try again.\n"
-                    "Ensure your Planet account is active."
+                    "❌ Planet Catalog token verification failed.\n\n"
+                    "Please check token/base URL and try again.\n"
+                    "Ensure your Planet access is active for Catalog API."
                 )
-                logger.warning("Planet API key verification failed")
+                logger.warning("Planet token verification failed")
                 
         except Exception as e:
-            logger.error(f"Planet API key verification error: {e}")
+            logger.error(f"Planet token verification error: {e}")
             QMessageBox.critical(
                 self,
                 "Verification Error",
-                f"Error verifying Planet API key:\n\n{str(e)}"
+                f"Error verifying Planet token:\n\n{str(e)}"
             )
     
     def _restore_default_iceye(self):
         """Restore default ICEYE endpoint"""
-        self.iceye_endpoint.setText('https://iceye-open-data-catalog.s3.amazonaws.com/catalog.json')
+        self.iceye_endpoint.setText('https://api.iceye.com')
+        self.iceye_contract_id.clear()
+        self.iceye_collections.setText('public')
         self.iceye_catalog_timeout.setValue(12)
         self.iceye_search_timeout.setValue(15)
         logger.info("Restored default ICEYE settings")
+
+    def _restore_default_umbra(self):
+        """Restore default Umbra endpoint"""
+        self.umbra_api_base_url.setText('https://api.canopy.umbra.space')
+        self.umbra_client_id.clear()
+        self.umbra_client_secret.clear()
+        self.umbra_catalog_timeout.setValue(12)
+        self.umbra_search_timeout.setValue(15)
+        logger.info("Restored default Umbra settings")
     
     def _restore_default_copernicus(self):
-        """Restore default Copernicus settings"""
+        """Restore default Copernicus settings (DEPRECATED - redirects to STAC)"""
+        # This function is deprecated but kept for backward compatibility
+        # HDA connector has been removed, only STAC remains
+        logger.warning("_restore_default_copernicus() is deprecated, redirecting to STAC")
+        self._restore_default_copernicus_stac()
+    
+    def _restore_default_copernicus_stac(self):
+        """Restore default Copernicus STAC settings"""
         self.copernicus_client_id.clear()
         self.copernicus_client_secret.clear()
-        self.copernicus_timeout.setValue(15)
-        logger.info("Restored default Copernicus settings")
+        self.copernicus_stac_timeout.setValue(15)
+        self.copernicus_stac_results.clear()
+        logger.info("Restored default Copernicus STAC settings")
     
     def _test_iceye_connection(self):
-        """Test ICEYE STAC connection and count available data"""
+        """Test ICEYE Catalog API v2 connection and credentials"""
         import time
         import json
+        from urllib.parse import urlencode
         
-        endpoint = self.iceye_endpoint.text().strip()
+        endpoint = self.iceye_endpoint.text().strip().rstrip('/')
+        access_token = self.iceye_access_token.text().strip()
+        contract_id = self.iceye_contract_id.text().strip()
+        collections = self.iceye_collections.text().strip()
         timeout = self.iceye_catalog_timeout.value()
         
         if not endpoint:
-            QMessageBox.warning(self, "Missing URL", "Please enter STAC endpoint URL.")
+            QMessageBox.warning(self, "Missing URL", "Please enter ICEYE API Base URL.")
+            return
+
+        if not access_token:
+            QMessageBox.warning(self, "Missing Token", "Please enter ICEYE Access Token.")
             return
         
         self.iceye_results.setText("Testing connection...")
@@ -1345,10 +1506,24 @@ class SettingsDockWidget(QDockWidget):
             # Setup proxy
             QgsNetworkAccessManager.instance().setupDefaultProxyAndCache()
             
+            # Build Catalog API URL
+            items_url = endpoint
+            if not items_url.endswith('/api/catalog/v2/items'):
+                items_url = f"{items_url}/api/catalog/v2/items"
+
+            params = {'limit': '5'}
+            if contract_id:
+                params['contractID'] = contract_id
+            if collections:
+                params['collections'] = collections
+            url = f"{items_url}?{urlencode(params)}"
+
             # Test connection with timing
             start_time = time.time()
             
-            request = QNetworkRequest(QUrl(endpoint))
+            request = QNetworkRequest(QUrl(url))
+            request.setRawHeader(b"Accept", b"application/json, application/problem+json")
+            request.setRawHeader(b"Authorization", f"Bearer {access_token}".encode("utf-8"))
             blocking_request = QgsBlockingNetworkRequest()
             error = blocking_request.get(request, forceRefresh=True)
             
@@ -1362,88 +1537,39 @@ class SettingsDockWidget(QDockWidget):
                 self.iceye_results.setStyleSheet("color: #ff6666; font-size: 9px; font-family: monospace;")
                 return
             
-            # Parse STAC catalog
+            # Parse response
             reply = blocking_request.reply()
             content = reply.content().data().decode('utf-8')
-            catalog = json.loads(content)
-            
-            # Count collections
-            collections = []
-            for link in catalog.get('links', []):
-                if link.get('rel') == 'child':
-                    collections.append(link.get('title', link.get('href', 'Unknown')))
-            
-            num_collections = len(collections)
-            
-            # Try to count items in first collection (sample)
-            sample_items = 0
-            sample_cog_assets = 0
-            
-            if collections and catalog.get('links'):
-                # Find first child link
-                for link in catalog.get('links', []):
-                    if link.get('rel') == 'child':
-                        child_url = link.get('href')
-                        if child_url:
-                            try:
-                                # Fetch collection
-                                child_request = QNetworkRequest(QUrl(child_url))
-                                child_blocking = QgsBlockingNetworkRequest()
-                                child_error = child_blocking.get(child_request, forceRefresh=True)
-                                
-                                if child_error == QgsBlockingNetworkRequest.NoError:
-                                    child_reply = child_blocking.reply()
-                                    child_content = child_reply.content().data().decode('utf-8')
-                                    collection_data = json.loads(child_content)
-                                    
-                                    # Count items
-                                    for item_link in collection_data.get('links', []):
-                                        if item_link.get('rel') == 'item':
-                                            sample_items += 1
-                                    
-                                    # If collection has features array (GeoJSON)
-                                    if 'features' in collection_data:
-                                        sample_items = len(collection_data['features'])
-                                        
-                                        # Count COG/TIF assets
-                                        for feature in collection_data['features']:
-                                            for asset_key, asset in feature.get('assets', {}).items():
-                                                asset_type = asset.get('type', '').lower()
-                                                asset_href = asset.get('href', '').lower()
-                                                if 'tif' in asset_type or 'tif' in asset_href or 'cog' in asset_type:
-                                                    sample_cog_assets += 1
-                                
-                                break  # Only sample first collection
-                            except:
-                                pass
+            payload = json.loads(content)
+            features = payload.get('features', [])
+            if not isinstance(features, list):
+                features = []
+            cursor = payload.get('cursor')
             
             # Build result text
             result_text = (
                 f"✅ Connection successful\n"
                 f"Response time: {response_time_ms} ms\n"
                 f"─────────────────────\n"
-                f"Collections: {num_collections}\n"
+                f"Endpoint: {items_url}\n"
+                f"Items returned: {len(features)}\n"
             )
             
-            if sample_items > 0:
-                result_text += (
-                    f"Sample collection items: {sample_items}\n"
-                    f"COG/TIF assets (sample): {sample_cog_assets}\n"
-                )
-            
-            result_text += f"─────────────────────\n"
-            result_text += "Collections:\n"
-            
-            for i, coll in enumerate(collections[:5]):
-                result_text += f"  • {coll}\n"
-            
-            if num_collections > 5:
-                result_text += f"  ... and {num_collections - 5} more"
+            if cursor:
+                result_text += "More results available (cursor present)\n"
+
+            if features:
+                result_text += "─────────────────────\n"
+                result_text += "Sample items:\n"
+                for feature in features[:3]:
+                    item_id = feature.get('id', 'unknown')
+                    item_dt = feature.get('properties', {}).get('datetime', 'n/a')
+                    result_text += f"  • {item_id} ({item_dt})\n"
             
             self.iceye_results.setText(result_text)
             self.iceye_results.setStyleSheet("color: #226633; font-size: 9px; font-family: monospace;")
             
-            logger.info(f"ICEYE test: {num_collections} collections, {response_time_ms}ms")
+            logger.info(f"ICEYE Catalog API test OK: {len(features)} items, {response_time_ms}ms")
             
         except Exception as e:
             logger.error(f"ICEYE connection test error: {e}")
@@ -1452,15 +1578,81 @@ class SettingsDockWidget(QDockWidget):
                 f"Error: {str(e)}"
             )
             self.iceye_results.setStyleSheet("color: #ff6666; font-size: 9px; font-family: monospace;")
+
+    def _test_umbra_connection(self):
+        """Test Umbra STAC v2 connection and credentials/token"""
+        api_base_url = self.umbra_api_base_url.text().strip().rstrip('/')
+        access_token = self.umbra_access_token.text().strip()
+        client_id = self.umbra_client_id.text().strip()
+        client_secret = self.umbra_client_secret.text().strip()
+
+        if not api_base_url:
+            QMessageBox.warning(self, "Missing URL", "Please enter Umbra API Base URL.")
+            return
+
+        if not access_token and not (client_id and client_secret):
+            QMessageBox.warning(
+                self,
+                "Missing Credentials",
+                "Provide either Access Token or Client ID + Client Secret."
+            )
+            return
+
+        self.umbra_results.setText("Testing connection...")
+        QApplication.processEvents()
+
+        try:
+            from ..connectors import UmbraSTACConnector
+
+            connector = UmbraSTACConnector()
+            success = connector.authenticate({
+                'access_token': access_token,
+                'client_id': client_id,
+                'client_secret': client_secret,
+                'api_base_url': api_base_url,
+            })
+
+            if not success:
+                self.umbra_results.setText(
+                    "❌ Authentication failed\n"
+                    "Please verify token and endpoint"
+                )
+                self.umbra_results.setStyleSheet("color: #ff6666; font-size: 9px; font-family: monospace;")
+                return
+
+            collections = connector.get_collections() or []
+            auth_mode = "token" if access_token else "client_credentials"
+            self.umbra_results.setText(
+                f"✅ Connection successful\n"
+                f"Endpoint: {api_base_url}/v2/stac\n"
+                f"Auth mode: {auth_mode}\n"
+                f"Collections: {len(collections)}"
+            )
+            self.umbra_results.setStyleSheet("color: #226633; font-size: 9px; font-family: monospace;")
+            logger.info(f"Umbra STAC v2 test OK: {len(collections)} collections")
+
+        except Exception as e:
+            logger.error(f"Umbra connection test error: {e}")
+            self.umbra_results.setText(
+                f"❌ Test failed\n"
+                f"Error: {str(e)}"
+            )
+            self.umbra_results.setStyleSheet("color: #ff6666; font-size: 9px; font-family: monospace;")
     
     def _test_copernicus_connection(self):
-        """Test Copernicus OAuth2 authentication and API access"""
+        """Test Copernicus connection (DEPRECATED - redirects to STAC test)"""
+        # This function is deprecated but kept for backward compatibility
+        # Redirect to the new STAC-specific test
+        logger.warning("_test_copernicus_connection() is deprecated, redirecting to _test_copernicus_stac_connection()")
+        self._test_copernicus_stac_connection()
+    
+    def _test_copernicus_stac_connection(self):
+        """Test Copernicus STAC OAuth2 authentication and API access"""
         import time
-        import json
         
         client_id = self.copernicus_client_id.text().strip()
         client_secret = self.copernicus_client_secret.text().strip()
-        timeout = self.copernicus_timeout.value()
+        timeout = self.copernicus_stac_timeout.value()
         
         if not client_id or not client_secret:
             QMessageBox.warning(
@@ -1470,14 +1662,14 @@ class SettingsDockWidget(QDockWidget):
             )
             return
         
-        self.copernicus_results.setText("Testing authentication...")
+        self.copernicus_stac_results.setText("Testing authentication...")
         QApplication.processEvents()
         
         try:
-            # Import Copernicus connector
-            from ..connectors.copernicus import CopernicusConnector
+            # Import Copernicus STAC connector
+            from ..connectors.copernicus_stac import CopernicusStacConnector
             
-            connector = CopernicusConnector()
+            connector = CopernicusStacConnector()
             
             # Test authentication
             start_time = time.time()
@@ -1490,11 +1682,11 @@ class SettingsDockWidget(QDockWidget):
             auth_time_ms = int((time.time() - start_time) * 1000)
             
             if not success:
-                self.copernicus_results.setText(
+                self.copernicus_stac_results.setText(
                     f"❌ Authentication failed\n"
                     f"Check your credentials at dataspace.copernicus.eu"
                 )
-                self.copernicus_results.setStyleSheet("color: #ff6666; font-size: 9px; font-family: monospace;")
+                self.copernicus_stac_results.setStyleSheet("color: #ff6666; font-size: 9px; font-family: monospace;")
                 return
             
             # Get available collections
@@ -1517,210 +1709,30 @@ class SettingsDockWidget(QDockWidget):
             
             result_text += (
                 f"─────────────────────\n"
-                f"API Endpoint: Sentinel Hub Catalog\n"
+                f"API Endpoint: Copernicus STAC\n"
                 f"Coverage: 2014-present (global)"
             )
             
-            self.copernicus_results.setText(result_text)
-            self.copernicus_results.setStyleSheet("color: #226633; font-size: 9px; font-family: monospace;")
+            self.copernicus_stac_results.setText(result_text)
+            self.copernicus_stac_results.setStyleSheet("color: #226633; font-size: 9px; font-family: monospace;")
             
-            logger.info(f"Copernicus test: authenticated in {auth_time_ms}ms")
+            logger.info(f"Copernicus STAC test: authenticated in {auth_time_ms}ms")
             
         except ImportError as e:
-            logger.error(f"Copernicus connector not available: {e}")
-            self.copernicus_results.setText(
-                f"❌ Copernicus connector not available\n"
+            logger.error(f"Copernicus STAC connector not available: {e}")
+            self.copernicus_stac_results.setText(
+                f"❌ Copernicus STAC connector not available\n"
                 f"Error: {str(e)}"
             )
-            self.copernicus_results.setStyleSheet("color: #ff6666; font-size: 9px; font-family: monospace;")
+            self.copernicus_stac_results.setStyleSheet("color: #ff6666; font-size: 9px; font-family: monospace;")
         except Exception as e:
-            logger.error(f"Copernicus connection test error: {e}")
-            self.copernicus_results.setText(
+            logger.error(f"Copernicus STAC connection test error: {e}")
+            self.copernicus_stac_results.setText(
                 f"❌ Test failed\n"
                 f"Error: {str(e)}"
             )
-            self.copernicus_results.setStyleSheet("color: #ff6666; font-size: 9px; font-family: monospace;")
-
-    def _check_gee_auth_status(self):
-        """Check Google Earth Engine authentication status"""
-        try:
-            import ee
-            
-            # Try to initialize and test connection
-            ee.Number(1).getInfo()
-            
-            self.gee_auth_status.setText("✅ Authenticated")
-            self.gee_auth_status.setStyleSheet("color: #00ff00; font-size: 9px;")
-            
-        except ImportError:
-            self.gee_auth_status.setText("⚠️ earthengine-api not installed")
-            self.gee_auth_status.setStyleSheet("color: #ffaa00; font-size: 9px;")
-        except Exception:
-            self.gee_auth_status.setText("❌ Not authenticated - Click 'Authenticate' button")
-            self.gee_auth_status.setStyleSheet("color: #ff6666; font-size: 9px;")
-
-    def _authenticate_gee(self):
-        """Authenticate with Google Earth Engine"""
-        try:
-            import ee
-            
-            QMessageBox.information(
-                self,
-                "GEE Authentication",
-                "A browser window will open for Google authentication.\n\n"
-                "1. Login with your Google account\n"
-                "2. Authorize Earth Engine access\n"
-                "3. Return to QGIS after success\n\n"
-                "Click OK to continue..."
-            )
-            
-            self.gee_auth_status.setText("⏳ Opening browser for authentication...")
-            self.gee_auth_status.setStyleSheet("color: #ffaa00; font-size: 9px;")
-            QApplication.processEvents()
-            
-            # Trigger authentication (opens browser)
-            ee.Authenticate()
-            
-            # Test the authentication
-            ee.Initialize()
-            ee.Number(1).getInfo()
-            
-            self.gee_auth_status.setText("✅ Authentication successful!")
-            self.gee_auth_status.setStyleSheet("color: #00ff00; font-size: 9px;")
-            
-            QMessageBox.information(
-                self,
-                "Success",
-                "Google Earth Engine authentication successful!\n\n"
-                "Don't forget to set your Project ID above."
-            )
-            
-        except ImportError:
-            QMessageBox.critical(
-                self,
-                "Missing Library",
-                "earthengine-api not installed.\n\n"
-                "Install in QGIS Python Console:\n"
-                ">>> import subprocess, sys\n"
-                ">>> subprocess.check_call([sys.executable, '-m', 'pip', 'install', 'earthengine-api'])"
-            )
-            self.gee_auth_status.setText("⚠️ earthengine-api not installed")
-            self.gee_auth_status.setStyleSheet("color: #ffaa00; font-size: 9px;")
-        except Exception as e:
-            error_msg = str(e)
-            QMessageBox.critical(
-                self,
-                "Authentication Failed",
-                f"Failed to authenticate with Google Earth Engine:\n\n{error_msg}"
-            )
-            self.gee_auth_status.setText(f"❌ Authentication failed: {error_msg[:50]}")
-            self.gee_auth_status.setStyleSheet("color: #ff6666; font-size: 9px;")
-
-    def _test_gee_connection(self):
-        """Test Google Earth Engine connection and catalog access"""
-        import time
-        
-        project_id = self.gee_project_id.text().strip()
-        
-        if not project_id:
-            QMessageBox.warning(
-                self,
-                "Missing Project ID",
-                "Please enter your Google Cloud Project ID.\n\n"
-                "Get your Project ID from:\n"
-                "https://console.cloud.google.com/"
-            )
-            return
-        
-        self.gee_results.setText("Testing connection...")
-        QApplication.processEvents()
-        
-        try:
-            from ..connectors.gee import GeeConnector
-            
-            connector = GeeConnector(project_id=project_id)
-            
-            # Test authentication
-            start_time = time.time()
-            
-            success = connector.authenticate(verify=True)
-            
-            auth_time_ms = int((time.time() - start_time) * 1000)
-            
-            if not success:
-                self.gee_results.setText(
-                    f"❌ Connection failed\n"
-                    f"Check authentication and project ID"
-                )
-                self.gee_results.setStyleSheet("color: #ff6666; font-size: 9px; font-family: monospace;")
-                return
-            
-            # Load catalog
-            start_time = time.time()
-            catalog = connector._load_catalog()
-            catalog_time_ms = int((time.time() - start_time) * 1000)
-            
-            # Count by source
-            official_count = sum(1 for d in catalog if d.get('source') == 'official')
-            community_count = sum(1 for d in catalog if d.get('source') == 'community')
-            
-            # Get categories
-            categories = {}
-            for dataset in catalog:
-                category = dataset.get('category', 'Other')
-                categories[category] = categories.get(category, 0) + 1
-            
-            top_categories = sorted(categories.items(), key=lambda x: x[1], reverse=True)[:5]
-            
-            # Build result text
-            result_text = (
-                f"✅ Connection successful\n"
-                f"Auth time: {auth_time_ms} ms\n"
-                f"Catalog load: {catalog_time_ms} ms\n"
-                f"─────────────────────\n"
-                f"Available Datasets:\n"
-                f"  • Official: {official_count}\n"
-                f"  • Community: {community_count}\n"
-                f"  • TOTAL: {len(catalog)}\n"
-                f"─────────────────────\n"
-                f"Top Categories:\n"
-            )
-            
-            for category, count in top_categories:
-                result_text += f"  • {category}: {count}\n"
-            
-            result_text += (
-                f"─────────────────────\n"
-                f"Project: {project_id}\n"
-                f"API: Google Earth Engine\n"
-                f"Coverage: 1972-present (varies by dataset)"
-            )
-            
-            self.gee_results.setText(result_text)
-            self.gee_results.setStyleSheet("color: #226633; font-size: 9px; font-family: monospace;")
-            
-            logger.info(f"GEE test: loaded {len(catalog)} datasets in {catalog_time_ms}ms")
-            
-        except ImportError as e:
-            logger.error(f"GEE connector not available: {e}")
-            self.gee_results.setText(
-                f"❌ Google Earth Engine not available\n"
-                f"Install: pip install earthengine-api\n"
-                f"Error: {str(e)}"
-            )
-            self.gee_results.setStyleSheet("color: #ff6666; font-size: 9px; font-family: monospace;")
-        except Exception as e:
-            logger.error(f"GEE connection test error: {e}")
-            self.gee_results.setText(
-                f"❌ Test failed\n"
-                f"Error: {str(e)}\n\n"
-                f"Check:\n"
-                f"  1. Authentication (click 'Authenticate' button)\n"
-                f"  2. Project ID is correct\n"
-                f"  3. Earth Engine API is enabled in GCP project"
-            )
-            self.gee_results.setStyleSheet("color: #ff6666; font-size: 9px; font-family: monospace;")
-
+            self.copernicus_stac_results.setStyleSheet("color: #ff6666; font-size: 9px; font-family: monospace;")
+    
     def _check_nasa_auth_status(self):
         """Check NASA EarthData authentication status"""
         try:

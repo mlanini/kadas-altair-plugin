@@ -57,13 +57,13 @@ Choose from dropdown:
 - **Maxar Open Data** (55+ disaster events)
 - **Umbra SAR Open Data** (high-res radar)
 - **Capella SAR Open Data** (~1000 images)
-- **Copernicus Dataspace** (Sentinel constellation)
+- **Copernicus STAC (Dataspace)** (Sentinel constellation)
 
 ### 3. Authenticate
 
 Click **Authenticate** button:
 - **ICEYE, Maxar, Umbra, Capella**: No credentials needed
-- **Copernicus**: Requires client_id/client_secret (see [Authentication](#authentication))
+- **Copernicus STAC**: Requires client_id/client_secret (see [Authentication](#authentication))
 
 ### 4. Select Collection
 
@@ -157,7 +157,7 @@ Click **Search** button → Results appear in table
 
 **Use Cases:** Disaster assessment, emergency response, damage mapping
 
-### Copernicus Dataspace
+### Copernicus STAC (Dataspace)
 
 **Type:** Multi-sensor (Optical + SAR + Atmospheric)  
 **Collections:** Sentinel-1, 2, 3, 5P  
@@ -215,9 +215,9 @@ Columns vary by connector, typically include:
 
 ## 🔐 Authentication
 
-### Copernicus Dataspace
+### Copernicus STAC (Dataspace)
 
-**Required for:** Sentinel-1, Sentinel-2, Sentinel-3, Sentinel-5P
+**Required for:** Sentinel-1, Sentinel-2, Sentinel-3, Sentinel-5P via STAC API
 
 **Get Credentials:**
 1. Register at https://dataspace.copernicus.eu/
@@ -225,13 +225,16 @@ Columns vary by connector, typically include:
 3. Copy `client_id` and `client_secret`
 
 **Enter Credentials:**
-1. Select "Copernicus Dataspace" connector
+1. Select "Copernicus STAC (Dataspace)" connector
 2. Click **Settings** (gear icon)
-3. Enter `client_id` and `client_secret`
-4. Click **Save**
-5. Click **Authenticate** in main panel
+3. Navigate to **Copernicus STAC (Dataspace)** section
+4. Enter `client_id` and `client_secret`
+5. Click **Save**
+6. Click **Authenticate** in main panel
 
-**Credentials stored securely** in KADAS settings (QGIS-based).
+**Credentials stored securely** in KADAS settings (keyring/encryption fallback).
+
+---
 
 ### Other Connectors
 

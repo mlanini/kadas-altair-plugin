@@ -1,5 +1,5 @@
 """
-Altair EO Data Main Dock Widget
+Altair EO Open Data Search Dock Widget
 """
 import json
 from typing import List, Dict, Any
@@ -9,7 +9,7 @@ from qgis.PyQt.QtWidgets import (
     QLabel, QLineEdit, QPushButton, QComboBox, QSpinBox, QCheckBox,
     QGroupBox, QTableWidget, QTableWidgetItem, QHeaderView,
     QAbstractItemView, QSplitter, QMessageBox, QDateEdit, QApplication,
-    QProgressBar, QSlider, QFileDialog
+    QProgressBar, QSlider, QFileDialog, QTabWidget, QTreeWidget, QTreeWidgetItem
 )
 from qgis.PyQt.QtCore import Qt, QDate, QSettings, QTimer, QModelIndex, QVariant
 from qgis.PyQt.QtGui import QFont, QColor
@@ -209,8 +209,8 @@ class AltairDockWidget(QDockWidget):
 
     def __init__(self, iface, parent=None):
         """Initialize the dock widget"""
-        super().__init__("Altair EO", parent)
-        logger.info("Initializing Altair dock widget")
+        super().__init__("Open Data Search", parent)
+        logger.info("Initializing Open Data Search dock widget")
         
         self.iface = iface
         self.settings = QSettings()
@@ -297,7 +297,7 @@ class AltairDockWidget(QDockWidget):
         layout.setSpacing(10)
 
         # Header
-        header_label = QLabel("Altair EO Data")
+        header_label = QLabel("Open Data Search")
         header_font = QFont()
         header_font.setPointSize(12)
         header_font.setBold(True)
@@ -309,7 +309,7 @@ class AltairDockWidget(QDockWidget):
         # Description
         desc_label = QLabel(
             "Unified access to multiple STAC catalogs of satellite imagery via AWS Open Data.\n"
-            "Includes: Copernicus, Landsat, Umbra, Capella, ICEYE and many more."
+            "Includes: Landsat, Umbra, Capella, ICEYE and many more."
         )
         desc_label.setWordWrap(True)
         desc_label.setStyleSheet("color: #b0b0b0; font-size: 10px;")
@@ -326,10 +326,7 @@ class AltairDockWidget(QDockWidget):
             "Select data source connector:\n"
             "• ICEYE: SAR open data\n"
             "• Umbra: High-resolution SAR (up to 16cm)\n"
-            "• Capella: High-resolution SAR (~1000 images)\n"
-            "• OneAtlas: Airbus commercial imagery\n"
-            "• Planet: High-resolution satellite data\n"
-            "• Copernicus: Sentinel Hub data access"
+            "• Capella: High-resolution SAR (~1000 images)"
         )
         self.connector_combo.currentIndexChanged.connect(self._on_connector_changed)
         connector_label = QLabel("Data Source:")
@@ -523,6 +520,15 @@ class AltairDockWidget(QDockWidget):
         results_group.setStyleSheet("QGroupBox { color: #cccccc; font-weight: bold; }")
         results_layout = QVBoxLayout(results_group)
 
+        # Create tab widget for Results and WMS/WMTS layers
+        self.results_tabs = QTabWidget()
+        self.results_tabs.setStyleSheet("QTabWidget { color: #cccccc; }")
+        
+        # Tab 1: Search Results
+        search_results_widget = QWidget()
+        search_results_layout = QVBoxLayout(search_results_widget)
+        search_results_layout.setContentsMargins(0, 0, 0, 0)
+        
         # Use QTableWidget with 5 columns
         self.results_table = QTableWidget()
         self.results_table.setColumnCount(5)
@@ -537,10 +543,60 @@ class AltairDockWidget(QDockWidget):
         self.results_table.setSortingEnabled(True)
         self.results_table.itemSelectionChanged.connect(self._on_footprint_selection_changed)
         self.results_table.horizontalHeader().sectionDoubleClicked.connect(self._on_header_double_clicked)
-        results_layout.addWidget(self.results_table)
+        search_results_layout.addWidget(self.results_table)
         
         # Track sorting order per column
         self._sort_order = {}
+        
+        self.results_tabs.addTab(search_results_widget, "Search Results")
+        
+        # Tab 2: WMS/WMTS Layers
+        wms_layers_widget = QWidget()
+        wms_layers_layout = QVBoxLayout(wms_layers_widget)
+        wms_layers_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Info label
+        wms_info_label = QLabel(
+            "WMS/WMTS layer discovery is currently unavailable in this build.\n"
+            "The previous WEkEO HDA flow has been removed."
+        )
+        wms_info_label.setWordWrap(True)
+        wms_info_label.setStyleSheet("color: #ffb86b; font-size: 9px; padding: 5px;")
+        wms_layers_layout.addWidget(wms_info_label)
+        
+        # Refresh button
+        wms_refresh_layout = QHBoxLayout()
+        self.wms_refresh_btn = QPushButton("Refresh (Unavailable)")
+        self.wms_refresh_btn.setToolTip("WMS/WMTS layer discovery is currently unavailable")
+        self.wms_refresh_btn.clicked.connect(self._on_refresh_wms_layers)
+        self.wms_refresh_btn.setEnabled(False)
+        wms_refresh_layout.addWidget(self.wms_refresh_btn)
+        wms_refresh_layout.addStretch()
+        wms_layers_layout.addLayout(wms_refresh_layout)
+        
+        # Tree widget for layers
+        self.wms_layers_tree = QTreeWidget()
+        self.wms_layers_tree.setHeaderLabels(["Layer", "Title", "Type"])
+        self.wms_layers_tree.setColumnCount(3)
+        self.wms_layers_tree.header().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.wms_layers_tree.header().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.wms_layers_tree.header().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.wms_layers_tree.setAlternatingRowColors(True)
+        self.wms_layers_tree.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.wms_layers_tree.itemDoubleClicked.connect(self._on_wms_layer_double_clicked)
+        wms_layers_layout.addWidget(self.wms_layers_tree)
+        
+        # Add to Map button
+        self.wms_add_btn = QPushButton("Add Selected to Map")
+        self.wms_add_btn.setToolTip("WMS/WMTS layer discovery is currently unavailable")
+        self.wms_add_btn.clicked.connect(self._on_add_wms_layers)
+        self.wms_add_btn.setEnabled(False)
+        wms_layers_layout.addWidget(self.wms_add_btn)
+        
+        self.results_tabs.addTab(wms_layers_widget, "WMS/WMTS Layers")
+        
+        # Add tab widget to results layout
+        results_layout.addWidget(self.results_tabs)
 
         layout.addWidget(results_group)
 
@@ -748,67 +804,7 @@ class AltairDockWidget(QDockWidget):
         self.aws_connector = None
         self.swisstopo_connector = None  # Removed swisstopo connector
         
-        # Register OneAtlas connector (commercial - requires authentication)
-        try:
-            from ..connectors import OneAtlasConnector
-            oneatlas_connector = OneAtlasConnector()
-            
-            self.connector_manager.register_connector(
-                connector_id='oneatlas',
-                connector_instance=oneatlas_connector,
-                display_name='OneAtlas (Airbus)',
-                capabilities=[
-                    ConnectorCapability.BBOX_SEARCH,
-                    ConnectorCapability.DATE_RANGE,
-                    ConnectorCapability.CLOUD_COVER,
-                    ConnectorCapability.COLLECTIONS,
-                    ConnectorCapability.COG_SUPPORT,
-                    ConnectorCapability.AUTHENTICATION,
-                    ConnectorCapability.COMMERCIAL
-                ],
-                description='Airbus OneAtlas commercial high-resolution imagery (0.3-1.5m)'
-            )
-            logger.info("Registered OneAtlas connector")
-            
-            self.oneatlas_connector = oneatlas_connector
-            
-        except ImportError as e:
-            logger.warning(f"OneAtlas connector not available: {e}")
-            self.oneatlas_connector = None
-        except Exception as e:
-            logger.error(f"Failed to register OneAtlas connector: {e}")
-            self.oneatlas_connector = None
-        
-        # Register Planet connector (commercial - requires API key)
-        try:
-            from ..connectors import PlanetConnector
-            planet_connector = PlanetConnector()
-            
-            self.connector_manager.register_connector(
-                connector_id='planet',
-                connector_instance=planet_connector,
-                display_name='Planet Labs',
-                capabilities=[
-                    ConnectorCapability.BBOX_SEARCH,
-                    ConnectorCapability.DATE_RANGE,
-                    ConnectorCapability.CLOUD_COVER,
-                    ConnectorCapability.COLLECTIONS,
-                    ConnectorCapability.COG_SUPPORT,
-                    ConnectorCapability.AUTHENTICATION,
-                    ConnectorCapability.COMMERCIAL
-                ],
-                description='Planet Labs daily satellite imagery (0.5-5m resolution)'
-            )
-            logger.info("Registered Planet connector")
-            
-            self.planet_connector = planet_connector
-            
-        except ImportError as e:
-            logger.warning(f"Planet connector not available: {e}")
-            self.planet_connector = None
-        except Exception as e:
-            logger.error(f"Failed to register Planet connector: {e}")
-            self.planet_connector = None
+        # OneAtlas and Planet connectors intentionally excluded from main dock
         
         # Register Vantor connector (Maxar Open Data via GitHub)
         try:
@@ -923,68 +919,7 @@ class AltairDockWidget(QDockWidget):
             logger.error(f"Failed to register Capella STAC connector: {e}")
             self.capella_connector = None
         
-        # Register Copernicus Dataspace connector (Sentinel-1/2)
-        try:
-            from ..connectors.copernicus import CopernicusConnector
-            copernicus_connector = CopernicusConnector()
-            
-            self.connector_manager.register_connector(
-                connector_id='copernicus',
-                connector_instance=copernicus_connector,
-                display_name='Copernicus Dataspace (Sentinel)',
-                capabilities=[
-                    ConnectorCapability.BBOX_SEARCH,
-                    ConnectorCapability.DATE_RANGE,
-                    ConnectorCapability.CLOUD_COVER,
-                    ConnectorCapability.COLLECTIONS,
-                    ConnectorCapability.COG_SUPPORT,
-                    ConnectorCapability.AUTHENTICATION
-                ],
-                description='Copernicus Sentinel-1/2 data via Sentinel Hub Catalog API'
-            )
-            logger.info("Registered Copernicus connector")
-            
-            self.copernicus_connector = copernicus_connector
-            
-        except ImportError as e:
-            logger.warning(f"Copernicus connector not available: {e}")
-            self.copernicus_connector = None
-        except Exception as e:
-            logger.error(f"Failed to register Copernicus connector: {e}")
-            self.copernicus_connector = None
-        
-        # Register Google Earth Engine connector (cloud-based Earth observation data)
-        try:
-            from ..connectors import GeeConnector
-            
-            # Try to get project_id from settings or environment
-            settings = QSettings()
-            project_id = settings.value('altair/gee_project_id', None)
-            
-            gee_connector = GeeConnector(project_id=project_id)
-            
-            self.connector_manager.register_connector(
-                connector_id='gee',
-                connector_instance=gee_connector,
-                display_name='Google Earth Engine',
-                capabilities=[
-                    ConnectorCapability.TEXT_SEARCH,
-                    ConnectorCapability.COLLECTIONS,
-                    ConnectorCapability.AUTHENTICATION
-                ],
-                description='Browse 5,140+ Earth Engine datasets (Landsat, Sentinel, MODIS, etc.)'
-            )
-            logger.info("Registered Google Earth Engine connector")
-            
-            self.gee_connector = gee_connector
-            
-        except ImportError as e:
-            logger.warning(f"Google Earth Engine connector not available: {e}")
-            logger.info("Install earthengine-api to enable GEE: pip install earthengine-api")
-            self.gee_connector = None
-        except Exception as e:
-            logger.error(f"Failed to register Google Earth Engine connector: {e}")
-            self.gee_connector = None
+        # Connector decommissioned
         
         # Register NASA EarthData connector (9,000+ Earth science datasets)
         try:
@@ -1146,6 +1081,10 @@ class AltairDockWidget(QDockWidget):
         if hasattr(self, 'cloud_slider'):
             self.cloud_slider.setEnabled(has_cloud_cover)
         
+        # WMS/WMTS refresh button disabled (legacy discovery flow removed)
+        if hasattr(self, 'wms_refresh_btn'):
+            self.wms_refresh_btn.setEnabled(False)
+        
         # Always hide catalogue row (AWS STAC is masked)
         # Keep the widgets hidden regardless of connector
         self.endpoint_label.setVisible(False)
@@ -1161,8 +1100,6 @@ class AltairDockWidget(QDockWidget):
             self._load_umbra_collections()
         elif connector_id == 'capella_stac':
             self._load_capella_collections()
-        elif connector_id == 'copernicus':
-            self._load_copernicus_collections()
         
         logger.debug(f"UI updated for connector: {connector_id} (collections={has_collections}, cloud={has_cloud_cover}, bbox={has_bbox})")
     
@@ -1437,8 +1374,6 @@ class AltairDockWidget(QDockWidget):
             self._load_umbra_collections()
         elif connector_id == 'capella_stac':
             self._load_capella_collections()
-        elif connector_id == 'copernicus':
-            self._load_copernicus_collections()
     
     def _load_copernicus_collections(self):
         """Load collections from Copernicus Dataspace connector"""
@@ -1545,7 +1480,6 @@ class AltairDockWidget(QDockWidget):
         except Exception as e:
             logger.error(f"Failed to load Copernicus collections: {e}")
             self._set_status(f"Error loading collections: {e}", "color: #FF0000;")
-
 
     def _on_endpoint_changed(self, index):
         """Handle STAC endpoint selection change"""
@@ -2208,9 +2142,13 @@ class AltairDockWidget(QDockWidget):
                 logger.info(f"Bbox already in EPSG:4326, no transformation needed: {bbox}")
             
             # Execute search via SearchTask (background thread)
-            # NOTE: No limit - retrieve all available results matching filters
-            # Users want to see all imagery matching their search criteria
+            # Use configured max_results with a protective upper bound to avoid
+            # expensive full-catalog scans on static STAC connectors.
             logger.info(f"Executing search via {connector_name} with bbox={search_bbox}, dates={start_date} to {end_date}, cloud={max_cloud}%, collection={collection_id}")
+
+            configured_limit = self.settings.value("AltairEOData/max_results", 100, type=int)
+            effective_limit = max(10, min(2000, configured_limit))
+            logger.debug(f"Search limit resolved to {effective_limit} (configured={configured_limit})")
             
             # Create search task
             search_params = {
@@ -2219,7 +2157,7 @@ class AltairDockWidget(QDockWidget):
                 'end_date': end_date,
                 'max_cloud_cover': max_cloud,
                 'collection': collection_id,
-                'limit': 10000  # High limit to retrieve all results (effectively unlimited)
+                'limit': effective_limit
             }
             
             # Create task with description for progress indicator
@@ -2368,6 +2306,10 @@ class AltairDockWidget(QDockWidget):
             
             # Call aggregated search
             logger.info(f"Executing ALL SOURCES search: bbox={search_bbox}, dates={start_date} to {end_date}, cloud={max_cloud}%, collection={collection_filter}")
+
+            configured_limit = self.settings.value("AltairEOData/max_results", 100, type=int)
+            effective_limit = max(10, min(1000, configured_limit))
+            logger.debug(f"All-sources limit resolved to {effective_limit} per connector (configured={configured_limit})")
             
             search_params = {
                 'bbox': search_bbox,
@@ -2375,7 +2317,7 @@ class AltairDockWidget(QDockWidget):
                 'end_date': end_date,
                 'max_cloud_cover': max_cloud,
                 'collection': collection_filter,
-                'limit': 10000
+                'limit': effective_limit
             }
             
             # Create task for aggregated search
@@ -3347,8 +3289,8 @@ class AltairDockWidget(QDockWidget):
                     try:
                         if hasattr(self, 'connector_manager') and self.connector_manager:
                             # Access connector instance from manager's internal dict
-                            if 'copernicus' in self.connector_manager._connectors:
-                                copernicus_connector = self.connector_manager._connectors['copernicus']['instance']
+                            if 'copernicus_stac' in self.connector_manager._connectors:
+                                copernicus_connector = self.connector_manager._connectors['copernicus_stac']['instance']
                                 if copernicus_connector and hasattr(copernicus_connector, 'access_token'):
                                     copernicus_token = copernicus_connector.access_token
                                     logger.debug(f"  Got Copernicus token: {copernicus_token[:20] if copernicus_token else 'None'}...")
@@ -3728,8 +3670,8 @@ class AltairDockWidget(QDockWidget):
                         try:
                             if hasattr(self, 'connector_manager') and self.connector_manager:
                                 # Access connector instance from manager's internal dict
-                                if 'copernicus' in self.connector_manager._connectors:
-                                    copernicus_connector = self.connector_manager._connectors['copernicus']['instance']
+                                if 'copernicus_stac' in self.connector_manager._connectors:
+                                    copernicus_connector = self.connector_manager._connectors['copernicus_stac']['instance']
                                     if copernicus_connector and hasattr(copernicus_connector, 'access_token'):
                                         copernicus_token = copernicus_connector.access_token
                                         logger.debug(f"  Got Copernicus token for download: {copernicus_token[:20] if copernicus_token else 'None'}...")
@@ -3869,6 +3811,131 @@ class AltairDockWidget(QDockWidget):
         )
         
         logger.info("Cleared all Altair and Preview layers")
+
+    def _on_refresh_wms_layers(self):
+        """Handle refresh request for WMS/WMTS layers.
+
+        The legacy WEkEO/HDA WMS/WMTS discovery flow was removed, but the UI
+        still exposes the tab/button in some builds. This safe fallback keeps
+        the dock functional and communicates the current state instead of
+        raising an AttributeError during signal connection.
+        """
+        try:
+            if hasattr(self, 'wms_layers_tree') and self.wms_layers_tree is not None:
+                self.wms_layers_tree.clear()
+
+            if hasattr(self, 'wms_add_btn') and self.wms_add_btn is not None:
+                self.wms_add_btn.setEnabled(False)
+
+            message = (
+                "WMS/WMTS layer discovery is currently unavailable "
+                "(WEkEO HDA flow removed)."
+            )
+            self._set_status(
+                message,
+                "color: #ffb86b; font-size: 10px; font-weight: 500;"
+            )
+            logger.info(message)
+        except Exception as e:
+            logger.error(f"Error while refreshing WMS/WMTS layers: {e}", exc_info=True)
+            self._set_status(
+                f"Failed to refresh WMS/WMTS layers: {str(e)}",
+                "color: #ff6b6b; font-size: 10px; font-weight: 500;"
+            )
+    
+    def _on_wms_layer_double_clicked(self, item, column):
+        """Handle double-click on WMS/WMTS layer item"""
+        layer_info = item.data(0, Qt.UserRole)
+        if layer_info:
+            self._add_wms_layer_to_map(layer_info)
+    
+    def _on_add_wms_layers(self):
+        """Add selected WMS/WMTS layers to map"""
+        selected_items = self.wms_layers_tree.selectedItems()
+        
+        if not selected_items:
+            QMessageBox.information(
+                self,
+                "No Selection",
+                "Please select one or more WMS/WMTS layers to add to the map."
+            )
+            return
+        
+        added_count = 0
+        failed_count = 0
+        
+        for item in selected_items:
+            layer_info = item.data(0, Qt.UserRole)
+            if layer_info:
+                try:
+                    self._add_wms_layer_to_map(layer_info)
+                    added_count += 1
+                except Exception as e:
+                    logger.error(f"Failed to add layer: {e}")
+                    failed_count += 1
+        
+        if added_count > 0:
+            self._set_status(
+                f"Added {added_count} WMS/WMTS layer(s) to map",
+                "color: #00ff00; font-size: 10px; font-weight: 500;"
+            )
+        
+        if failed_count > 0:
+            QMessageBox.warning(
+                self,
+                "Partial Failure",
+                f"Successfully added {added_count} layer(s).\n"
+                f"Failed to add {failed_count} layer(s).\n\n"
+                "Check the log for details."
+            )
+    
+    def _add_wms_layer_to_map(self, layer_info: Dict[str, Any]):
+        """Add a single WMS/WMTS layer to the map
+        
+        Args:
+            layer_info: Dict with layer information (name, title, type, url, etc.)
+        """
+        layer_type = layer_info.get('type', 'WMS').upper()
+        layer_name = layer_info.get('name', 'Unknown')
+        layer_title = layer_info.get('title', layer_name)
+        layer_url = layer_info.get('url', '')
+        
+        if not layer_url:
+            raise ValueError(f"No URL provided for layer {layer_name}")
+        
+        logger.info(f"Adding {layer_type} layer to map: {layer_title}")
+        
+        if not QGIS_AVAILABLE:
+            raise Exception("QGIS not available")
+        
+        try:
+            # Build layer URI based on type
+            if layer_type == 'WMS':
+                # WMS URI format: url=...&layers=...&styles=&format=image/png&crs=EPSG:4326
+                uri = f"url={layer_url}&layers={layer_name}&styles=&format=image/png&crs=EPSG:4326"
+                qgis_layer = QgsRasterLayer(uri, f"Altair WMS - {layer_title}", "wms")
+            elif layer_type == 'WMTS':
+                # WMTS URI format: url=...&layer=...&style=default&format=image/png&tilematrixset=...&crs=EPSG:4326
+                tilematrixset = layer_info.get('tilematrixset', 'EPSG:4326')
+                uri = f"url={layer_url}&layer={layer_name}&style=default&format=image/png&tilematrixset={tilematrixset}&crs=EPSG:4326"
+                qgis_layer = QgsRasterLayer(uri, f"Altair WMTS - {layer_title}", "wms")
+            else:
+                raise ValueError(f"Unsupported layer type: {layer_type}")
+            
+            if not qgis_layer.isValid():
+                raise Exception(f"Failed to create valid {layer_type} layer")
+            
+            # Add to project
+            QgsProject.instance().addMapLayer(qgis_layer)
+            
+            # Track loaded layer
+            self._loaded_layers.append(qgis_layer.name())
+            
+            logger.info(f"Successfully added {layer_type} layer: {layer_title}")
+            
+        except Exception as e:
+            logger.error(f"Failed to add {layer_type} layer: {e}", exc_info=True)
+            raise
     
     def cleanup(self):
         """Cleanup resources when closing the dock widget"""

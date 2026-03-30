@@ -60,6 +60,51 @@ class ConnectorBase:
     def search(self, query: str) -> list:
         raise NotImplementedError()
 
+    def search_unified(
+        self,
+        bbox=None,
+        start_date=None,
+        end_date=None,
+        max_cloud_cover=None,
+        collection=None,
+        text_query=None,
+        limit: int = 100
+    ) -> tuple:
+        """Normalized search entrypoint called by ConnectorManager.
+
+        Default implementation forwards to ``search()`` using the standard
+        keyword-argument signature shared by most connectors
+        (bbox, start_date, end_date, max_cloud_cover, collection, limit).
+
+        Connectors whose ``search()`` method expects a different signature
+        (e.g. a single ``dict`` positional arg, or a custom parameter set)
+        **must override this method** rather than changing ``search()``, so
+        the ConnectorManager can always call a single consistent interface.
+
+        Args:
+            bbox: Bounding box [min_lon, min_lat, max_lon, max_lat] or None
+            start_date: Start date ``YYYY-MM-DD`` or None
+            end_date: End date ``YYYY-MM-DD`` or None
+            max_cloud_cover: Maximum cloud cover percentage (0-100) or None
+            collection: Collection / dataset identifier or None
+            text_query: Free-text search string or None
+            limit: Maximum number of results to return
+
+        Returns:
+            Tuple[List[Dict], Optional[str]]: ``(items, next_token_or_error)``
+        """
+        result = self.search(  # type: ignore[call-arg]
+            bbox=bbox,
+            start_date=start_date or "",
+            end_date=end_date or "",
+            max_cloud_cover=max_cloud_cover,
+            collection=collection,
+            limit=limit,
+        )
+        if isinstance(result, tuple):
+            return result
+        return result, None
+
     def get_tile_url(self, result: dict, z: int, x: int, y: int) -> str:
         raise NotImplementedError()
 

@@ -1,15 +1,18 @@
 """
-Umbra SAR Open Data STAC Connector
-Provides access to Umbra's high-resolution Synthetic Aperture Radar imagery
+Umbra STAC Connector (dual mode)
 
-STAC Catalog: https://umbra-open-data-catalog.s3.us-west-2.amazonaws.com/stac/catalog.json
-Documentation: https://help.umbra.space/product-guide
-License: CC BY 4.0
+- Open Data mode (default): public Umbra SAR Open Data catalog
+- Commercial mode: Umbra Canopy STAC API v2 (Bearer token)
+
+References:
+- Open data catalog: https://umbra-open-data-catalog.s3.us-west-2.amazonaws.com/stac/catalog.json
+- Commercial STAC v2 overview: https://docs.canopy.umbra.space/reference/v2-stac-overview
 """
 
 import logging
 import json
-from typing import List, Dict, Optional
+import time
+from typing import List, Dict, Optional, Any
 from datetime import datetime
 
 from .base import ConnectorBase
@@ -49,6 +52,13 @@ class UmbraSTACConnector(ConnectorBase):
     # Umbra STAC endpoints
     CATALOG_URL = 'https://umbra-open-data-catalog.s3.us-west-2.amazonaws.com/stac/catalog.json'
     CATALOG_BASE = 'https://umbra-open-data-catalog.s3.us-west-2.amazonaws.com/stac'
+
+    # Umbra Canopy STAC v2 endpoints (commercial/archive)
+    DEFAULT_API_BASE = 'https://api.canopy.umbra.space'
+    COMMERCIAL_LANDING_PATH = '/v2/stac/'
+    COMMERCIAL_COLLECTIONS_PATH = '/v2/stac/collections'
+    COMMERCIAL_SEARCH_PATH = '/v2/stac/search'
+    AUTH_TOKEN_URL = 'https://auth.canopy.umbra.space/oauth/token'
     
     def __init__(self):
         """Initialize Umbra STAC connector"""
@@ -56,20 +66,308 @@ class UmbraSTACConnector(ConnectorBase):
         self._catalog = None
         self._collections = []
         self._items_cache = {}
+        self._commercial_collections_cache: Optional[List[Dict[str, Any]]] = None
+        self._use_commercial = False
+        self._access_token: Optional[str] = None
+        self._client_id: Optional[str] = None
+        self._client_secret: Optional[str] = None
+        self._token_expires_at: Optional[float] = None
+        self._api_base_url: str = self.DEFAULT_API_BASE
+        self._auth_header: Optional[str] = None
         logger.info("Initialized Umbra SAR Open Data STAC connector")
     
+    def _build_commercial_url(self, path: str) -> str:
+        base = (self._api_base_url or self.DEFAULT_API_BASE).strip().rstrip('/')
+        if not path.startswith('/'):
+            path = '/' + path
+        return f"{base}{path}"
+
     def authenticate(self, credentials: dict) -> bool:
         """
-        No authentication required for Umbra Open Data
+        Authenticate connector.
+
+        Behavior:
+        - If ``access_token`` is provided, enable commercial STAC v2 mode.
+        - Otherwise keep/open open-data mode.
         
         Args:
-            credentials: Ignored (public data)
+            credentials: Optional auth fields:
+                - access_token: Umbra Canopy bearer token
+                - client_id/client_secret: OAuth2 client credentials
+                - api_base_url: Optional API base (default https://api.canopy.umbra.space)
+            
+            Missing/empty credentials fallback to open-data mode.
             
         Returns:
-            bool: Always True
+            bool: True if selected mode is usable
         """
-        logger.info("Umbra Open Data - no authentication required")
-        return True
+        credentials = credentials or {}
+        self._api_base_url = str(credentials.get('api_base_url') or self.DEFAULT_API_BASE).strip().rstrip('/')
+        access_token = str(credentials.get('access_token') or '').strip()
+        client_id = str(credentials.get('client_id') or '').strip()
+        client_secret = str(credentials.get('client_secret') or '').strip()
+
+        self._client_id = client_id or None
+        self._client_secret = client_secret or None
+
+        if not access_token and self._client_id and self._client_secret:
+            token_response = self._request_m2m_access_token(self._client_id, self._client_secret)
+            if token_response:
+                access_token = token_response.get('access_token', '').strip()
+
+        if not access_token:
+            self._use_commercial = False
+            self._access_token = None
+            self._auth_header = None
+            self._token_expires_at = None
+            self._commercial_collections_cache = None
+            logger.info("Umbra: open-data mode active (no authentication required)")
+            return True
+
+        self._use_commercial = True
+        self._access_token = access_token
+        self._auth_header = f"Bearer {access_token}"
+        if self._token_expires_at is None:
+            self._token_expires_at = time.time() + 23 * 3600
+        self._commercial_collections_cache = None
+
+        try:
+            logger.info("Umbra: verifying commercial STAC token...")
+            landing = self._commercial_get(self._build_commercial_url(self.COMMERCIAL_LANDING_PATH), self.timeout_auth)
+            if landing is None:
+                logger.error("Umbra: commercial authentication verification failed")
+                return False
+
+            if isinstance(landing, dict) and (landing.get('type') in ('Catalog', 'Collection') or 'links' in landing):
+                logger.info("Umbra: commercial authentication successful")
+                return True
+
+            logger.error("Umbra: unexpected response from commercial STAC landing endpoint")
+            return False
+        except Exception as e:
+            logger.error(f"Umbra: authentication error: {e}")
+            return False
+
+    def _request_m2m_access_token(self, client_id: str, client_secret: str) -> Optional[Dict[str, Any]]:
+        """Request OAuth2 access token using Umbra client credentials flow."""
+        try:
+            audience = (self._api_base_url or self.DEFAULT_API_BASE).rstrip('/')
+            payload = {
+                'client_id': client_id,
+                'client_secret': client_secret,
+                'audience': audience,
+                'grant_type': 'client_credentials',
+            }
+
+            if QGIS_AVAILABLE:
+                request = QNetworkRequest(QUrl(self.AUTH_TOKEN_URL))
+                request.setHeader(QNetworkRequest.ContentTypeHeader, "application/json")
+                request.setRawHeader(b"Accept", b"application/json")
+                request.setRawHeader(b"User-Agent", b"KADAS-Altair-Plugin/1.0")
+
+                nam = QgsNetworkAccessManager.instance()
+                body = json.dumps(payload).encode('utf-8')
+                reply = nam.post(request, body)
+
+                loop = QEventLoop()
+                reply.finished.connect(loop.quit)
+
+                timer = QTimer()
+                timer.setSingleShot(True)
+                timer.timeout.connect(loop.quit)
+                timer.start(int(self.timeout_auth * 1000))
+                loop.exec_()
+
+                if not reply.isFinished():
+                    reply.abort()
+                    logger.error('Umbra token request timeout')
+                    return None
+
+                if reply.error():
+                    logger.error(f"Umbra token request error: {reply.errorString()}")
+                    return None
+
+                status_code = reply.attribute(QNetworkRequest.HttpStatusCodeAttribute)
+                if status_code and status_code >= 400:
+                    logger.error(f"Umbra token request HTTP {status_code}")
+                    return None
+
+                data = reply.readAll().data().decode('utf-8')
+            else:
+                session = self.get_session()
+                response = session.post(
+                    self.AUTH_TOKEN_URL,
+                    headers={
+                        'Accept': 'application/json',
+                        'Content-Type': 'application/json',
+                    },
+                    json=payload,
+                    timeout=self.timeout_auth,
+                    verify=self._verify_ssl,
+                )
+                response.raise_for_status()
+                data = response.text
+
+            token_payload = json.loads(data) if data else {}
+            token = str(token_payload.get('access_token') or '').strip()
+            expires_in = int(token_payload.get('expires_in') or 0)
+
+            if not token:
+                logger.error('Umbra token request succeeded but access_token missing')
+                return None
+
+            self._access_token = token
+            self._auth_header = f"Bearer {token}"
+            if expires_in > 0:
+                self._token_expires_at = time.time() + max(60, expires_in - 120)
+            else:
+                self._token_expires_at = time.time() + 23 * 3600
+
+            logger.info('Umbra: obtained M2M access token via client credentials')
+            return token_payload
+
+        except Exception as e:
+            logger.error(f"Umbra token request failed: {e}")
+            return None
+
+    def _ensure_valid_commercial_token(self) -> bool:
+        """Ensure commercial bearer token is available and not expired."""
+        if self._auth_header and self._token_expires_at and time.time() < self._token_expires_at:
+            return True
+
+        if self._auth_header and self._token_expires_at is None:
+            return True
+
+        if self._client_id and self._client_secret:
+            token_response = self._request_m2m_access_token(self._client_id, self._client_secret)
+            return token_response is not None
+
+        return bool(self._auth_header)
+
+    def _commercial_get(self, url: str, timeout: float) -> Optional[Dict[str, Any]]:
+        """Authenticated GET helper for commercial STAC v2."""
+        if not self._ensure_valid_commercial_token() or not self._auth_header:
+            logger.error("Umbra commercial: not authenticated")
+            return None
+
+        try:
+            if QGIS_AVAILABLE:
+                request = QNetworkRequest(QUrl(url))
+                request.setHeader(QNetworkRequest.ContentTypeHeader, "application/json")
+                request.setRawHeader(b"Accept", b"application/json, application/geo+json")
+                request.setRawHeader(b"Authorization", self._auth_header.encode("utf-8"))
+                request.setRawHeader(b"User-Agent", b"KADAS-Altair-Plugin/1.0")
+
+                nam = QgsNetworkAccessManager.instance()
+                reply = nam.get(request)
+
+                loop = QEventLoop()
+                reply.finished.connect(loop.quit)
+
+                timer = QTimer()
+                timer.setSingleShot(True)
+                timer.timeout.connect(loop.quit)
+                timer.start(int(timeout * 1000))
+
+                loop.exec_()
+
+                if not reply.isFinished():
+                    reply.abort()
+                    logger.error(f"Umbra commercial GET timeout after {timeout}s")
+                    return None
+
+                if reply.error():
+                    logger.error(f"Umbra commercial GET error: {reply.errorString()}")
+                    return None
+
+                status_code = reply.attribute(QNetworkRequest.HttpStatusCodeAttribute)
+                if status_code and status_code >= 400:
+                    logger.error(f"Umbra commercial GET HTTP {status_code}")
+                    return None
+
+                data = reply.readAll().data().decode('utf-8')
+            else:
+                session = self.get_session()
+                response = session.get(
+                    url,
+                    headers={
+                        'Accept': 'application/json, application/geo+json',
+                        'Authorization': self._auth_header,
+                    },
+                    timeout=timeout,
+                    verify=self._verify_ssl,
+                )
+                response.raise_for_status()
+                data = response.text
+
+            return json.loads(data) if data else {}
+        except Exception as e:
+            logger.error(f"Umbra commercial GET failed ({url}): {e}")
+            return None
+
+    def _commercial_post(self, url: str, payload: Dict[str, Any], timeout: float) -> Optional[Dict[str, Any]]:
+        """Authenticated POST helper for commercial STAC v2."""
+        if not self._ensure_valid_commercial_token() or not self._auth_header:
+            logger.error("Umbra commercial: not authenticated")
+            return None
+
+        try:
+            if QGIS_AVAILABLE:
+                request = QNetworkRequest(QUrl(url))
+                request.setHeader(QNetworkRequest.ContentTypeHeader, "application/json")
+                request.setRawHeader(b"Accept", b"application/json, application/geo+json")
+                request.setRawHeader(b"Authorization", self._auth_header.encode("utf-8"))
+                request.setRawHeader(b"User-Agent", b"KADAS-Altair-Plugin/1.0")
+
+                nam = QgsNetworkAccessManager.instance()
+                body = json.dumps(payload).encode('utf-8')
+                reply = nam.post(request, body)
+
+                loop = QEventLoop()
+                reply.finished.connect(loop.quit)
+
+                timer = QTimer()
+                timer.setSingleShot(True)
+                timer.timeout.connect(loop.quit)
+                timer.start(int(timeout * 1000))
+
+                loop.exec_()
+
+                if not reply.isFinished():
+                    reply.abort()
+                    logger.error(f"Umbra commercial POST timeout after {timeout}s")
+                    return None
+
+                if reply.error():
+                    logger.error(f"Umbra commercial POST error: {reply.errorString()}")
+                    return None
+
+                status_code = reply.attribute(QNetworkRequest.HttpStatusCodeAttribute)
+                if status_code and status_code >= 400:
+                    logger.error(f"Umbra commercial POST HTTP {status_code}")
+                    return None
+
+                data = reply.readAll().data().decode('utf-8')
+            else:
+                session = self.get_session()
+                response = session.post(
+                    url,
+                    headers={
+                        'Accept': 'application/json, application/geo+json',
+                        'Content-Type': 'application/json',
+                        'Authorization': self._auth_header,
+                    },
+                    json=payload,
+                    timeout=timeout,
+                    verify=self._verify_ssl,
+                )
+                response.raise_for_status()
+                data = response.text
+
+            return json.loads(data) if data else {}
+        except Exception as e:
+            logger.error(f"Umbra commercial POST failed ({url}): {e}")
+            return None
     
     def load_catalog(self, timeout: Optional[float] = None) -> bool:
         """
@@ -116,6 +414,9 @@ class UmbraSTACConnector(ConnectorBase):
         Returns:
             List of collection info dicts with keys: id, title, href, asset_count
         """
+        if self._use_commercial:
+            return self._get_commercial_collections()
+
         if not self._catalog:
             if not self.load_catalog():
                 logger.error("Failed to load catalog for collections")
@@ -170,6 +471,40 @@ class UmbraSTACConnector(ConnectorBase):
         
         logger.info(f"Found {len(collections)} year catalogs")
         return collections
+
+    def _get_commercial_collections(self) -> List[Dict[str, Any]]:
+        """Get commercial Umbra collections from /v2/stac/collections."""
+        if not self._auth_header:
+            logger.warning('Umbra commercial collections requested without authentication')
+            return []
+
+        if self._commercial_collections_cache is not None:
+            return self._commercial_collections_cache
+
+        url = self._build_commercial_url(self.COMMERCIAL_COLLECTIONS_PATH)
+        payload = self._commercial_get(url, self.timeout_search)
+        if payload is None:
+            self._commercial_collections_cache = []
+            return self._commercial_collections_cache
+
+        collections = payload.get('collections', []) if isinstance(payload, dict) else []
+        normalized: List[Dict[str, Any]] = []
+        for collection in collections if isinstance(collections, list) else []:
+            if not isinstance(collection, dict):
+                continue
+            collection_id = str(collection.get('id', '')).strip()
+            if not collection_id:
+                continue
+            normalized.append({
+                'id': collection_id,
+                'title': collection.get('title') or collection_id,
+                'description': collection.get('description') or '',
+                'asset_count': 0,
+                'type': 'collection',
+            })
+
+        self._commercial_collections_cache = normalized
+        return normalized
     
     def get_month_collections(self, year_href: str, timeout: Optional[float] = None) -> List[Dict]:
         """
@@ -220,6 +555,38 @@ class UmbraSTACConnector(ConnectorBase):
             logger.error(f"Error loading month collections from {year_href}: {e}")
             return []
     
+    def search_unified(
+        self,
+        bbox=None,
+        start_date=None,
+        end_date=None,
+        max_cloud_cover=None,
+        collection=None,
+        text_query=None,
+        limit: int = 100,
+    ) -> tuple:
+        """Normalized entrypoint for ConnectorManager.
+
+        Builds the dict expected by :meth:`search` from the standard
+        ``search_unified`` parameters.
+        """
+        query_dict: dict = {'limit': limit}
+        if bbox:
+            query_dict['bbox'] = bbox
+        if start_date and end_date:
+            query_dict['datetime'] = f"{start_date}/{end_date}"
+        elif start_date:
+            query_dict['datetime'] = f"{start_date}/.."
+        elif end_date:
+            query_dict['datetime'] = f"../{end_date}"
+        if collection:
+            if len(collection) == 4 and collection.isdigit():
+                query_dict['year'] = collection
+            elif len(collection) == 7 and collection[4] == '-':
+                query_dict['month'] = collection
+        results = self.search(query_dict)
+        return results, None
+
     def search(self, query: dict) -> List[Dict]:
         """
         Search Umbra STAC catalog
@@ -235,6 +602,9 @@ class UmbraSTACConnector(ConnectorBase):
         Returns:
             List of STAC items matching query
         """
+        if self._use_commercial:
+            return self._search_commercial(query)
+
         if not self._catalog:
             if not self.load_catalog():
                 logger.error("Failed to load catalog for search")
@@ -299,6 +669,85 @@ class UmbraSTACConnector(ConnectorBase):
         logger.info(f"   Months searched: {total_months_searched}")
         logger.info(f"   Items found: {len(results)}")
         logger.info(f"✅ Search completed: {len(results)} items")
+        return results
+
+    def _search_commercial(self, query: dict) -> List[Dict[str, Any]]:
+        """Search Umbra commercial archive via /v2/stac/search."""
+        if not self._auth_header:
+            logger.error('Umbra commercial search requested without authentication')
+            return []
+
+        requested_limit = int(query.get('limit', 100))
+        requested_limit = max(1, requested_limit)
+
+        collections = query.get('collections')
+        if collections is None:
+            if query.get('collection'):
+                collections = [query.get('collection')]
+            else:
+                collections_info = self._get_commercial_collections()
+                collections = [c.get('id') for c in collections_info if c.get('id')]
+
+        if not collections:
+            logger.warning('Umbra commercial search: no collections selected/available')
+            return []
+
+        page_limit = min(requested_limit, 10000)
+
+        payload: Dict[str, Any] = {
+            'collections': collections,
+            'limit': page_limit,
+        }
+
+        bbox = query.get('bbox')
+        if bbox and len(bbox) >= 4:
+            payload['bbox'] = [bbox[0], bbox[1], bbox[2], bbox[3]]
+
+        datetime_expr = query.get('datetime')
+        if datetime_expr:
+            payload['datetime'] = datetime_expr
+
+        url = self._build_commercial_url(self.COMMERCIAL_SEARCH_PATH)
+        results: List[Dict[str, Any]] = []
+        next_token = None
+        iteration = 0
+
+        while len(results) < requested_limit:
+            iteration += 1
+            req_body = dict(payload)
+            if next_token:
+                req_body['token'] = next_token
+
+            response = self._commercial_post(url, req_body, self.timeout_search)
+            if response is None:
+                break
+
+            features = response.get('features', []) if isinstance(response, dict) else []
+            if not isinstance(features, list) or not features:
+                break
+
+            for feature in features:
+                if len(results) >= requested_limit:
+                    break
+                if isinstance(feature, dict):
+                    results.append(feature)
+
+            context = response.get('context', {}) if isinstance(response, dict) else {}
+            context_next = context.get('next') if isinstance(context, dict) else None
+            token_next = response.get('token') if isinstance(response, dict) else None
+
+            if context_next is not None and context_next != '':
+                next_token = str(context_next)
+            elif token_next is not None and token_next != '':
+                next_token = str(token_next)
+            else:
+                break
+
+            if iteration > 100:
+                logger.warning('Umbra commercial search: pagination safety stop')
+                break
+
+        logger.info(f"Umbra commercial search completed: {len(results)} items")
         return results
     
     def _fetch_collection_items(self, collection_href: str) -> List[Dict]:

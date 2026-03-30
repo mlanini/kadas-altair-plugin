@@ -252,6 +252,40 @@ class CapellaSTACConnector(ConnectorBase):
             logger.error(f"Error loading subcollections from {catalog_href}: {e}")
             return []
     
+    def search_unified(
+        self,
+        bbox=None,
+        start_date=None,
+        end_date=None,
+        max_cloud_cover=None,
+        collection=None,
+        text_query=None,
+        limit: int = 100,
+    ) -> tuple:
+        """Normalized entrypoint for ConnectorManager.
+
+        Builds the dict expected by :meth:`search` from the standard
+        ``search_unified`` parameters.  Maps ``collection`` to
+        ``product_type`` (e.g. GEO/SLC) or ``instrument_mode`` as
+        appropriate.
+        """
+        query_dict: dict = {'limit': limit}
+        if bbox:
+            query_dict['bbox'] = bbox
+        if start_date and end_date:
+            query_dict['datetime'] = f"{start_date}/{end_date}"
+        elif start_date:
+            query_dict['datetime'] = f"{start_date}/.."
+        elif end_date:
+            query_dict['datetime'] = f"../{end_date}"
+        if collection:
+            if collection.upper() in {'GEO', 'GEC', 'SLC', 'SICD', 'SIDD', 'CPHD'}:
+                query_dict['product_type'] = collection.upper()
+            else:
+                query_dict['instrument_mode'] = collection
+        results = self.search(query_dict)
+        return results, None
+
     def search(self, query: dict) -> List[Dict]:
         """
         Search Capella STAC catalog

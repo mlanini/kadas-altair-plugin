@@ -48,29 +48,33 @@ KADAS Altair follows a **middleware architecture** that decouples the UI from da
 └────────┬─────────────────────────────────────────────────┘
          │
 ┌────────▼─────────────────────────────────────────────────┐
-│                    Connectors (9)                        │
+│                    Connectors (11)                       │
 │  ┌──────────┐  ┌──────────┐  ┌───────────┐             │
 │  │  Vantor  │  │  ICEYE   │  │   Umbra   │             │
 │  │  (CSV)   │  │  (STAC)  │  │   (STAC)  │             │
 │  └────┬─────┘  └────┬─────┘  └─────┬─────┘             │
 │  ┌────┴─────┐  ┌────┴─────┐  ┌─────┴─────┐             │
 │  │ Capella  │  │Copernicus│  │  Planet   │             │
-│  │  (STAC)  │  │ (OAuth2) │  │   (API)   │             │
-│  └──────────┘  └──────────┘  └───────────┘             │
+│  │  (STAC)  │  │  (STAC)  │  │   (API)   │             │
+│  └──────────┘  └────┬─────┘  └───────────┘             │
+│                     │                                    │
+│              (OAuth2 Token)                              │
 └────────┬─────────────────────────────────────────────────┘
          │
 ┌────────▼─────────────────────────────────────────────────┐
-│              Network Layer (Qt-based)                    │
+│              Network Layer (Qt-based + owslib)           │
 │  • QgsNetworkAccessManager (proxy-aware)                 │
 │  • SSL/TLS via Qt (no Python ssl dependency)             │
 │  • VPN-compatible (handles SSL inspection)               │
+│  • owslib for WMS/WMTS GetCapabilities parsing           │
 └────────┬─────────────────────────────────────────────────┘
          │
 ┌────────▼─────────────────────────────────────────────────┐
 │                  Data Sources                            │
 │  • GitHub (CSV, GeoJSON)                                 │
-│  • STAC APIs (Umbra, ICEYE, Capella)                     │
-│  • REST APIs (Copernicus, Planet)                        │
+│  • STAC APIs (Umbra, ICEYE, Capella, Copernicus)        │
+│  • REST APIs (Copernicus STAC, Planet)                   │
+│  • OGC Web Services (WMS/WMTS)                           │
 │  • AWS S3 (COG imagery)                                  │
 └──────────────────────────────────────────────────────────┘
 ```
@@ -92,7 +96,7 @@ kadas_altair_plugin/
 │   ├── iceye_stac.py        # ICEYE SAR (STAC catalog)
 │   ├── umbra_stac.py        # Umbra SAR (recursive STAC)
 │   ├── capella_stac.py      # Capella SAR (STAC)
-│   ├── copernicus.py        # Copernicus (OAuth2 + REST)
+│   ├── copernicus_stac.py   # Copernicus STAC (OAuth2 + REST)
 │   ├── oneatlas.py          # OneAtlas (stub)
 │   ├── planet.py            # Planet (stub)
 │   ├── gee.py               # Google Earth Engine (stub)
@@ -118,6 +122,49 @@ kadas_altair_plugin/
 └── icons/                    # UI icons
     └── *.png
 ```
+
+---
+
+# Dependencies
+
+## Core Dependencies (Bundled in Full Package)
+
+### pystac-client (>=0.8.5)
+- **Purpose**: STAC API client library
+- **License**: Apache 2.0
+- **Size**: ~1 MB bundled
+- **Used by**: ICEYE, Umbra, Capella, Copernicus STAC connectors
+- **Features**: Catalog browsing, item search, pagination
+
+### owslib (>=0.31.0)
+- **Purpose**: OGC Web Services client library
+- **License**: BSD
+- **Size**: ~2 MB bundled
+- **Used by**: Various connectors for OGC service parsing
+- **Features**: GetCapabilities parsing, WMS 1.3.0, WMTS support
+
+### Total Package Size
+- **Lite package**: ~200 KB (plugin code only)
+- **Full package**: ~5.78 MB (plugin + dependencies)
+
+## QGIS/KADAS Built-in Libraries (Not Bundled)
+
+### qgis.core
+- `QgsNetworkAccessManager` - HTTP/HTTPS networking
+- `QgsRasterLayer` - Raster layer management
+- `QgsCoordinateReferenceSystem` - CRS handling
+- `QgsRectangle` - Bounding box geometry
+- `QgsProject` - Project management
+
+### qgis.PyQt
+- `QtCore` - Qt core functionality
+- `QtWidgets` - UI widgets
+- `QtNetwork` - Network operations
+
+### Python Standard Library
+- `json`, `datetime`, `typing`, `pathlib` - Data handling
+- `concurrent.futures` - Parallel execution
+- `abc` - Abstract base classes
 
 ---
 
@@ -244,6 +291,52 @@ def authenticate(self, credentials):
 
 ---
 
+# Authentication Architecture
+
+## Dual Secure Storage
+
+KADAS Altair v0.3.1+ uses **two separate secure storage services**:
+
+### Copernicus STAC (OAuth2)
+- **Service Name**: `'copernicus'`
+- **Credentials**: `client_id`, `client_secret`
+- **Storage**: QGIS settings + keyring/encryption
+- **Usage**: Token-based API access
+
+## Credential Fallback Chain
+
+### Copernicus STAC
+1. **UI credentials** (Settings → Copernicus STAC section)
+2. **Secure storage** (keyring → cryptography → base64)
+
+## Secure Storage Implementation
+
+**File**: `secrets/secure_storage.py`
+
+```python
+class SecureStorageService:
+    """3-level credential storage"""
+    
+    def store_credentials(self, service_name, username, password):
+        """Store credentials with fallback chain"""
+        try:
+            # Level 1: System keyring (Windows Credential Manager, macOS Keychain)
+            keyring.set_password(service_name, username, password)
+        except:
+            try:
+                # Level 2: Encrypted file (cryptography library)
+                self._store_encrypted(service_name, username, password)
+            except:
+                # Level 3: Base64 obfuscated (QGIS settings)
+                self._store_obfuscated(service_name, username, password)
+    
+    def get_credentials(self, service_name):
+        """Retrieve credentials with same fallback"""
+        # Try keyring → encrypted → obfuscated
+```
+
+---
+
 # Performance Optimizations
 
 ## Collection Loading
@@ -364,6 +457,39 @@ def _fetch_url(self, url: str) -> str:
 Some connectors use `requests` library:
 - Environment variables propagated from KADAS proxy settings
 - Set at plugin startup in `plugin.py`
+
+---
+
+# UI Components
+
+## Main Dock (Search Results)
+
+**File**: `gui/dock.py`
+
+### Results Display
+
+```python
+# Search results display
+self.results_table_view = QTableWidget()
+```
+
+## Settings Dock (Connector Configuration)
+
+**File**: `gui/settings_dock.py`
+
+### Copernicus STAC Configuration
+
+```python
+# Copernicus STAC (Dataspace)
+stac_group = QGroupBox("Copernicus STAC (Dataspace)")
+self.copernicus_client_id_input = QLineEdit()
+self.copernicus_client_secret_input = QLineEdit()
+self.test_copernicus_stac_btn = QPushButton("Test Connection")
+```
+
+**Features:**
+- **Test STAC Connection**: Tests OAuth2 with Copernicus Dataspace
+- **Restore Defaults**: Reset to default configuration
 
 ---
 

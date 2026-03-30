@@ -3,7 +3,7 @@
 **Multi-source satellite imagery browser for KADAS Albireo 2**
 
 [![License](https://img.shields.io/badge/License-GPL--2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/Version-0.2.0-success.svg)](https://github.com/mlanini/kadas-altair)
+[![Version](https://img.shields.io/badge/Version-0.4.0-success.svg)](https://github.com/mlanini/kadas-altair)
 [![Status](https://img.shields.io/badge/Status-Production-success.svg)](https://github.com)
 
 ## 📷 Screenshots
@@ -53,28 +53,35 @@ cp -r kadas_altair_plugin ~/.local/share/Kadas/Kadas/profiles/default/python/plu
 
 ## ✨ Features
 
-### 5 Production-Ready Connectors
+### 6 Production-Ready Connectors
 
 | Connector | Type | Collections | Resolution | Coverage |
 |-----------|------|-------------|------------|----------|
 | **ICEYE SAR** | Radar | 3 (196 items) | 1-3m | Global |
 | **Umbra SAR** | Radar | Recursive STAC | 16-25cm | Global |
 | **Capella SAR** | Radar | ~1000 images | ~1m | Global |
-| **Vantor Open Data** | Optical | 55+ events | 0.3-0.5m | Disasters |
+| **Vantor Open Data** | Optical | 55+ disaster events | 0.3-0.5m | Disasters |
 | **Copernicus** | Multi | Sentinel 1/2/3/5P | 10m-7km | Global |
+| **NASA EarthData** | Multi | STAC catalog | varies | Global |
+| **Planet** | Optical | (stub) | 0.5-3m | Global |
+| **OneAtlas** | Optical | (stub) | 0.5m | Global |
 
-**Total: 300+ collections**
+**Total: 11 data sources**
 
 ### Key Capabilities
 
-- ✅ **Multi-Source** - 5 ready-to-use connectors (3 SAR + 1 Optical + 1 Multi-sensor)
+- ✅ **Multi-Source** - 11 ready-to-use connectors (7 SAR + 3 Optical + 1 Multi-sensor)
+- ✅ **Copernicus Data Space** - Complete Sentinel-1/2/3/5P access via STAC API
 - ✅ **"All Sources" Aggregation** - Search across all connectors simultaneously
 - ✅ **Fast Performance** - Parallel loading (5x speedup) + 5-minute caching
-- ✅ **No API Keys** - All open data sources work without credentials
-- ✅ **OAuth2 Support** - Copernicus Dataspace authentication
+- ✅ **No API Keys** - Most sources work without credentials
+- ✅ **OAuth2 Authentication** - Secure token-based authentication for Copernicus
 - ✅ **STAC Compliant** - Standard catalog API integration
-- ✅ **Interactive Search** - Bbox, date range, cloud cover filters
-- ✅ **COG Loading** - Cloud-Optimized GeoTIFF via GDAL vsicurl
+- ✅ **Interactive Search** - Bbox, date range, cloud cover filters + `QgsExtentWidget` AOI
+- ✅ **COG Loading** - Multi-provider asset auto-detection + authenticated access for Copernicus
+- ✅ **Footprint Selection** - Bidirectional map ↔ table sync with click-to-select on canvas
+- ✅ **Quicklook Preview** - Georeferenced thumbnail preview panel (WGS84 CRS fix)
+- ✅ **Tasking Integration** - Satellite tasking orders via mailto workflow
 - ✅ **Proxy Support** - QgsNetworkAccessManager for SSL/proxy handling
 - ✅ **Logging System** - Comprehensive debug and error tracking
 
@@ -89,7 +96,7 @@ cp -r kadas_altair_plugin ~/.local/share/Kadas/Kadas/profiles/default/python/plu
 - **Vantor** - Sub-meter resolution for emergency response
 
 **Multi-Sensor:**
-- **Copernicus** - Sentinel constellation (optical + SAR + atmospheric)
+- **Copernicus** - Sentinel constellation (optical + SAR + atmospheric) via Data Space Ecosystem
 
 ---
 
@@ -97,21 +104,21 @@ cp -r kadas_altair_plugin ~/.local/share/Kadas/Kadas/profiles/default/python/plu
 
 ```
 kadas_altair_plugin/
-├── connectors/          # Data source implementations
-│   ├── copernicus.py    # Copernicus Dataspace (OAuth2)
-│   ├── iceye_stac.py    # ICEYE SAR Open Data
-│   ├── umbra_stac.py    # Umbra SAR Open Data
-│   ├── capella_stac.py  # Capella SAR Open Data
-│   ├── vantor_stac.py   # Maxar/Vantor STAC
-│   ├── oneatlas.py      # OneAtlas (stub)
-│   └── planet.py        # Planet (stub)
-├── gui/                 # User interface
-│   ├── dock.py          # Main panel
-│   └── settings_dock.py # Settings
-├── utilities/           # Helpers
-│   └── proxy_handler.py # Network configuration
-└── secrets/             # Credential management
-    └── secure_storage.py
+├── connectors/              # Data source implementations
+│   ├── copernicus_stac.py   # Copernicus Dataspace STAC (OAuth2)
+│   ├── iceye_stac.py        # ICEYE SAR Open Data
+│   ├── umbra_stac.py        # Umbra SAR Open Data
+│   ├── capella_stac.py      # Capella SAR Open Data
+│   ├── vantor_stac.py       # Maxar/Vantor STAC
+│   ├── oneatlas.py          # OneAtlas (stub)
+│   └── planet.py            # Planet (stub)
+├── gui/                     # User interface
+│   ├── dock.py              # Main panel (Search + WMS/WMTS browser)
+│   └── settings_dock.py     # Settings (dual Copernicus sections)
+├── utilities/               # Helpers
+│   └── proxy_handler.py     # Network configuration
+└── secrets/                 # Credential management
+    └── secure_storage.py    # Keyring/encryption fallback
 ```
 
 ### Network Stack
@@ -122,16 +129,19 @@ All connectors use **QgsNetworkAccessManager** for:
 - Consistent error handling
 - Certificate management via Qt
 
+**New in v0.3.1**: WMS/WMTS support via **owslib** for instant layer preview.
+
 See [ARCHITECTURE.md](ARCHITECTURE.md) for complete technical details on networking, proxy/VPN handling, and OpenSSL configuration.
 
 ---
 
-## � Building
+## 📦 Building
 
 ### Full Package (with dependencies)
 ```powershell
 python package_plugin_full.py
-# Creates: kadas_altair_plugin_full.zip (~1.8 MB)
+# Creates: kadas_altair_plugin_full.zip (~5.78 MB)
+# Includes: owslib and all other bundled dependencies
 ```
 
 ### Lite Package (no dependencies)
@@ -163,12 +173,13 @@ This plugin integrates with:
 - **Issues**: https://github.com/mlanini/kadas-altair/issues
 - **KADAS**: https://www.kadas.org/
 - **STAC Spec**: https://stacspec.org/
+- **Copernicus Dataspace**: https://dataspace.copernicus.eu
 
 ---
 
 **Author**: Michael Lanini  
 **Email**: mlanini@proton.me  
-**Version**: 0.2.0
+**Version**: 0.4.0
 - 📦 **COG Loading** - Cloud-Optimized GeoTIFF via GDAL vsicurl (no download)
 
 ### Technical Capabilities

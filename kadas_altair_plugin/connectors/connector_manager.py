@@ -32,7 +32,6 @@ class ConnectorType(Enum):
     ICEYE_STAC = "iceye_stac"
     UMBRA_STAC = "umbra_stac"
     CAPELLA_STAC = "capella_stac"
-    GEE = "gee"
     NASA_EARTHDATA = "nasa_earthdata"
 
 
@@ -309,161 +308,129 @@ class ConnectorManager:
         text_query: Optional[str],
         limit: int
     ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
-        """Execute search on a specific connector instance
-        
-        Handles different connector method signatures
+        """Execute search on a connector via the unified ``search_unified()`` interface.
+
+        Every :class:`~connectors.base.ConnectorBase` subclass exposes
+        ``search_unified()``, which accepts the same normalized parameter set
+        regardless of the underlying connector's own ``search()`` signature.
+        Connectors with non-standard signatures (Iceye, Umbra, Capella,
+        Copernicus, Planet) override ``search_unified()`` to translate
+        parameters before delegating to their own ``search()``.
+
+        This replaces the previous approach of detecting connector class names
+        at runtime, which was fragile and required changes here whenever a new
+        connector was added.
         """
-        # Detect connector type by class name
         connector_class = instance.__class__.__name__
-        
-        # ICEYE STAC signature: search(query, bbox, start_date, end_date, collections, limit, **kwargs)
-        if connector_class == 'IceyeStacConnector':
-            try:
-                logger.debug(f"Using ICEYE signature for {connector_class}")
-                collections_list = [collection] if collection else None
-                results = instance.search(
-                    query=text_query or "",
-                    bbox=bbox,
-                    start_date=start_date,
-                    end_date=end_date,
-                    collections=collections_list,
-                    limit=limit
-                )
-                return results, None
-            except Exception as e:
-                logger.error(f"ICEYE search failed: {e}", exc_info=True)
-                return [], None
-        
-        # Umbra/Capella dict signature: search(query: dict)
-        if connector_class in ['UmbraSTACConnector', 'CapellaSTACConnector']:
-            try:
-                logger.debug(f"Using dict signature for {connector_class}")
-                query_dict = {
-                    'limit': limit
-                }
-                if bbox:
-                    query_dict['bbox'] = bbox
-                if start_date and end_date:
-                    query_dict['datetime'] = f"{start_date}/{end_date}"
-                elif start_date:
-                    query_dict['datetime'] = f"{start_date}/.."
-                elif end_date:
-                    query_dict['datetime'] = f"../{end_date}"
-                
-                # Capella-specific: map collection to product_type or instrument_mode
-                if connector_class == 'CapellaSTACConnector' and collection:
-                    # Try to detect if collection is a product_type or instrument_mode
-                    if collection.upper() in ['GEO', 'GEC', 'SLC', 'SICD', 'SIDD', 'CPHD']:
-                        query_dict['product_type'] = collection.upper()
-                    else:
-                        query_dict['instrument_mode'] = collection
-                
-                # Umbra-specific: map collection to year or month
-                if connector_class == 'UmbraSTACConnector' and collection:
-                    if len(collection) == 4 and collection.isdigit():
-                        query_dict['year'] = collection
-                    elif len(collection) == 7 and collection[4] == '-':
-                        query_dict['month'] = collection
-                
-                results = instance.search(query_dict)
-                return results, None
-            except Exception as e:
-                logger.error(f"{connector_class} search failed: {e}", exc_info=True)
-                return [], None
-        
-        # Try standard search signature (AWS STAC)
         try:
-            logger.debug(f"Trying standard search signature for {connector_class}")
-            result = instance.search(
-                bbox=bbox or [],
-                start_date=start_date or "",
-                end_date=end_date or "",
+            return instance.search_unified(
+                bbox=bbox,
+                start_date=start_date,
+                end_date=end_date,
                 max_cloud_cover=max_cloud_cover,
                 collection=collection,
-                limit=limit
+                text_query=text_query,
+                limit=limit,
             )
-            logger.debug(f"Standard search returned type: {type(result)}")
-            
-            # Handle both tuple and list returns
-            if isinstance(result, tuple) and len(result) == 2:
-                logger.debug(f"Got tuple result: ({len(result[0])} items, {result[1]})")
-                return result
-            elif isinstance(result, list):
-                logger.debug(f"Got list result: {len(result)} items, wrapping in tuple")
-                return result, None
-            else:
-                logger.warning(f"Unexpected result type: {type(result)}")
-                return result, None
-        except TypeError as e:
-            logger.debug(f"Standard signature failed: {e}")
-            pass
-        
-        # Copernicus connector signature: search(query, **kwargs)
-        if connector_class == 'CopernicusConnector':
-            try:
-                logger.debug(f"Using Copernicus signature for {connector_class}")
-                results = instance.search(
-                    query="",  # Copernicus doesn't use text query, only filters
-                    bbox=bbox,
-                    start_date=start_date,
-                    end_date=end_date,
-                    max_cloud_cover=int(max_cloud_cover) if max_cloud_cover else 100,
-                    collection=collection or 'sentinel-2-l2a',  # Default to S2 L2A
-                    limit=limit
-                )
-                logger.debug(f"Copernicus search returned: {len(results)} items")
-                return results, None
-            except Exception as e:
-                logger.error(f"Copernicus search failed: {e}", exc_info=True)
-                return [], None
-        
-        # Try alternative signatures (Planet, etc.)
-        try:
-            # Generic kwargs signature
-            if bbox and start_date and end_date:
-                results = instance.search(
-                    bbox=bbox,
-                    start_date=start_date,
-                    end_date=end_date,
-                    max_cloud_cover=int(max_cloud_cover) if max_cloud_cover else 100,
-                    collection=collection
-                )
-                return results, None
-        except (TypeError, AttributeError):
-            pass
-        
-        # Try simple text query signature (legacy connectors)
-        try:
-            results = instance.search(query=text_query or "")
-            return results, None
-        except (TypeError, AttributeError):
-            pass
-        
-        logger.warning(f"Could not match search signature for connector: {connector_class}")
-        return [], None
+        except Exception as e:
+            logger.error(
+                f"search_unified() failed for {connector_class}: {e}",
+                exc_info=True,
+            )
+            return [], None
     
+    def _validate_stac_item(
+        self,
+        item: Dict[str, Any],
+        connector_id: str
+    ) -> bool:
+        """Lightweight validation of a STAC-like item before it enters the result set.
+
+        Checks the minimum fields required by the STAC Item specification:
+
+        * ``type`` must be ``"Feature"``
+        * ``id`` must be a non-empty string
+        * ``properties`` must be a :class:`dict` (may be empty for open-data connectors)
+        * ``assets`` must be a :class:`dict` (may be empty)
+
+        Inspired by the STAC-Atlas crawler, which runs every collected
+        collection through ``stac-node-validator`` before persisting it.
+        Our lightweight version avoids a network round-trip while still
+        preventing malformed items from propagating to the UI.
+
+        Invalid items are logged at WARNING level and silently excluded so
+        that a single bad item never blocks the rest of a batch.
+
+        Args:
+            item: The candidate STAC item dict (already in STAC-like format).
+            connector_id: Source connector identifier, used in log messages.
+
+        Returns:
+            bool: ``True`` if the item satisfies the minimum STAC requirements.
+        """
+        item_id = item.get('id', '<no-id>')
+
+        # type must be "Feature"
+        if item.get('type') != 'Feature':
+            logger.warning(
+                f"[{connector_id}] Item '{item_id}' skipped: "
+                f"type='{item.get('type')}' is not 'Feature'"
+            )
+            return False
+
+        # id must be a non-empty string
+        if not item_id or not isinstance(item_id, str):
+            logger.warning(
+                f"[{connector_id}] Item skipped: missing or non-string 'id'"
+            )
+            return False
+
+        # properties must be a dict (may be empty)
+        if not isinstance(item.get('properties'), dict):
+            logger.warning(
+                f"[{connector_id}] Item '{item_id}' skipped: "
+                f"'properties' is not a dict (got {type(item.get('properties')).__name__})"
+            )
+            return False
+
+        # assets must be a dict (may be empty)
+        if not isinstance(item.get('assets'), dict):
+            logger.warning(
+                f"[{connector_id}] Item '{item_id}' skipped: "
+                f"'assets' is not a dict (got {type(item.get('assets')).__name__})"
+            )
+            return False
+
+        return True
+
     def _standardize_results(
         self,
         items: List[Dict[str, Any]],
         connector_id: str
     ) -> List[Dict[str, Any]]:
-        """Standardize results from different connectors to common format
-        
+        """Standardize results from different connectors to common format.
+
+        Each item is first brought into STAC-like shape (either kept as-is
+        if already a GeoJSON Feature, or converted via
+        :meth:`_convert_to_stac_format`), then passed through
+        :meth:`_validate_stac_item` to ensure minimum STAC conformance
+        before being added to the output list.
+
         Args:
             items: Raw items from connector
             connector_id: Source connector ID
-            
+
         Returns:
-            List of standardized items in STAC-like format
+            List of validated, standardized items in STAC-like format
         """
         standardized = []
-        
+
         for item in items:
             # Check if already in STAC format
             if 'type' in item and item['type'] == 'Feature':
                 # Already STAC-like, just add source
                 item['_source'] = connector_id
-                
+
                 # Ensure stac_feature contains links for URL resolution
                 if 'stac_feature' in item and isinstance(item['stac_feature'], dict):
                     # Preserve original stac_feature links
@@ -477,15 +444,19 @@ class ConnectorManager:
                         'assets': item.get('assets', {}),
                         'properties': item.get('properties', {})
                     }
-                
+
+                if not self._validate_stac_item(item, connector_id):
+                    continue
                 standardized.append(item)
                 continue
-            
+
             # Convert to STAC-like format
             stac_item = self._convert_to_stac_format(item, connector_id)
             if stac_item:
+                if not self._validate_stac_item(stac_item, connector_id):
+                    continue
                 standardized.append(stac_item)
-        
+
         return standardized
     
     def _convert_to_stac_format(
@@ -553,13 +524,18 @@ class ConnectorManager:
             return []
         
         connector_info = self._connectors[target_connector]
-        
-        if not connector_info['authenticated']:
+
+        # Only block on authentication when the connector explicitly declares
+        # that it requires credentials (ConnectorCapability.AUTHENTICATION).
+        # Open-data connectors (Capella, Umbra, ICEYE, Vantor, …) do NOT carry
+        # this capability, so they must not be gated here.
+        needs_auth = ConnectorCapability.AUTHENTICATION in connector_info.get('capabilities', [])
+        if needs_auth and not connector_info['authenticated']:
             logger.warning(f"Connector not authenticated: {target_connector}")
             return []
-        
+
         instance = connector_info['instance']
-        
+
         try:
             # Try to get collections
             if hasattr(instance, 'get_collections'):

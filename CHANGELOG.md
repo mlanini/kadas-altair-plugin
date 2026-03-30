@@ -5,6 +5,106 @@ All notable changes to KADAS Altair Plugin will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-04-10
+
+### Added
+- **`QgsExtentWidget` AOI** in both Archive Search and Tasking docks — bidirectional sync with map canvas; replaces manual coordinate spin boxes
+- **Archive Search dock** (`archive_dock.py`):
+  - `FootprintSelectionTool` — click a footprint on the map canvas to select it; selection reflected bidirectionally in the results table
+  - `QgsRuleBasedRenderer` for footprint layer: selected items highlighted with semi-transparent yellow fill (`rgba(255,220,0,120)`) and `#ffcc00` border
+  - Quicklook preview panel: `QNetworkRequest` import fix (was missing, causing silent download failures)
+  - Quicklook CRS fix: `layer.setCrs(QgsCoordinateReferenceSystem('EPSG:4326'))` applied after loading worldfile-backed quicklook raster to ensure correct reprojection to map CRS
+  - `_pick_cog_href(assets)` — 3-level COG asset auto-detection: (1) priority key list `['visual','TCI','TCI_10m','B_TCI','B04_10m','B04','B03_10m','B03','data','analytic','cog','image']`, (2) media-type matching, (3) file extension fallback; skips `.SAFE` product folders
+  - `_gdal_set_bearer(token)` / `_gdal_clear_bearer()` — inject/clear `GDAL_HTTP_HEADERS` for authenticated `/vsicurl/` access to Copernicus `eodata.dataspace.copernicus.eu`
+  - `_get_bearer_for_item(item)` — resolves `_access_token` from the connector instance bound to a result item
+- **Tasking dock** (`tasking_dock.py`):
+  - `addStretch(1)` between every top-level group for even vertical distribution
+  - AOI now uses `QgsExtentWidget` instead of separate spin boxes
+  - `_get_aoi_bbox_wgs84()` helper returns the WGS84 bounding box from the widget; used in email body generation
+
+### Changed
+- `plugin.py` — `_open_tasking_from_archive()` updated to set `extent_widget` (via `setCurrentExtent` / `setOriginalExtent`) instead of the removed `bbox_min_lon/lat` spin boxes
+- **Connector Architecture (R1)**: Introduced `search_unified()` standardized entrypoint in `ConnectorBase`
+  - All connectors share a single normalized call signature: `(bbox, start_date, end_date, max_cloud_cover, collection, text_query, limit)`
+  - Connectors with non-standard `search()` signatures (IceyeStacConnector, UmbraSTACConnector, CapellaSTACConnector, CopernicusStacConnector, PlanetConnector) override `search_unified()` to translate parameters
+  - `ConnectorManager._execute_connector_search()` simplified from ~130 lines of fragile class-name dispatch to 15 lines calling `instance.search_unified()`
+- **Open-Data Auth Fix (R2)**: `ConnectorManager.get_collections()` no longer gates open-data connectors (Capella, Umbra, ICEYE, Vantor) behind an authentication check
+- **STAC Item Validation (R3)**: Added `ConnectorManager._validate_stac_item()` — lightweight pre-result validation ensuring `type=="Feature"`, non-empty `id`, `properties` dict, `assets` dict
+- **Vantor connector** (`vantor.py`):
+  - `search()` rewritten — iterates events from cache first, then up to `MAX_EVENTS_TO_FETCH=10` via network; removed `if not collection: return []` early-exit
+  - `_extract_assets(props, feature=None)` — optional `feature` param resolves from top-level `assets` dict when `href` not found in `properties` (newer Maxar GeoJSON schema)
+- **metadata.txt**: Updated version to 0.4.0, updated description and tags
+
+### Fixed
+- COG loading for Copernicus STAC: Bearer token now injected via `GDAL_HTTP_HEADERS` before `/vsicurl/` open; cleared in `finally` block
+- Vantor multi-event broad search: returns results even when no specific collection is selected
+- Quicklook download failure: `QNetworkRequest` was silently causing `NameError` inside a broad `except Exception` block
+- Quicklook displayed at wrong map position for non-WGS84 map CRS
+
+## [0.3.2] - 2026-03-27
+
+### Removed
+- **Copernicus HDA (WEkEO) Connector** - Removed due to API incompatibility
+  - Bearer token authentication not supported by hda library
+  - WMS/WMTS layer browser functionality removed
+  - HDA username/password authentication removed
+  - hda>=0.3.0 library dependency removed
+
+### Changed
+- **Connector Count**: Reduced from 12 to 11 (single Copernicus STAC only)
+- **Settings UI**: Simplified to single Copernicus STAC section
+- **Package Size**: Reduced without hda library
+- **Documentation**: Updated all HDA references to STAC-only
+
+## [0.3.1] - 2026-03-03
+
+### Added
+- **Copernicus HDA (WEkEO) Connector** - Access to 9000+ WEkEO datasets via Harmonized Data Access API
+  - Username/password authentication with 3-level fallback (explicit → secure_storage → ~/.hdarc)
+  - Dynamic query parameter mapping for dataset-specific searches
+  - Full download functionality via HDA client
+  - Support for bbox and temporal range filters
+- **WMS/WMTS Layer Browser** - Instant data visualization without downloading
+  - New "WMS/WMTS Layers" tab in Results section
+  - owslib integration for parsing GetCapabilities
+  - Support for both WMS and WMTS protocols
+  - Multi-select layer addition to map
+  - Double-click quick-add functionality
+- **Dual Copernicus Authentication** - Separate authentication for different Copernicus services
+  - OAuth2 client credentials for STAC (Dataspace)
+  - Username/password for HDA (WEkEO)
+  - Independent secure storage services ('copernicus' and 'copernicus_hda')
+  - Separate timeout configurations (15s STAC, 45s HDA)
+- **Enhanced Settings UI**
+  - Split Copernicus configuration into STAC and HDA sections
+  - Individual "Test Connection" buttons for each service
+  - Dedicated "Restore Defaults" buttons
+  - Clear visual separation and service-specific documentation
+
+### Changed
+- **Connector Architecture**: Renamed `CopernicusConnector` to `CopernicusStacConnector` for clarity
+- **ConnectorManager**: Extended to support HDA connector signature and routing
+- **Package Size**: Increased to 5.78 MB (was ~3 MB) to bundle new dependencies
+- **Dataset Count**: Expanded from 300+ to 9000+ accessible datasets
+- **Connector Count**: Increased from 5 to 6 production-ready connectors
+- **metadata.txt**: Updated descriptions to reflect new capabilities
+
+### Dependencies
+- Added `hda>=0.3.0` - Python client for WEkEO Harmonized Data Access API (Apache 2.0 license)
+- Added `owslib>=0.31.0` - OGC Web Services parsing library for WMS/WMTS (BSD license)
+
+### Fixed
+- Improved error handling in HDA authentication with user-friendly messages
+- Better credential fallback mechanism with ~/.hdarc file support
+- Enhanced logging for WMS/WMTS capabilities parsing
+
+### Technical Details
+- New `CopernicusHdaConnector` class (680 lines)
+- New UI components: QTabWidget, QTreeWidget for layer browser
+- owslib integration for GetCapabilities parsing (WMS 1.3.0, WMTS)
+- Dynamic query building based on dataset queryable parameters
+- Standardized layer information format (name, title, type, url, bbox, crs)
+
 ## [0.2.0] - 2026-02-25
 
 ### Added

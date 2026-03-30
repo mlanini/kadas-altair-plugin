@@ -15,9 +15,6 @@ cd kadas-altair
 # Windows
 Copy-Item -Recurse kadas_altair_plugin "$env:APPDATA\Kadas\KadasXY\profiles\default\python\plugins\"
 
-# Linux/macOS
-cp -r kadas_altair_plugin ~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/
-
 # Reload plugin in QGIS/KADAS
 # Plugin → Plugin Manager → Installed → Reload plugin
 ```
@@ -26,24 +23,26 @@ cp -r kadas_altair_plugin ~/.local/share/QGIS/QGIS3/profiles/default/python/plug
 
 ```
 kadas_altair_plugin/
-├── connectors/          # Data source implementations
-│   ├── base.py         # Base connector class
-│   ├── copernicus.py   # Copernicus Dataspace (OAuth2 + STAC)
-│   ├── iceye_stac.py   # ICEYE SAR Open Data
-│   ├── umbra_stac.py   # Umbra SAR Open Data
-│   ├── capella_stac.py # Capella SAR Open Data
-│   ├── vantor_stac.py  # Maxar/Vantor STAC
-│   ├── oneatlas.py     # OneAtlas (stub)
-│   └── planet.py       # Planet (stub)
-├── gui/                # User interface
-│   ├── dock.py         # Main panel
-│   ├── settings_dock.py # Settings panel
-│   └── footprint_tool.py # Map interaction
-├── utilities/          # Helper modules
-│   └── proxy_handler.py # Network configuration
-├── secrets/            # Credential management
-│   └── secure_storage.py
-└── logger.py           # Logging system
+├── connectors/              # Data source implementations
+│   ├── base.py             # Base connector class
+│   ├── copernicus_stac.py  # Copernicus Dataspace STAC (OAuth2)
+│   ├── iceye_stac.py       # ICEYE SAR Open Data
+│   ├── umbra_stac.py       # Umbra SAR Open Data
+│   ├── capella_stac.py     # Capella SAR Open Data
+│   ├── vantor.py           # Maxar/Vantor Open Data
+│   ├── oneatlas.py         # OneAtlas (stub)
+│   ├── planet.py           # Planet (stub)
+│   ├── gee.py              # Google Earth Engine (stub)
+│   └── nasa_earthdata.py   # NASA EarthData (stub)
+├── gui/                    # User interface
+│   ├── dock.py             # Main panel (search & results)
+│   ├── settings_dock.py    # Settings panel
+│   └── footprint_tool.py   # Map interaction
+├── utilities/              # Helper modules
+│   └── proxy_handler.py    # Network configuration
+├── secrets/                # Credential management
+│   └── secure_storage.py   # Keyring/encryption fallback
+└── logger.py               # Logging system
 ```
 
 ## 🔧 Adding a New Connector
@@ -450,12 +449,12 @@ The `test/` directory contains standalone test scripts for debugging connectors 
 
 #### Available Tests
 
-**1. Copernicus Authentication (`test_copernicus_auth.py`)**
+**1. Copernicus STAC Authentication (`test_copernicus_auth.py`)**
 ```bash
 python test/test_copernicus_auth.py <client_id> <client_secret>
 ```
 - Tests OAuth2 token generation
-- Validates Copernicus credentials
+- Validates Copernicus Dataspace credentials
 - Diagnoses authentication issues
 
 **2. Umbra Structure Exploration (`test_umbra_structure.py`)**
@@ -474,7 +473,7 @@ python test/test_vantor_search.py
 - Validates event collection navigation
 - Verifies subcollection hierarchy
 
-**4. Network Connectivity (`test_network_connectivity.py`)**
+**5. Network Connectivity (`test_network_connectivity.py`)**
 ```bash
 python test/test_network_connectivity.py
 ```
@@ -494,7 +493,7 @@ Expected output:
 ✅ Network connectivity is working!
 ```
 
-**5. Network Migration Verification (`verify_network_migration.py`)**
+**6. Network Migration Verification (`verify_network_migration.py`)**
 ```bash
 python verify_network_migration.py
 ```

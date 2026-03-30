@@ -18,6 +18,7 @@ class SecureStorage:
         self._keyring_available = self._check_keyring()
         
         # Generate encryption key from machine-specific data
+        # Handle OpenSSL legacy provider issues gracefully
         self._encryption_key = self._get_encryption_key()
     
     def _check_keyring(self):
@@ -33,6 +34,7 @@ class SecureStorage:
     def _get_encryption_key(self):
         """Generate encryption key from machine-specific data"""
         try:
+            # Try to import cryptography with OpenSSL legacy handling
             from cryptography.fernet import Fernet
             
             # Use machine ID or create one
@@ -47,8 +49,28 @@ class SecureStorage:
             key = hashlib.sha256(machine_id.encode()).digest()
             key_b64 = base64.urlsafe_b64encode(key)
             return Fernet(key_b64)
-        except ImportError:
-            # Cryptography not available
+        except Exception as e:
+            # Cryptography not available or OpenSSL configuration issue
+            # Set environment variable to allow cryptography to work without legacy
+            if "legacy provider" in str(e).lower():
+                try:
+                    os.environ['CRYPTOGRAPHY_OPENSSL_NO_LEGACY'] = '1'
+                    # Retry import after setting environment variable
+                    from cryptography.fernet import Fernet
+                    
+                    machine_id = self.settings.value("AltairEOData/machine_id", "")
+                    if not machine_id:
+                        machine_id = base64.urlsafe_b64encode(os.urandom(32)).decode()
+                        self.settings.setValue("AltairEOData/machine_id", machine_id)
+                        self.settings.sync()
+                    
+                    key = hashlib.sha256(machine_id.encode()).digest()
+                    key_b64 = base64.urlsafe_b64encode(key)
+                    return Fernet(key_b64)
+                except Exception:
+                    pass
+            
+            # Final fallback: return None to use obfuscated storage
             return None
     
     def store_credential(self, service, username, password):
@@ -228,9 +250,26 @@ class SecureStorage:
                 credentials['username'] = username
                 credentials['password'] = password
         elif service == 'planet':
+            access_token = self.retrieve_credential(service, 'access_token')
             api_key = self.retrieve_credential(service, 'api_key')
+            if access_token:
+                credentials['access_token'] = access_token
             if api_key:
                 credentials['api_key'] = api_key
+        elif service == 'iceye':
+            access_token = self.retrieve_credential(service, 'access_token')
+            if access_token:
+                credentials['access_token'] = access_token
+        elif service == 'umbra':
+            access_token = self.retrieve_credential(service, 'access_token')
+            client_id = self.retrieve_credential(service, 'client_id')
+            client_secret = self.retrieve_credential(service, 'client_secret')
+            if access_token:
+                credentials['access_token'] = access_token
+            if client_id:
+                credentials['client_id'] = client_id
+            if client_secret:
+                credentials['client_secret'] = client_secret
         
         return credentials if credentials else None
 

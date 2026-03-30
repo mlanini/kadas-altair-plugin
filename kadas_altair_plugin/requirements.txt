@@ -4,7 +4,7 @@ urllib3
 keyring
 cryptography
 pystac-client>=0.7.0
-earthengine-api
 earthaccess
 pandas
-
+hda>=0.3.0
+owslib>=0.31.0
