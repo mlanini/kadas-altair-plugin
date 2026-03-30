@@ -1,4 +1,4 @@
-# SHA256 Checksums - KADAS Altair Plugin v0.3.1
+# SHA256 Checksums - KADAS Altair Plugin v0.4.0
 
 ## Package Integrity Verification
 
@@ -6,22 +6,22 @@ Verify the integrity of downloaded files using SHA256 checksums:
 
 ```powershell
 # Windows PowerShell
-Get-FileHash kadas_altair_plugin_full_v0.3.1.zip -Algorithm SHA256
+Get-FileHash kadas_altair_plugin_full_v0.4.0.zip -Algorithm SHA256
 ```
 
 ```bash
 # Linux/macOS
-shasum -a 256 kadas_altair_plugin_full_v0.3.1.zip
+shasum -a 256 kadas_altair_plugin_full_v0.4.0.zip
 ```
 
 ---
 
 ## Checksums
 
-### kadas_altair_plugin_full_v0.3.1.zip
-- **Size**: 5.78 MB (6,056,309 bytes)
-- **SHA256**: `[TO BE CALCULATED AFTER FINAL BUILD]`
-- **Build**: [TO BE UPDATED]
+### kadas_altair_plugin_full_v0.4.0.zip
+- **Size**: 0.15 MB (162,478 bytes)
+- **SHA256**: `2B6259DB5CA64603EE3356C983828A3176C09C23A15932D91B337B3057611503`
+- **Build**: 2026-03-30 21:47:24
 - **Changes**:
   - 🗺️ Enhanced Copernicus STAC connector with OAuth2 authentication
   - 📦 Bundled pystac-client and owslib libraries
@@ -36,11 +36,11 @@ shasum -a 256 kadas_altair_plugin_full_v0.3.1.zip
 ### Windows PowerShell
 ```powershell
 # Download plugin
-Invoke-WebRequest -Uri "https://github.com/mlanini/kadas-altair/releases/download/v0.3.1/kadas_altair_plugin_full_v0.3.1.zip" -OutFile "kadas_altair_plugin_full_v0.3.1.zip"
+Invoke-WebRequest -Uri "https://github.com/mlanini/kadas-altair/releases/download/v0.4.0/kadas_altair_plugin_full_v0.4.0.zip" -OutFile "kadas_altair_plugin_full_v0.4.0.zip"
 
 # Verify checksum
-$expectedHash = "[TO BE CALCULATED]"
-$actualHash = (Get-FileHash kadas_altair_plugin_full_v0.3.1.zip -Algorithm SHA256).Hash
+$expectedHash = "2B6259DB5CA64603EE3356C983828A3176C09C23A15932D91B337B3057611503"
+$actualHash = (Get-FileHash kadas_altair_plugin_full_v0.4.0.zip -Algorithm SHA256).Hash
 
 if ($actualHash -eq $expectedHash) {
     Write-Host "✅ Checksum verified! File is authentic." -ForegroundColor Green
@@ -54,12 +54,12 @@ if ($actualHash -eq $expectedHash) {
 ### Linux/macOS
 ```bash
 # Download plugin
-wget https://github.com/mlanini/kadas-altair/releases/download/v0.3.1/kadas_altair_plugin_full_v0.3.1.zip
+wget https://github.com/mlanini/kadas-altair/releases/download/v0.4.0/kadas_altair_plugin_full_v0.4.0.zip
 
 # Verify checksum
-echo "[TO BE CALCULATED]  kadas_altair_plugin_full_v0.3.1.zip" | shasum -a 256 --check
+echo "2B6259DB5CA64603EE3356C983828A3176C09C23A15932D91B337B3057611503  kadas_altair_plugin_full_v0.4.0.zip" | shasum -a 256 --check
 
-# Should output: kadas_altair_plugin_full_v0.3.1.zip: OK
+# Should output: kadas_altair_plugin_full_v0.4.0.zip: OK
 ```
 
 ---
@@ -72,9 +72,9 @@ echo "[TO BE CALCULATED]  kadas_altair_plugin_full_v0.3.1.zip" | shasum -a 256 -
 ---
 
 ## Generated On
-- **Date**: [TO BE UPDATED AFTER FINAL BUILD]
-- **Plugin Version**: 0.3.1
-- **Package**: kadas_altair_plugin_full_v0.3.1.zip
+- **Date**: 2026-03-30
+- **Plugin Version**: 0.4.0
+- **Package**: kadas_altair_plugin_full_v0.4.0.zip
 
 ---
 
@@ -88,7 +88,7 @@ git clone https://github.com/mlanini/kadas-altair.git
 cd kadas-altair
 
 # Verify tag signature (if GPG signed)
-git tag -v v0.3.1
+git tag -v v0.4.0
 
 # Build from source
 python package_plugin_full.py
@@ -97,4 +97,4 @@ python package_plugin_full.py
 ---
 
 **Repository**: https://github.com/mlanini/kadas-altair  
-**Release**: https://github.com/mlanini/kadas-altair/releases/tag/v0.3.1
+**Release**: https://github.com/mlanini/kadas-altair/releases/tag/v0.4.0

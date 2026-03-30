@@ -5,9 +5,10 @@ All notable changes to KADAS Altair Plugin will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.4.0] - 2026-04-10
+## [0.4.0] - 2026-03-29
 
-### Added
+### Changed
+- **UI compactness**: Open Data, Archive, Tasking and Settings docks are now wrapped in a scrollable container, top-aligned, and use tighter spacing/margins to better fit KADAS window height.
 - **`QgsExtentWidget` AOI** in both Archive Search and Tasking docks — bidirectional sync with map canvas; replaces manual coordinate spin boxes
 - **Archive Search dock** (`archive_dock.py`):
   - `FootprintSelectionTool` — click a footprint on the map canvas to select it; selection reflected bidirectionally in the results table
@@ -21,8 +22,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `addStretch(1)` between every top-level group for even vertical distribution
   - AOI now uses `QgsExtentWidget` instead of separate spin boxes
   - `_get_aoi_bbox_wgs84()` helper returns the WGS84 bounding box from the widget; used in email body generation
-
-### Changed
 - `plugin.py` — `_open_tasking_from_archive()` updated to set `extent_widget` (via `setCurrentExtent` / `setOriginalExtent`) instead of the removed `bbox_min_lon/lat` spin boxes
 - **Connector Architecture (R1)**: Introduced `search_unified()` standardized entrypoint in `ConnectorBase`
   - All connectors share a single normalized call signature: `(bbox, start_date, end_date, max_cloud_cover, collection, text_query, limit)`
