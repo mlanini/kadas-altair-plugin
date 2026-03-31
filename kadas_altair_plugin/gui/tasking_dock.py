@@ -73,13 +73,11 @@ class TaskingDockWidget(QDockWidget):
         self._setup_ui()
 
     # Shared label color used by the subtitle and all form labels/group titles
-    _LABEL_COLOR = '#b0b0b0'
+    _LABEL_COLOR = '#303030'
 
     def _setup_ui(self):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setStyleSheet('QScrollArea { background: transparent; border: none; }')
-        scroll.viewport().setStyleSheet('background: transparent;')
         self.setWidget(scroll)
 
         widget = QWidget()
@@ -103,7 +101,7 @@ class TaskingDockWidget(QDockWidget):
         header_font.setBold(True)
         header.setFont(header_font)
         header.setAlignment(Qt.AlignCenter)
-        header.setStyleSheet('color: #ffffff;')
+        header.setStyleSheet('color: #1f1f1f;')
         layout.addWidget(header)
 
         subtitle = QLabel(
@@ -111,7 +109,7 @@ class TaskingDockWidget(QDockWidget):
             'an email draft. No direct provider API order is sent yet.'
         )
         subtitle.setWordWrap(True)
-        subtitle.setStyleSheet('color: #b0b0b0; font-size: 10px;')
+        subtitle.setStyleSheet(f'color: {self._LABEL_COLOR}; font-size: 10px;')
         layout.addWidget(subtitle)
 
         requester_group = QGroupBox('Requester')
@@ -276,7 +274,7 @@ class TaskingDockWidget(QDockWidget):
         layout.addLayout(buttons)
 
         self.status_label = QLabel('Ready - Fill the form and click "Compose Email Order (DEMO ONLY)"')
-        self.status_label.setStyleSheet('color: #f0f0f0; font-size: 10px;')
+        self.status_label.setStyleSheet(f'color: {self._LABEL_COLOR}; font-size: 10px;')
         layout.addWidget(self.status_label)
 
         self._on_sensor_type_changed(self.sensor_type_combo.currentText())
@@ -467,4 +465,4 @@ class TaskingDockWidget(QDockWidget):
         self.notes.clear()
 
         self.status_label.setText('Form cleared')
-        self.status_label.setStyleSheet('color: #b0b0b0; font-size: 10px;')
+        self.status_label.setStyleSheet(f'color: {self._LABEL_COLOR}; font-size: 10px;')

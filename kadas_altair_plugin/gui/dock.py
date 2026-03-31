@@ -293,12 +293,15 @@ class AltairDockWidget(QDockWidget):
         """Set up the dock widget UI"""
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setStyleSheet('QScrollArea { background: transparent; border: none; }')
-        scroll.viewport().setStyleSheet('background: transparent;')
         self.setWidget(scroll)
 
         main_widget = QWidget()
         scroll.setWidget(main_widget)
+        main_widget.setStyleSheet(
+            "QLabel { color: #303030; }"
+            "QCheckBox { color: #303030; }"
+            "QGroupBox { color: #303030; font-weight: bold; }"
+        )
 
         layout = QVBoxLayout(main_widget)
         layout.setContentsMargins(6, 6, 6, 6)
@@ -312,7 +315,7 @@ class AltairDockWidget(QDockWidget):
         header_font.setBold(True)
         header_label.setFont(header_font)
         header_label.setAlignment(Qt.AlignCenter)
-        header_label.setStyleSheet("color: #cccccc;")
+        header_label.setStyleSheet("color: #1f1f1f;")
         layout.addWidget(header_label)
 
         # Description
@@ -321,12 +324,12 @@ class AltairDockWidget(QDockWidget):
             "Includes: Landsat, Umbra, Capella, ICEYE and many more."
         )
         desc_label.setWordWrap(True)
-        desc_label.setStyleSheet("color: #b0b0b0; font-size: 10px;")
+        desc_label.setStyleSheet("color: #404040; font-size: 10px;")
         layout.addWidget(desc_label)
 
         # Filters group (including search area)
         filters_group = QGroupBox("Filters")
-        filters_group.setStyleSheet("QGroupBox { color: #cccccc; font-weight: bold; }")
+        filters_group.setStyleSheet("QGroupBox { color: #303030; font-weight: bold; }")
         filters_layout = QFormLayout(filters_group)
 
         # Connector selection dropdown (NEW)
@@ -339,7 +342,7 @@ class AltairDockWidget(QDockWidget):
         )
         self.connector_combo.currentIndexChanged.connect(self._on_connector_changed)
         connector_label = QLabel("Data Source:")
-        connector_label.setStyleSheet("color: #cccccc; font-weight: bold;")
+        connector_label.setStyleSheet("color: #303030; font-weight: bold;")
         filters_layout.addRow(connector_label, self.connector_combo)
 
         # STAC Endpoint dropdown with reload button (for AWS STAC connector)
@@ -360,7 +363,7 @@ class AltairDockWidget(QDockWidget):
         endpoint_layout.addWidget(self.reload_catalog_btn)
         
         self.endpoint_label = QLabel("Catalogue:")
-        self.endpoint_label.setStyleSheet("color: #cccccc;")
+        self.endpoint_label.setStyleSheet("color: #303030;")
         self.endpoint_row = filters_layout.rowCount()  # Store row index for show/hide
         filters_layout.addRow(self.endpoint_label, endpoint_layout)
 
@@ -373,7 +376,7 @@ class AltairDockWidget(QDockWidget):
         self.collections_combo.setEnabled(False)  # Disabled until endpoint selected
         self.collections_combo.addItem("N/A - Select endpoint", userData=None)
         collection_label = QLabel("Collection:")
-        collection_label.setStyleSheet("color: #cccccc;")
+        collection_label.setStyleSheet("color: #303030;")
         filters_layout.addRow(collection_label, self.collections_combo)
 
         # Search Area - QgsExtentWidget for area selection
@@ -404,14 +407,14 @@ class AltairDockWidget(QDockWidget):
             area_checkbox_layout = QHBoxLayout()
             self.use_area_check = QCheckBox("Use Search Area")
             self.use_area_check.setChecked(True)
-            self.use_area_check.setStyleSheet("color: #cccccc;")
+            self.use_area_check.setStyleSheet("color: #303030;")
             self.use_area_check.stateChanged.connect(self._on_use_area_changed)
             area_checkbox_layout.addWidget(self.use_area_check)
             area_checkbox_layout.addStretch()
             filters_layout.addRow("", area_checkbox_layout)
             
             area_label = QLabel("Search Area:")
-            area_label.setStyleSheet("color: #cccccc;")
+            area_label.setStyleSheet("color: #303030;")
             filters_layout.addRow(area_label, self.extent_widget)
             
             logger.info("QgsExtentWidget initialized successfully")
@@ -424,7 +427,7 @@ class AltairDockWidget(QDockWidget):
                 "QgsExtentWidget not available. Enter coordinates manually:"
             )
             fallback_label.setWordWrap(True)
-            fallback_label.setStyleSheet("color: #cccccc;")
+            fallback_label.setStyleSheet("color: #303030;")
             filters_layout.addRow(fallback_label)
             
             # Manual bbox input fields
@@ -442,7 +445,7 @@ class AltairDockWidget(QDockWidget):
         date_checkbox_layout = QHBoxLayout()
         self.use_date_check = QCheckBox("Use Date Range")
         self.use_date_check.setChecked(False)
-        self.use_date_check.setStyleSheet("color: #cccccc;")
+        self.use_date_check.setStyleSheet("color: #303030;")
         self.use_date_check.stateChanged.connect(self._on_use_date_changed)
         date_checkbox_layout.addWidget(self.use_date_check)
         date_checkbox_layout.addStretch()
@@ -454,7 +457,7 @@ class AltairDockWidget(QDockWidget):
         self.start_date.setCalendarPopup(True)
         self.start_date.setEnabled(False)
         start_label = QLabel("Start Date:")
-        start_label.setStyleSheet("color: #cccccc;")
+        start_label.setStyleSheet("color: #303030;")
         filters_layout.addRow(start_label, self.start_date)
         
         self.end_date = QDateEdit()
@@ -462,14 +465,14 @@ class AltairDockWidget(QDockWidget):
         self.end_date.setCalendarPopup(True)
         self.end_date.setEnabled(False)
         end_label = QLabel("End Date:")
-        end_label.setStyleSheet("color: #cccccc;")
+        end_label.setStyleSheet("color: #303030;")
         filters_layout.addRow(end_label, self.end_date)
 
         # Cloud cover checkbox and slider
         cloud_checkbox_layout = QHBoxLayout()
         self.use_cloud_check = QCheckBox("Use Cloud Cover Filter")
         self.use_cloud_check.setChecked(False)
-        self.use_cloud_check.setStyleSheet("color: #cccccc;")
+        self.use_cloud_check.setStyleSheet("color: #303030;")
         self.use_cloud_check.stateChanged.connect(self._on_use_cloud_changed)
         cloud_checkbox_layout.addWidget(self.use_cloud_check)
         cloud_checkbox_layout.addStretch()
@@ -488,7 +491,7 @@ class AltairDockWidget(QDockWidget):
         self.cloud_cover_label = QLabel("20%")
         self.cloud_cover_label.setMinimumWidth(40)
         self.cloud_cover_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.cloud_cover_label.setStyleSheet("color: #cccccc; font-weight: bold;")
+        self.cloud_cover_label.setStyleSheet("color: #303030; font-weight: bold;")
         cloud_cover_layout.addWidget(self.cloud_cover_label)
         
         # Update label when slider changes
@@ -497,7 +500,7 @@ class AltairDockWidget(QDockWidget):
         )
         
         cloud_label = QLabel("Max Cloud Cover:")
-        cloud_label.setStyleSheet("color: #cccccc;")
+        cloud_label.setStyleSheet("color: #303030;")
         filters_layout.addRow(cloud_label, cloud_cover_layout)
 
         layout.addWidget(filters_group)
@@ -526,12 +529,12 @@ class AltairDockWidget(QDockWidget):
 
         # Results table
         results_group = QGroupBox("Results")
-        results_group.setStyleSheet("QGroupBox { color: #cccccc; font-weight: bold; }")
+        results_group.setStyleSheet("QGroupBox { color: #303030; font-weight: bold; }")
         results_layout = QVBoxLayout(results_group)
 
         # Create tab widget for Results and WMS/WMTS layers
         self.results_tabs = QTabWidget()
-        self.results_tabs.setStyleSheet("QTabWidget { color: #cccccc; }")
+        self.results_tabs.setStyleSheet("QTabWidget { color: #303030; }")
         
         # Tab 1: Search Results
         search_results_widget = QWidget()
@@ -611,7 +614,7 @@ class AltairDockWidget(QDockWidget):
 
         # Action buttons group
         actions_group = QGroupBox("Actions")
-        actions_group.setStyleSheet("QGroupBox { color: #cccccc; font-weight: bold; }")
+        actions_group.setStyleSheet("QGroupBox { color: #303030; font-weight: bold; }")
         actions_layout = QVBoxLayout(actions_group)
 
         # Selection and zoom buttons row (horizontal)
@@ -663,7 +666,7 @@ class AltairDockWidget(QDockWidget):
 
         # Status label
         self.status_label = QLabel("Ready - Load a STAC endpoint to begin")
-        self.status_label.setStyleSheet("color: #f0f0f0; font-size: 10px; font-weight: 500;")
+        self.status_label.setStyleSheet("color: #303030; font-size: 10px; font-weight: 500;")
         self.status_label.setWordWrap(False)  # Disable word wrap to enforce truncation
         layout.addWidget(self.status_label)
 
@@ -680,7 +683,7 @@ class AltairDockWidget(QDockWidget):
         
         # AWS STAC auto-load removed (connector masked from UI)
 
-    def _set_status(self, text, style="color: #f0f0f0; font-size: 10px; font-weight: 500;"):
+    def _set_status(self, text, style="color: #303030; font-size: 10px; font-weight: 500;"):
         """
         Set status label text with automatic truncation and tooltip.
         
@@ -934,12 +937,26 @@ class AltairDockWidget(QDockWidget):
         try:
             from ..connectors import NasaEarthdataConnector
             
-            # Try to get credentials from settings or environment
+            # Try to get credentials from settings and secure storage
             settings = QSettings()
             username = settings.value('altair/nasa_username', None)
             password = settings.value('altair/nasa_password', None)
+            access_token = settings.value('altair/nasa_access_token', None)
+
+            if self.secure_storage:
+                try:
+                    nasa_creds = self.secure_storage.get_credentials('nasa_earthdata') or {}
+                    username = nasa_creds.get('username', username)
+                    password = nasa_creds.get('password', password)
+                    access_token = nasa_creds.get('access_token', nasa_creds.get('token', access_token))
+                except Exception as e:
+                    logger.debug(f"NASA secure storage read failed: {e}")
             
-            nasa_connector = NasaEarthdataConnector(username=username, password=password)
+            nasa_connector = NasaEarthdataConnector(
+                username=username,
+                password=password,
+                access_token=access_token,
+            )
             
             self.connector_manager.register_connector(
                 connector_id='nasa_earthdata',

@@ -36,11 +36,13 @@ GITHUB_RAW_URL = "https://raw.githubusercontent.com/opengeos/maxar-open-data/mas
 DATASETS_CSV_URL = f"{GITHUB_RAW_URL}/datasets.csv"
 GEOJSON_URL_TEMPLATE = f"{GITHUB_RAW_URL}/datasets/{{event}}.geojson"
 
-# STAC catalog fallback URLs (used in kadas-vantor-plugin and more robust
-# than GitHub in restricted networks)
+# STAC catalog URLs - primary is the official Vantor Open Data catalog
+# (same as qgis-vantor-plugin reference implementation)
+# Fallback to legacy Maxar Open Data bucket for backwards compatibility
 STAC_CATALOG_URLS = [
-    "https://maxar-opendata.s3.dualstack.us-west-2.amazonaws.com/events/catalog.json",
+    "https://vantor-opendata.s3.amazonaws.com/events/catalog.json",
     "https://maxar-opendata.s3.amazonaws.com/events/catalog.json",
+    "https://maxar-opendata.s3.dualstack.us-west-2.amazonaws.com/events/catalog.json",
 ]
 
 # Timeouts (same as kadas-vantor-plugin)
@@ -392,19 +394,57 @@ class VantorConnector(ConnectorBase):
     def _load_footprints_from_stac_collection(self, collection_href: str) -> Dict[str, Any]:
         """Load item footprints from a STAC collection href.
 
+        Follows the qgis-vantor-plugin reference pattern:
+        - Fetches the collection JSON
+        - Iterates links with rel=="item" and fetches each STAC item JSON
+        - Builds a GeoJSON-like FeatureCollection from the individual item dicts
+
+        Falls back to the /items endpoint when no item links are found
+        (e.g. older static STAC catalogs).
+
         Args:
             collection_href: Absolute URL to STAC collection JSON
 
         Returns:
-            Dict[str, Any]: GeoJSON-like FeatureCollection from STAC items endpoint
+            Dict[str, Any]: GeoJSON-like FeatureCollection of STAC items
         """
-        logger.info(f"Loading STAC collection metadata from: {collection_href}")
+        logger.info(f"Loading STAC collection from: {collection_href}")
         collection_str = self._fetch_url(collection_href, timeout=TIMEOUT_EVENTS)
         collection_obj = json.loads(collection_str)
 
         if not isinstance(collection_obj, dict):
             raise Exception("Invalid STAC collection response")
 
+        # --- Strategy 1: individual item links (qgis-vantor-plugin pattern) ---
+        item_links = [
+            link for link in collection_obj.get('links', [])
+            if isinstance(link, dict) and link.get('rel') == 'item' and link.get('href')
+        ]
+
+        if item_links:
+            logger.info(f"Found {len(item_links)} item link(s) in collection, fetching individually")
+            features: List[Dict[str, Any]] = []
+            seen_ids: set = set()
+
+            for link in item_links:
+                href = link['href']
+                if not href.startswith(('http://', 'https://')):
+                    href = urljoin(collection_href, href)
+                try:
+                    item_str = self._fetch_url(href, timeout=TIMEOUT_EVENTS)
+                    item = json.loads(item_str)
+                    item_id = item.get('id', '')
+                    if item_id not in seen_ids:
+                        seen_ids.add(item_id)
+                        features.append(item)
+                except Exception as e:
+                    logger.warning(f"Skipping item {href}: {e}")
+                    continue
+
+            logger.info(f"Fetched {len(features)} STAC item(s) individually")
+            return {'type': 'FeatureCollection', 'features': features}
+
+        # --- Strategy 2: /items GeoJSON endpoint (older static STAC collections) ---
         items_href = None
         for link in collection_obj.get('links', []):
             if not isinstance(link, dict):
@@ -414,13 +454,12 @@ class VantorConnector(ConnectorBase):
                 break
 
         if not items_href:
-            # Fallback commonly used by static STAC collections
             items_href = collection_href.rstrip('/') + '/items'
 
         if not items_href.startswith(('http://', 'https://')):
             items_href = urljoin(collection_href, items_href)
 
-        logger.info(f"Loading STAC items from: {items_href}")
+        logger.info(f"Loading STAC items endpoint: {items_href}")
         items_str = self._fetch_url(items_href, timeout=TIMEOUT_FOOTPRINTS)
         items_obj = json.loads(items_str)
 
@@ -590,21 +629,28 @@ class VantorConnector(ConnectorBase):
         """
         assets = {}
 
-        # Feature-level assets dict (newer Maxar GeoJSON schema)
+        # Feature-level assets dict (native STAC items from vantor-opendata S3
+        # and newer Maxar GeoJSON schema both store URLs here)
         feature_assets: Dict[str, Any] = {}
         if isinstance(feature, dict):
             feature_assets = feature.get('assets', {}) or {}
 
         def _href(key: str) -> Optional[str]:
-            """Resolve href: props → feature-level assets → None."""
-            url = props.get(key, '')
-            if url:
-                return url
+            """Resolve href: feature-level STAC assets → props fallback.
+
+            Priority order matches qgis-vantor-plugin (stac_client.get_cog_url):
+            native STAC assets take precedence over GeoJSON properties.
+            """
+            # 1. Standard STAC asset (vantor-opendata S3 items)
             a = feature_assets.get(key)
             if isinstance(a, dict):
                 return a.get('href')
             if isinstance(a, str):
                 return a
+            # 2. GeoJSON property fallback (GitHub maxar-open-data format)
+            url = props.get(key, '')
+            if url:
+                return url
             return None
         
         # Visual (RGB)
@@ -633,7 +679,32 @@ class VantorConnector(ConnectorBase):
                 'type': 'image/tiff; application=geotiff; profile=cloud-optimized',
                 'roles': ['data']
             }
-        
+
+        # Passthrough: include any additional raster assets from native STAC items
+        # (e.g. 'pan', 'ms', 'rgb', 'data' — names used by vantor-opendata catalog)
+        # that were not already captured by the three keys above
+        _raster_mime = (
+            'image/tiff', 'image/geotiff', 'image/jp2',
+            'image/jpeg2000', 'application/jp2',
+        )
+        for asset_key, asset_val in feature_assets.items():
+            if asset_key in assets:
+                continue  # already captured
+            if not isinstance(asset_val, dict):
+                continue
+            href = asset_val.get('href', '')
+            if not href:
+                continue
+            mime = asset_val.get('type', '').lower()
+            href_lower = href.lower()
+            is_raster = (
+                any(m in mime for m in _raster_mime)
+                or href_lower.endswith(('.tif', '.tiff', '.cog', '.jp2', '.j2k'))
+            )
+            if is_raster:
+                assets[asset_key] = asset_val
+                logger.debug(f"Vantor: passthrough asset '{asset_key}' (type={mime or 'ext-based'})")
+
         return assets
     
     def get_cog_url(self, item: Dict[str, Any], asset_type: str = 'visual') -> Optional[str]:

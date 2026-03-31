@@ -228,7 +228,7 @@ class ArchiveDockWidget(QDockWidget):
     # Emitted when the user wants to create a tasking order from a result
     order_requested = pyqtSignal(dict)   # payload: basic scene dict
 
-    _LABEL_COLOR = '#b0b0b0'
+    _LABEL_COLOR = '#303030'
     _SETTINGS_PREFIX = 'AltairEOData/'
 
     # Table column indices
@@ -271,8 +271,6 @@ class ArchiveDockWidget(QDockWidget):
     def _setup_ui(self):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setStyleSheet('QScrollArea { background: transparent; border: none; }')
-        scroll.viewport().setStyleSheet('background: transparent;')
         self.setWidget(scroll)
 
         root = QWidget()
@@ -296,7 +294,7 @@ class ArchiveDockWidget(QDockWidget):
         hf.setBold(True)
         header.setFont(hf)
         header.setAlignment(Qt.AlignCenter)
-        header.setStyleSheet('color: #ffffff;')
+        header.setStyleSheet('color: #1f1f1f;')
         layout.addWidget(header)
 
         subtitle = QLabel(

@@ -242,6 +242,32 @@ Columns vary by connector, typically include:
 
 ---
 
+### NASA EarthData (Experimental)
+
+**Required for:** restricted datasets and authenticated downloads/streaming through Earthdata Login.
+
+You can authenticate in two ways:
+1. **Username + Password** (Earthdata Login account)
+2. **Access Token** (`EARTHDATA_TOKEN`, Bearer token)
+
+**Get Earthdata Login:**
+1. Register at https://urs.earthdata.nasa.gov/
+2. (Optional) Create user token from EDL profile (Generate Token)
+
+**Enter credentials in plugin:**
+1. Open **Settings** → **NASA EarthData**
+2. Fill either:
+    - `Username` + `Password`, or
+    - `Access Token`
+3. Click **Test Credentials**
+4. Click **Save**
+
+Notes:
+- Dataset catalog loading can work without auth, but many data accesses require EDL auth.
+- `earthaccess` checks `EARTHDATA_TOKEN` / environment / `.netrc` fallback.
+
+---
+
 ## 🔧 Troubleshooting
 
 ### Plugin Not Appearing

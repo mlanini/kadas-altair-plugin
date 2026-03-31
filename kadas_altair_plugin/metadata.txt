@@ -2,7 +2,7 @@
 name=KADAS Altair
 qgisMinimumVersion=3.0
 qgisMaximumVersion=3.99
-version=0.4.0
+version=0.4.1
 author=Michael Lanini
 email=mlanini@proton.me
 description=Multi-source satellite imagery browser for KADAS Albireo 2.x: 5 production-ready connectors (ICEYE, Umbra, Capella SAR + Maxar Optical + Copernicus STAC) + 3 experimental (Planet, NASA EarthData, OneAtlas). Unified STAC search interface, interactive footprint selection, COG loading, OAuth2 auth.

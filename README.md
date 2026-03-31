@@ -3,7 +3,7 @@
 **Multi-source satellite imagery browser for KADAS Albireo 2**
 
 [![License](https://img.shields.io/badge/License-GPL--2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/Version-0.4.0-success.svg)](https://github.com/mlanini/kadas-altair)
+[![Version](https://img.shields.io/badge/Version-0.4.1-success.svg)](https://github.com/mlanini/kadas-altair)
 [![Status](https://img.shields.io/badge/Status-Production-success.svg)](https://github.com)
 
 ## 📷 Screenshots
@@ -11,6 +11,8 @@
 ![KADAS Altair Plugin - The Vantor EO Open Data Connector](screenshots/screenshot01_vantor.jpg) 
 
 ![KADAS Altair Plugin - The ICEYE EO Open Data Connector](screenshots/screenshot02_iceye.jpg) 
+
+![KADAS Altair Plugin - The Archive Search with Copernicus ](screenshots/screenshot03_copernicus.jpg) 
 
 ---
 
@@ -140,8 +142,9 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for complete technical details on network
 ### Full Package (with dependencies)
 ```powershell
 python package_plugin_full.py
-# Creates: kadas_altair_plugin_full.zip (~5.78 MB)
-# Includes: owslib and all other bundled dependencies
+# Creates: kadas_altair_plugin_full_vX.Y.Z.zip
+# To build without pip dependency install step:
+#   KADAS_SKIP_PIP=1 python package_plugin_full.py
 ```
 
 ### Lite Package (no dependencies)
@@ -179,7 +182,7 @@ This plugin integrates with:
 
 **Author**: Michael Lanini  
 **Email**: mlanini@proton.me  
-**Version**: 0.4.0
+**Version**: 0.4.1
 - 📦 **COG Loading** - Cloud-Optimized GeoTIFF via GDAL vsicurl (no download)
 
 ### Technical Capabilities

@@ -1,3 +1,44 @@
+# Release Notes - KADAS Altair Plugin v0.4.1
+
+## 🔐 NASA EarthData Auth Update + Release Packaging
+
+v0.4.1 focuses on NASA EarthData authentication compatibility and release packaging workflow improvements.
+
+---
+
+## ✨ Highlights
+
+### 🛰️ NASA EarthData: Token + Credentials Support
+- Connector now supports both Earthdata authentication modes:
+  - `username` + `password`
+  - `access_token` (`EARTHDATA_TOKEN`, Bearer)
+- Added robust auth precedence:
+  1. explicit credentials passed to connector
+  2. secure storage (`nasa_earthdata`)
+  3. environment variables (`EARTHDATA_TOKEN`, `EARTHDATA_USERNAME`, `EARTHDATA_PASSWORD`)
+  4. `.netrc` fallback handled by `earthaccess`
+
+### ⚙️ Settings & UX
+- NASA settings tab now includes **Access Token** field
+- `Test Credentials` now accepts either token or username/password
+- Auth status check is now token-aware
+- Guidance text updated with both supported authentication workflows
+
+### 🧩 Connector Reliability
+- Secure storage retrieval now includes `nasa_earthdata` credential keys (`username`, `password`, `access_token`)
+- NASA result asset mapping improved to expose raster/visual asset for generic COG loading paths
+- Download URL selection now prioritizes TIFF/COG links
+
+---
+
+## 📦 Packaging
+
+- Full package build supports no-pip mode with:
+  - `KADAS_SKIP_PIP=1 python package_plugin_full.py`
+- Output file is versioned from `metadata.txt` (v0.4.1)
+
+---
+
 # Release Notes - KADAS Altair Plugin v0.4.0
 
 ## 🚀 UI, COG Loading & Connector Improvements

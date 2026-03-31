@@ -47,12 +47,15 @@ class SettingsDockWidget(QDockWidget):
         """Set up the settings UI"""
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setStyleSheet('QScrollArea { background: transparent; border: none; }')
-        scroll.viewport().setStyleSheet('background: transparent;')
         self.setWidget(scroll)
 
         widget = QWidget()
         scroll.setWidget(widget)
+        widget.setStyleSheet(
+            "QLabel { color: #303030; }"
+            "QCheckBox { color: #303030; }"
+            "QGroupBox { color: #303030; font-weight: bold; }"
+        )
         
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(6, 6, 6, 6)
@@ -66,7 +69,7 @@ class SettingsDockWidget(QDockWidget):
         header_font.setBold(True)
         header_label.setFont(header_font)
         header_label.setAlignment(Qt.AlignCenter)
-        header_label.setStyleSheet("color: #ffffff;")
+        header_label.setStyleSheet("color: #1f1f1f;")
         layout.addWidget(header_label)
         
         # Tab widget for organized settings
@@ -131,7 +134,7 @@ class SettingsDockWidget(QDockWidget):
         
         # Status label
         self.status_label = QLabel("Settings loaded")
-        self.status_label.setStyleSheet("color: gray; font-size: 10px;")
+        self.status_label.setStyleSheet("color: #505050; font-size: 10px;")
         layout.addWidget(self.status_label)
         
         # Load current settings
@@ -607,10 +610,18 @@ class SettingsDockWidget(QDockWidget):
         self.nasa_password.setPlaceholderText("Your NASA Earthdata password")
         self.nasa_password.setEchoMode(QLineEdit.Password)
         nasa_layout.addRow("Password*:", self.nasa_password)
+
+        # Optional EDL bearer token
+        self.nasa_access_token = QLineEdit()
+        self.nasa_access_token.setPlaceholderText("Optional EARTHDATA_TOKEN (Bearer)")
+        self.nasa_access_token.setEchoMode(QLineEdit.Password)
+        nasa_layout.addRow("Access Token:", self.nasa_access_token)
         
         cred_info = QLabel(
-            "* Required: Credentials are saved securely and used for authentication.\n"
-            "Stored in ~/.netrc file for persistent access."
+            "Authentication options:\n"
+            "• Username + Password, or\n"
+            "• Access Token (EARTHDATA_TOKEN / Bearer).\n"
+            "Credentials are saved securely when available."
         )
         cred_info.setWordWrap(True)
         cred_info.setStyleSheet("color: #ffaa00; font-size: 9px; font-style: italic;")
@@ -653,6 +664,9 @@ class SettingsDockWidget(QDockWidget):
         
         install_info = QLabel(
             "The NASA EarthData connector requires 'earthaccess' and 'pandas' Python packages.\n\n"
+            "Authentication supports either:\n"
+            "• Username + Password, or\n"
+            "• EARTHDATA_TOKEN (Bearer token).\n\n"
             "To install in QGIS Python Console:\n"
             ">>> import subprocess, sys\n"
             ">>> subprocess.check_call([sys.executable, '-m', 'pip', 'install', 'earthaccess', 'pandas'])"
@@ -898,16 +912,22 @@ class SettingsDockWidget(QDockWidget):
         if nasa_username:
             self.nasa_username.setText(nasa_username)
         
-        # Load password from secure storage
+        # Load password/token from secure storage
         if self.secure_storage:
             nasa_creds = self.secure_storage.get_credentials('nasa_earthdata')
             if nasa_creds:
                 self.nasa_password.setText(nasa_creds.get('password', ''))
+                self.nasa_access_token.setText(
+                    nasa_creds.get('access_token', nasa_creds.get('token', ''))
+                )
         else:
             # Fallback: load from QSettings
             nasa_password = self.settings.value("altair/nasa_password", "")
             if nasa_password:
                 self.nasa_password.setText(nasa_password)
+            nasa_token = self.settings.value("altair/nasa_access_token", "")
+            if nasa_token:
+                self.nasa_access_token.setText(nasa_token)
         
         self.nasa_cache_timeout.setValue(
             self.settings.value(f"{self.SETTINGS_PREFIX}nasa_cache_timeout", 7, type=int)
@@ -1080,23 +1100,30 @@ class SettingsDockWidget(QDockWidget):
         # NASA EarthData
         nasa_username = self.nasa_username.text().strip()
         nasa_password = self.nasa_password.text().strip()
+        nasa_access_token = self.nasa_access_token.text().strip()
         
-        if nasa_username and nasa_password:
+        if nasa_username or nasa_password or nasa_access_token:
             self.settings.setValue("altair/nasa_username", nasa_username)
-            # Save password to secure storage
+            # Save sensitive fields to secure storage
             if self.secure_storage:
-                self.secure_storage.store_credentials('nasa_earthdata', {
-                    'username': nasa_username,
-                    'password': nasa_password
-                })
+                nasa_payload = {}
+                if nasa_username:
+                    nasa_payload['username'] = nasa_username
+                if nasa_password:
+                    nasa_payload['password'] = nasa_password
+                if nasa_access_token:
+                    nasa_payload['access_token'] = nasa_access_token
+                self.secure_storage.store_credentials('nasa_earthdata', nasa_payload)
                 logger.info("NASA EarthData credentials saved to secure storage")
             else:
-                # Fallback: save password to QSettings (less secure)
+                # Fallback: save sensitive values to QSettings (less secure)
                 self.settings.setValue("altair/nasa_password", nasa_password)
-                logger.warning("NASA EarthData password saved to QSettings (secure storage not available)")
+                self.settings.setValue("altair/nasa_access_token", nasa_access_token)
+                logger.warning("NASA EarthData credentials saved to QSettings (secure storage not available)")
         else:
             self.settings.remove("altair/nasa_username")
             self.settings.remove("altair/nasa_password")
+            self.settings.remove("altair/nasa_access_token")
             if self.secure_storage:
                 self.secure_storage.store_credentials('nasa_earthdata', {})
             logger.info("NASA EarthData credentials cleared")
@@ -1745,12 +1772,18 @@ class SettingsDockWidget(QDockWidget):
         """Check NASA EarthData authentication status"""
         try:
             import earthaccess
+            import os
+
+            # Prefer token path if available, then env username/password
+            token = self.nasa_access_token.text().strip()
+            if token:
+                os.environ['EARTHDATA_TOKEN'] = token
             
             # Try to check if authenticated
             auth = earthaccess.login(strategy="environment", persist=False)
             
             if auth.authenticated:
-                self.nasa_auth_status.setText("✅ Authenticated")
+                self.nasa_auth_status.setText("✅ Authenticated (environment/token)")
                 self.nasa_auth_status.setStyleSheet("color: #00ff00; font-size: 9px;")
             else:
                 self.nasa_auth_status.setText("❌ Not authenticated")
@@ -1770,12 +1803,18 @@ class SettingsDockWidget(QDockWidget):
         
         username = self.nasa_username.text().strip()
         password = self.nasa_password.text().strip()
+        access_token = self.nasa_access_token.text().strip()
         
-        if not username or not password:
+        has_userpass = bool(username and password)
+        has_token = bool(access_token)
+
+        if not has_userpass and not has_token:
             QMessageBox.warning(
                 self,
                 "Missing Credentials",
-                "Please enter both username and password.\n\n"
+                "Provide either:\n"
+                "• Username + Password, or\n"
+                "• Access Token (EARTHDATA_TOKEN).\n\n"
                 "Register at: https://urs.earthdata.nasa.gov/"
             )
             return
@@ -1786,16 +1825,30 @@ class SettingsDockWidget(QDockWidget):
         try:
             from ..connectors.nasa_earthdata import NasaEarthdataConnector
             
-            connector = NasaEarthdataConnector(username=username, password=password)
+            connector = NasaEarthdataConnector(
+                username=username,
+                password=password,
+                access_token=access_token,
+            )
             
             # Test authentication
             start_time = time.time()
             
-            # Set environment variables
-            os.environ['EARTHDATA_USERNAME'] = username
-            os.environ['EARTHDATA_PASSWORD'] = password
+            # Set environment variables for explicit test path
+            if access_token:
+                os.environ['EARTHDATA_TOKEN'] = access_token
+            if username and password:
+                os.environ['EARTHDATA_USERNAME'] = username
+                os.environ['EARTHDATA_PASSWORD'] = password
             
-            success = connector.authenticate(verify=True)
+            success = connector.authenticate(
+                credentials={
+                    'username': username,
+                    'password': password,
+                    'access_token': access_token,
+                },
+                verify=True,
+            )
             
             auth_time_ms = int((time.time() - start_time) * 1000)
             
@@ -1831,19 +1884,22 @@ class SettingsDockWidget(QDockWidget):
                 top_categories = catalog['Category'].value_counts().head(5)
                 categories_info = "\nTop Categories:\n"
                 for cat, count in top_categories.items():
-                    if pd.notna(cat):
+                    if str(cat).strip() and str(cat).lower() != 'nan':
                         categories_info += f"  • {cat}: {count}\n"
+
+            auth_mode = "token" if has_token else "username/password"
             
             # Build result text
             result_text = (
                 f"✅ Authentication successful\n"
                 f"Auth time: {auth_time_ms} ms\n"
+                f"Auth mode: {auth_mode}\n"
                 f"Catalog load: {catalog_time_ms} ms\n"
                 f"─────────────────────\n"
                 f"Available Datasets: {dataset_count}\n"
                 f"{categories_info}"
                 f"─────────────────────\n"
-                f"Username: {username}\n"
+                f"Username: {username or '(token mode)'}\n"
                 f"API: NASA CMR (Common Metadata Repository)\n"
                 f"Coverage: 1970s-present (varies by dataset)"
             )
@@ -1870,7 +1926,7 @@ class SettingsDockWidget(QDockWidget):
                 f"❌ Test failed\n"
                 f"Error: {str(e)}\n\n"
                 f"Check:\n"
-                f"  1. Credentials are correct\n"
+                f"  1. Token or credentials are correct\n"
                 f"  2. earthaccess and pandas are installed\n"
                 f"  3. Internet connection is active"
             )

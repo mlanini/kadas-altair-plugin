@@ -5,6 +5,26 @@ All notable changes to KADAS Altair Plugin will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-03-31
+
+### Changed
+- **NASA EarthData connector** now supports both authentication modes documented by Earthdata Login/earthaccess:
+  - `username` + `password`
+  - `access_token` / `EARTHDATA_TOKEN` (Bearer)
+- Added credentials loading precedence in connector: explicit input → secure storage → environment (`EARTHDATA_TOKEN`, `EARTHDATA_USERNAME`, `EARTHDATA_PASSWORD`) → `.netrc` via earthaccess.
+- Added reusable authenticated session/header helpers in NASA connector for downstream streaming/download use.
+- Improved NASA granule asset mapping:
+  - Adds explicit `visual` raster asset when TIFF/COG links are present
+  - Prefers raster links in `get_download_url()`.
+
+### Fixed
+- **Secure storage** now returns credentials for service `nasa_earthdata` (username/password/access_token), enabling proper reload from settings.
+- **Settings dock** NASA tab now supports token input and token-aware test flow (token OR user/pass).
+- **Main dock initialization** now reads NASA token from secure storage/settings and passes it to connector registration.
+
+### Documentation
+- Updated NASA guidance text in Settings and GUIDE with explicit token workflow.
+
 ## [0.4.0] - 2026-03-29
 
 ### Changed

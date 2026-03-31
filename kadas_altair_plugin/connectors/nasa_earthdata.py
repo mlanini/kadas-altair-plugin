@@ -22,15 +22,19 @@ References:
 - https://earthdata.nasa.gov/
 """
 import json
-import logging
+import os
 import tempfile
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Tuple
-from urllib.request import urlopen
-from urllib.error import URLError, HTTPError
 from .base import ConnectorBase
 from ..logger import get_logger
+
+try:
+    from ..secrets.secure_storage import get_secure_storage
+except ImportError:
+    def get_secure_storage():
+        return None
 
 logger = get_logger('connectors.nasa_earthdata')
 
@@ -59,6 +63,7 @@ class NasaEarthdataConnector(ConnectorBase):
     - Browse 9,000+ datasets (GEDI, MODIS, Landsat, Sentinel, etc.)
     - COG (Cloud Optimized GeoTIFF) support
     - Download capabilities with authentication
+    - Supports EDL username/password or existing Bearer token
     - Client-side filtering for bbox, datetime, cloud cover
     - Requires free NASA Earthdata account
     """
@@ -69,11 +74,19 @@ class NasaEarthdataConnector(ConnectorBase):
     # Cache settings
     catalog_cache_timeout: float = 604800.0  # 7 days in seconds
     
-    def __init__(self, username: Optional[str] = None, password: Optional[str] = None):
+    def __init__(
+        self,
+        username: Optional[str] = None,
+        password: Optional[str] = None,
+        access_token: Optional[str] = None,
+    ):
         super().__init__()
         self.username = username
         self.password = password
+        self.access_token = access_token
         self.authenticated = False
+        self._auth = None
+        self._auth_source = ""
         self._catalog_cache: Optional[Any] = None  # pandas DataFrame
         self._catalog_cache_time: float = 0
         self._catalog_names: List[str] = []
@@ -82,6 +95,95 @@ class NasaEarthdataConnector(ConnectorBase):
         self.cache_dir = Path(tempfile.gettempdir()) / "nasa_earthdata_cache"
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.catalog_cache_file = self.cache_dir / "nasa_earth_data.tsv"
+
+    def _load_stored_credentials(self) -> None:
+        """Load NASA credentials from secure storage and environment.
+
+        Priority:
+        1. Explicit constructor/authenticate() values already set on self
+        2. Secure storage values saved by the settings panel
+        3. Environment variables (EARTHDATA_TOKEN, USERNAME/PASSWORD)
+        4. .netrc is handled directly by earthaccess during login
+        """
+        try:
+            secure_storage = get_secure_storage()
+            if secure_storage:
+                creds = secure_storage.get_credentials('nasa_earthdata') or {}
+                if not self.username:
+                    self.username = creds.get('username') or self.username
+                if not self.password:
+                    self.password = creds.get('password') or self.password
+                if not self.access_token:
+                    self.access_token = (
+                        creds.get('access_token')
+                        or creds.get('token')
+                        or self.access_token
+                    )
+        except Exception as e:
+            logger.debug(f"NASA EarthData: could not load secure storage credentials: {e}")
+
+        self.access_token = self.access_token or os.environ.get('EARTHDATA_TOKEN')
+        self.username = self.username or os.environ.get('EARTHDATA_USERNAME')
+        self.password = self.password or os.environ.get('EARTHDATA_PASSWORD')
+
+    def _update_credentials(self, credentials: Optional[dict] = None) -> None:
+        """Apply explicit credentials and merge with stored sources."""
+        if credentials:
+            self.username = credentials.get('username') or self.username
+            self.password = credentials.get('password') or self.password
+            self.access_token = (
+                credentials.get('access_token')
+                or credentials.get('token')
+                or self.access_token
+            )
+
+        self._load_stored_credentials()
+
+    def _prime_environment(self) -> None:
+        """Populate environment variables for earthaccess.
+
+        earthaccess supports:
+        - EARTHDATA_USERNAME + EARTHDATA_PASSWORD
+        - EARTHDATA_TOKEN (existing EDL bearer token)
+        """
+        if self.access_token:
+            os.environ['EARTHDATA_TOKEN'] = self.access_token
+
+        if self.username and self.password:
+            os.environ['EARTHDATA_USERNAME'] = self.username
+            os.environ['EARTHDATA_PASSWORD'] = self.password
+
+    def _login_with_earthaccess(self):
+        """Authenticate with earthaccess using the best available strategy."""
+        self._prime_environment()
+
+        attempts = []
+        if self.access_token:
+            attempts.append(("environment", "token"))
+        if self.username and self.password:
+            attempts.append(("environment", "username/password"))
+
+        # Fallbacks handled by earthaccess itself
+        attempts.extend([
+            ("netrc", ".netrc"),
+            ("environment", "environment"),
+        ])
+
+        last_error = None
+        for strategy, label in attempts:
+            try:
+                logger.info(f"NASA EarthData: Authenticating via {label} ({strategy})")
+                auth = earthaccess.login(strategy=strategy, persist=False)
+                if getattr(auth, 'authenticated', False):
+                    self._auth_source = label
+                    return auth
+            except Exception as e:
+                last_error = e
+                logger.debug(f"NASA EarthData: auth attempt via {label} failed: {e}")
+
+        if last_error:
+            raise last_error
+        raise Exception("No valid Earthdata authentication method available")
 
     def _check_earthaccess_available(self) -> bool:
         """Check if earthaccess is available"""
@@ -96,6 +198,28 @@ class NasaEarthdataConnector(ConnectorBase):
             logger.error("pandas library not installed. Install with: pip install pandas")
             return False
         return True
+
+    def search_unified(
+        self,
+        bbox=None,
+        start_date=None,
+        end_date=None,
+        max_cloud_cover=None,
+        collection=None,
+        text_query=None,
+        limit: int = 100,
+    ) -> tuple:
+        """Forward unified manager params, including `text_query`, to `search()`."""
+        return self.search(
+            bbox=bbox,
+            start_date=start_date or "",
+            end_date=end_date or "",
+            max_cloud_cover=max_cloud_cover,
+            collection=collection,
+            limit=limit,
+            text_query=text_query or "",
+            query=text_query or "",
+        )
 
     def _load_catalog(self) -> Any:
         """Load and cache NASA EarthData catalog"""
@@ -148,37 +272,31 @@ class NasaEarthdataConnector(ConnectorBase):
         """Initialize NASA EarthData authentication.
         
         Args:
-            credentials: Dict with 'username' and 'password' keys
+            credentials: Dict with `username`/`password` and/or `access_token`
             verify: If True, attempt to authenticate with NASA
         """
         if not self._check_earthaccess_available():
             return False
-        
-        # Extract credentials if provided
-        if credentials:
-            self.username = credentials.get('username')
-            self.password = credentials.get('password')
+
+        self._update_credentials(credentials)
         
         if not verify:
-            self.authenticated = True
-            logger.debug('NASA EarthData: offline mode (skipped authentication)')
+            self.authenticated = bool(
+                self.access_token
+                or (self.username and self.password)
+                or os.environ.get('EARTHDATA_TOKEN')
+                or os.environ.get('EARTHDATA_USERNAME')
+            )
+            logger.debug('NASA EarthData: skipped live verification')
             return True
         
         try:
-            import os
+            auth = self._login_with_earthaccess()
             
-            # Set environment variables for earthaccess
-            if self.username and self.password:
-                os.environ['EARTHDATA_USERNAME'] = self.username
-                os.environ['EARTHDATA_PASSWORD'] = self.password
-            
-            # Try to authenticate using environment variables
-            logger.info('NASA EarthData: Authenticating...')
-            auth = earthaccess.login(strategy="environment", persist=True)
-            
-            if auth.authenticated:
+            if getattr(auth, 'authenticated', False):
+                self._auth = auth
                 self.authenticated = True
-                logger.info('NASA EarthData: Authentication successful')
+                logger.info(f'NASA EarthData: Authentication successful via {self._auth_source}')
                 return True
             else:
                 logger.error('NASA EarthData: Authentication failed')
@@ -195,12 +313,38 @@ class NasaEarthdataConnector(ConnectorBase):
             else:
                 logger.error(f'NASA EarthData: Failed to authenticate: {error_msg}')
             
+            self._auth = None
             self.authenticated = False
             return False
 
     def is_authenticated(self) -> bool:
         """Check if connector is authenticated"""
         return self.authenticated
+
+    def get_session(self):
+        """Return the authenticated earthaccess session when available."""
+        if self._auth and hasattr(self._auth, 'get_session'):
+            try:
+                return self._auth.get_session()
+            except Exception as e:
+                logger.debug(f"NASA EarthData: could not get authenticated session: {e}")
+        return super().get_session()
+
+    def get_auth_headers(self) -> Dict[str, str]:
+        """Return request headers for authenticated downloads/streaming."""
+        headers: Dict[str, str] = {}
+
+        session = self.get_session()
+        if session is not None:
+            try:
+                headers.update(dict(getattr(session, 'headers', {}) or {}))
+            except Exception:
+                pass
+
+        if 'Authorization' not in headers and self.access_token:
+            headers['Authorization'] = f'Bearer {self.access_token}'
+
+        return headers
 
     def get_collections(self) -> List[Dict[str, Any]]:
         """Return list of NASA EarthData dataset categories.
@@ -264,8 +408,10 @@ class NasaEarthdataConnector(ConnectorBase):
         logger.info(f"NASA EarthData.search() called with collection={collection}, bbox={bbox}, limit={limit}")
         
         if not self.authenticated:
-            logger.error('NASA EarthData: not authenticated')
-            return [], None
+            logger.info('NASA EarthData: attempting lazy authentication before search')
+            if not self.authenticate(verify=True):
+                logger.error('NASA EarthData: not authenticated')
+                return [], None
         
         if not self._check_earthaccess_available():
             return [], None
@@ -382,10 +528,24 @@ class NasaEarthdataConnector(ConnectorBase):
             assets = {}
             for i, link in enumerate(data_links):
                 asset_key = f'data_{i}'
+                href_lower = link.lower()
+                asset_type = 'application/octet-stream'
+                if href_lower.endswith(('.tif', '.tiff')):
+                    asset_type = 'image/tiff; application=geotiff'
                 assets[asset_key] = {
                     'href': link,
-                    'type': 'application/octet-stream',
+                    'type': asset_type,
                     'title': link.split('/')[-1] if '/' in link else link
+                }
+
+            # Prefer an explicit `visual` asset when a TIFF/COG is available,
+            # so the generic preview path can behave like the other STAC connectors.
+            if cog_links:
+                assets['visual'] = {
+                    'href': cog_links[0],
+                    'type': 'image/tiff; application=geotiff',
+                    'roles': ['visual'],
+                    'title': cog_links[0].split('/')[-1] if '/' in cog_links[0] else cog_links[0],
                 }
             
             # Build result
@@ -407,6 +567,8 @@ class NasaEarthdataConnector(ConnectorBase):
                     'size_mb': granule_dict.get('granule_size', 0),
                     'data_links': data_links,
                     'cog_available': len(cog_links) > 0,
+                    'auth_required': True,
+                    'auth_source': self._auth_source,
                 },
                 'assets': assets,
                 'is_collection': False,
@@ -443,11 +605,16 @@ class NasaEarthdataConnector(ConnectorBase):
         try:
             # Get data links from properties
             data_links = result.get('properties', {}).get('data_links', [])
+            for link in data_links:
+                if link.lower().endswith(('.tif', '.tiff')):
+                    return link
             if data_links:
                 return data_links[0]
             
             # Fallback to assets
             assets = result.get('assets', {})
+            if 'visual' in assets:
+                return assets['visual'].get('href')
             if assets:
                 first_asset = next(iter(assets.values()))
                 return first_asset.get('href')

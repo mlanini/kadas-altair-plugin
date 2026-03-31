@@ -270,6 +270,19 @@ class SecureStorage:
                 credentials['client_id'] = client_id
             if client_secret:
                 credentials['client_secret'] = client_secret
+        elif service == 'nasa_earthdata':
+            username = self.retrieve_credential(service, 'username')
+            password = self.retrieve_credential(service, 'password')
+            access_token = self.retrieve_credential(service, 'access_token')
+            token = self.retrieve_credential(service, 'token')
+            if username:
+                credentials['username'] = username
+            if password:
+                credentials['password'] = password
+            if access_token:
+                credentials['access_token'] = access_token
+            elif token:
+                credentials['access_token'] = token
         
         return credentials if credentials else None
 
