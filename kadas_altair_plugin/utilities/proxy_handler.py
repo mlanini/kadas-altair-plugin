@@ -22,6 +22,8 @@ import os
 from pathlib import Path
 from typing import Dict, List, Optional
 
+logger = logging.getLogger(__name__)
+
 # ============================================================================
 # OpenSSL 3.0 Legacy Provider Support
 # ============================================================================
@@ -65,8 +67,6 @@ try:
     import ssl
 except ImportError:
     HAS_SSL = False
-
-logger = logging.getLogger(__name__)
 
 # ============================================================================
 # GLOBAL PROXY CONFIGURATION

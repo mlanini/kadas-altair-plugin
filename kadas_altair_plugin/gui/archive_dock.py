@@ -118,6 +118,7 @@ ARCHIVE_PROVIDERS: Dict[str, str] = {
     'ICEYE SAR':          'iceye_stac',
     'Capella Space':      'capella_stac',
     'Vantor':             'vantor',
+    'NASA EarthData':     'nasa_earthdata',
     'Copernicus':         'copernicus_stac',
 }
 
@@ -633,6 +634,24 @@ class ArchiveDockWidget(QDockWidget):
             except Exception as exc:
                 logger.warning(f'Copernicus connector unavailable: {exc}')
 
+            # NASA EarthData
+            try:
+                from ..connectors.nasa_earthdata import NasaEarthdataConnector
+                nasa = NasaEarthdataConnector()
+                self._connector_manager.register_connector(
+                    'nasa_earthdata', nasa, 'NASA EarthData',
+                    capabilities=[
+                        ConnectorCapability.BBOX_SEARCH,
+                        ConnectorCapability.DATE_RANGE,
+                        ConnectorCapability.COLLECTIONS,
+                        ConnectorCapability.AUTHENTICATION,
+                        ConnectorCapability.COG_SUPPORT,
+                    ]
+                )
+                logger.debug('NASA EarthData connector registered')
+            except Exception as exc:
+                logger.warning(f'NASA EarthData connector unavailable: {exc}')
+
             logger.info('ArchiveDockWidget: connector manager ready')
 
         except Exception as exc:
@@ -761,7 +780,7 @@ class ArchiveDockWidget(QDockWidget):
             return True
 
         credentials = self._get_credentials_for_connector(connector_id)
-        if not credentials:
+        if not credentials and connector_id != 'nasa_earthdata':
             logger.warning(f'Archive search: missing credentials for {connector_id}')
             return False
 
@@ -846,6 +865,52 @@ class ArchiveDockWidget(QDockWidget):
                 'client_id': client_id or None,
                 'client_secret': client_secret or None,
                 'api_base_url': api_base_url,
+            }
+
+        if connector_id == 'nasa_earthdata':
+            username = ''
+            password = ''
+            access_token = ''
+            if self.secure_storage:
+                nasa_creds = self.secure_storage.get_credentials('nasa_earthdata') or {}
+                username = (nasa_creds.get('username') or '').strip()
+                password = (nasa_creds.get('password') or '').strip()
+                access_token = (
+                    nasa_creds.get('access_token')
+                    or nasa_creds.get('token')
+                    or ''
+                ).strip()
+
+            settings = QSettings()
+            if not username:
+                username = str(
+                    settings.value(
+                        'altair/nasa_earthdata_username',
+                        settings.value('altair/nasa_username', ''),
+                    )
+                ).strip()
+            if not password:
+                password = str(
+                    settings.value(
+                        'altair/nasa_earthdata_password',
+                        settings.value('altair/nasa_password', ''),
+                    )
+                ).strip()
+            if not access_token:
+                access_token = str(
+                    settings.value(
+                        'altair/nasa_earthdata_token',
+                        settings.value('altair/nasa_access_token', ''),
+                    )
+                ).strip()
+
+            if not (access_token or (username and password)):
+                return {}
+
+            return {
+                'username': username or None,
+                'password': password or None,
+                'access_token': access_token or None,
             }
 
         return {}
@@ -1506,6 +1571,47 @@ class ArchiveDockWidget(QDockWidget):
         except Exception:
             pass
 
+    def _gdal_set_aws_s3(self, access_id: str, secret: str, endpoint: str = 'eodata.dataspace.copernicus.eu') -> None:
+        try:
+            from osgeo import gdal
+            gdal.SetConfigOption('AWS_ACCESS_KEY_ID', access_id)
+            gdal.SetConfigOption('AWS_SECRET_ACCESS_KEY', secret)
+            gdal.SetConfigOption('AWS_S3_ENDPOINT', endpoint)
+            gdal.SetConfigOption('AWS_HTTPS', 'YES')
+            gdal.SetConfigOption('AWS_VIRTUAL_HOSTING', 'FALSE')
+        except Exception as exc:
+            logger.debug(f'GDAL AWS S3 config skipped: {exc}')
+
+    def _gdal_clear_aws_s3(self) -> None:
+        try:
+            from osgeo import gdal
+            gdal.SetConfigOption('AWS_ACCESS_KEY_ID', None)
+            gdal.SetConfigOption('AWS_SECRET_ACCESS_KEY', None)
+            gdal.SetConfigOption('AWS_S3_ENDPOINT', None)
+            gdal.SetConfigOption('AWS_HTTPS', None)
+            gdal.SetConfigOption('AWS_VIRTUAL_HOSTING', None)
+        except Exception:
+            pass
+
+    def _build_copernicus_vsis3_uri(self, href: str) -> Optional[str]:
+        try:
+            parsed = urlparse(href)
+            if parsed.scheme != 'https' or parsed.netloc.lower() != 'eodata.dataspace.copernicus.eu':
+                return None
+            path = (parsed.path or '').lstrip('/')
+            if not path:
+                return None
+            return f'/vsis3/eodata/{path}'
+        except Exception:
+            return None
+
+    def _get_connector_instance(self, item: Dict[str, Any]) -> Optional[Any]:
+        source = item.get('_source', '')
+        if not source or not self._connector_manager:
+            return None
+        connector_info = getattr(self._connector_manager, '_connectors', {}).get(source, {})
+        return connector_info.get('instance') if connector_info else None
+
     def _get_bearer_for_item(self, item: Dict) -> Optional[str]:
         """Return a valid Bearer token for the given result item, if available."""
         source = item.get('_source', '')
@@ -1546,6 +1652,30 @@ class ArchiveDockWidget(QDockWidget):
                 self._gdal_set_bearer(bearer)
             try:
                 lyr = QgsRasterLayer(uri, scene_id)
+                if not lyr.isValid() and href.startswith('http'):
+                    lyr = QgsRasterLayer(href, scene_id)
+
+                if not lyr.isValid() and item.get('_source') == 'copernicus_stac':
+                    connector = self._get_connector_instance(item)
+                    if connector and hasattr(connector, 'get_s3_credentials'):
+                        creds = connector.get_s3_credentials()
+                        access_id = (creds or {}).get('access_id') if isinstance(creds, dict) else None
+                        secret = (creds or {}).get('secret') if isinstance(creds, dict) else None
+                        s3_uri = self._build_copernicus_vsis3_uri(href)
+
+                        if access_id and secret and s3_uri:
+                            self._gdal_set_aws_s3(access_id, secret)
+                            try:
+                                lyr = QgsRasterLayer(s3_uri, scene_id)
+                            finally:
+                                self._gdal_clear_aws_s3()
+
+                            if hasattr(connector, 'delete_s3_credentials'):
+                                try:
+                                    connector.delete_s3_credentials(access_id)
+                                except Exception as exc:
+                                    logger.debug(f'Copernicus S3 credentials cleanup failed: {exc}')
+
                 if lyr.isValid():
                     QgsProject.instance().addMapLayer(lyr)
                     loaded += 1

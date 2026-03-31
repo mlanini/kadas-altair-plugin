@@ -542,7 +542,7 @@ class VantorConnector(ConnectorBase):
                 continue
 
             features = geojson.get('features', [])
-            for feature in features:
+            for feature_idx, feature in enumerate(features):
                 if len(results) >= limit:
                     break
 
@@ -578,8 +578,15 @@ class VantorConnector(ConnectorBase):
                             if not self._bbox_intersects(bbox, feature_bbox):
                                 continue
 
+                raw_id = feature.get('id')
+                if raw_id is None or str(raw_id).strip() == '':
+                    raw_id = props.get('id') or props.get('catalog_id') or props.get('datetime')
+                item_id = str(raw_id).strip() if raw_id is not None else ''
+                if not item_id:
+                    item_id = f"{event_name}-{feature_idx}"
+
                 item = {
-                    'id': feature.get('id', ''),
+                    'id': item_id,
                     'type': 'Feature',
                     'geometry': feature.get('geometry'),
                     'bbox': feature.get('bbox'),
