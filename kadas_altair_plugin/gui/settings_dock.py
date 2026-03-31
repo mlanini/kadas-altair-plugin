@@ -738,10 +738,17 @@ class SettingsDockWidget(QDockWidget):
         self.auto_zoom.setChecked(True)
         layer_layout.addRow("Auto-zoom to results:", self.auto_zoom)
         
+        self.limit_results_check = QCheckBox("Enable result limit")
+        self.limit_results_check.setChecked(False)
+        layer_layout.addRow("", self.limit_results_check)
+        
         self.max_results = QSpinBox()
-        self.max_results.setRange(10, 1000)
-        self.max_results.setValue(100)
+        self.max_results.setRange(10, 8888)
+        self.max_results.setValue(250)
+        self.max_results.setEnabled(False)
         layer_layout.addRow("Maximum results:", self.max_results)
+        
+        self.limit_results_check.toggled.connect(self.max_results.setEnabled)
         
         layout.addWidget(layer_group)
         
@@ -804,9 +811,13 @@ class SettingsDockWidget(QDockWidget):
         self.auto_zoom.setChecked(
             self.settings.value(f"{self.SETTINGS_PREFIX}auto_zoom", True, type=bool)
         )
+        self.limit_results_check.setChecked(
+            self.settings.value(f"{self.SETTINGS_PREFIX}limit_results_enabled", False, type=bool)
+        )
         self.max_results.setValue(
             self.settings.value(f"{self.SETTINGS_PREFIX}max_results", 100, type=int)
         )
+        self.max_results.setEnabled(self.limit_results_check.isChecked())
         
         # Download folder
         download_folder = self.settings.value("altair/download_folder", "")
@@ -965,6 +976,10 @@ class SettingsDockWidget(QDockWidget):
         self.settings.setValue(
             f"{self.SETTINGS_PREFIX}auto_zoom",
             self.auto_zoom.isChecked()
+        )
+        self.settings.setValue(
+            f"{self.SETTINGS_PREFIX}limit_results_enabled",
+            self.limit_results_check.isChecked()
         )
         self.settings.setValue(
             f"{self.SETTINGS_PREFIX}max_results",

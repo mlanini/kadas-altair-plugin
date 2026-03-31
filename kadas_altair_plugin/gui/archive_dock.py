@@ -320,6 +320,8 @@ class ArchiveDockWidget(QDockWidget):
             self._provider_checks[name] = cb
             (prov_row1 if i < 3 else prov_row2).addWidget(cb)
 
+        prov_row1.addStretch()
+        prov_row2.addStretch()
         prov_layout.addLayout(prov_row1)
         prov_layout.addLayout(prov_row2)
         layout.addWidget(prov_group)

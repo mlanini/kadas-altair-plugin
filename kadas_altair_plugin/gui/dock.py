@@ -3376,9 +3376,9 @@ class AltairDockWidget(QDockWidget):
                     layer.setCustomProperty("altair_asset_name", asset_name_used)
                     layer.setCustomProperty("altair_source_url", cog_url)
                     
-                    # Set opacity for overlay
+                    # Set opacity to 100% (transparency 0%)
                     try:
-                        layer.renderer().setOpacity(0.8)
+                        layer.renderer().setOpacity(1.0)
                         layer.triggerRepaint()
                     except Exception as e:
                         logger.debug(f"Could not set opacity: {e}")
@@ -3396,7 +3396,7 @@ class AltairDockWidget(QDockWidget):
                         layer.setCustomProperty("altair_asset_name", asset_name_used)
                         layer.setCustomProperty("altair_source_url", cog_url)
                         try:
-                            layer.renderer().setOpacity(0.8)
+                            layer.renderer().setOpacity(1.0)
                         except Exception:
                             pass
                         self._loaded_layers.append(layer_name)
