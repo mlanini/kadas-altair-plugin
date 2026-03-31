@@ -19,9 +19,9 @@ shasum -a 256 kadas_altair_plugin_full_v0.4.1.zip
 ## Checksums
 
 ### kadas_altair_plugin_full_v0.4.1.zip
-- **Size**: 0.16 MB (165,420 bytes)
-- **SHA256**: `A774306CED1D944AFF10C000D7E0F5914BFCE501C674298AC9443001BAACAA51`
-- **Build**: 2026-03-31 12:09:58
+- **Size**: 0.16 MB (166,125 bytes)
+- **SHA256**: `A09F71A63FCAB19A67DFA3C04894F8E34E479D3C59BB7CE6A4A39EE28E40A228`
+- **Build**: 2026-03-31 12:21:00
 - **Build mode**: `KADAS_SKIP_PIP=1` (no pip dependency install step)
 
 ---
@@ -31,7 +31,7 @@ shasum -a 256 kadas_altair_plugin_full_v0.4.1.zip
 ### Windows PowerShell
 ```powershell
 # Verify checksum
-$expectedHash = "A774306CED1D944AFF10C000D7E0F5914BFCE501C674298AC9443001BAACAA51"
+$expectedHash = "A09F71A63FCAB19A67DFA3C04894F8E34E479D3C59BB7CE6A4A39EE28E40A228"
 $actualHash = (Get-FileHash kadas_altair_plugin_full_v0.4.1.zip -Algorithm SHA256).Hash
 
 if ($actualHash -eq $expectedHash) {
@@ -45,7 +45,7 @@ if ($actualHash -eq $expectedHash) {
 
 ### Linux/macOS
 ```bash
-echo "A774306CED1D944AFF10C000D7E0F5914BFCE501C674298AC9443001BAACAA51  kadas_altair_plugin_full_v0.4.1.zip" | shasum -a 256 --check
+echo "A09F71A63FCAB19A67DFA3C04894F8E34E479D3C59BB7CE6A4A39EE28E40A228  kadas_altair_plugin_full_v0.4.1.zip" | shasum -a 256 --check
 # Expected output: kadas_altair_plugin_full_v0.4.1.zip: OK
 ```
 
