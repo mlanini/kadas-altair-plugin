@@ -23,10 +23,12 @@ References:
 """
 import json
 import os
+import csv
 import tempfile
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Tuple
+from urllib.request import urlopen
 from .base import ConnectorBase
 from ..logger import get_logger
 
@@ -44,7 +46,7 @@ try:
     EARTHACCESS_AVAILABLE = True
 except ImportError:
     EARTHACCESS_AVAILABLE = False
-    logger.warning("earthaccess library not installed")
+    logger.debug("earthaccess library not installed")
 
 # Try to import pandas for catalog loading
 try:
@@ -52,7 +54,7 @@ try:
     PANDAS_AVAILABLE = True
 except ImportError:
     PANDAS_AVAILABLE = False
-    logger.warning("pandas library not installed")
+    logger.debug("pandas library not installed")
 
 
 class NasaEarthdataConnector(ConnectorBase):
@@ -188,16 +190,67 @@ class NasaEarthdataConnector(ConnectorBase):
     def _check_earthaccess_available(self) -> bool:
         """Check if earthaccess is available"""
         if not EARTHACCESS_AVAILABLE:
-            logger.error("earthaccess library not installed. Install with: pip install earthaccess")
+            logger.warning("earthaccess library not installed. Install with: pip install earthaccess")
             return False
         return True
 
     def _check_pandas_available(self) -> bool:
         """Check if pandas is available"""
         if not PANDAS_AVAILABLE:
-            logger.error("pandas library not installed. Install with: pip install pandas")
+            logger.info("pandas library not installed. Falling back to CSV parser")
             return False
         return True
+
+    def _load_catalog_csv_rows(self, from_cache: bool) -> List[Dict[str, Any]]:
+        """Load NASA TSV catalog using stdlib CSV (no pandas required)."""
+        rows: List[Dict[str, Any]] = []
+
+        if from_cache and self.catalog_cache_file.exists():
+            with open(self.catalog_cache_file, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f, delimiter='\t')
+                rows = list(reader)
+            logger.info(f"Loaded {len(rows)} datasets from file cache (csv fallback)")
+            return rows
+
+        logger.info(f"Fetching NASA EarthData catalog from {self.CATALOG_URL} (csv fallback)")
+        with urlopen(self.CATALOG_URL, timeout=30) as resp:  # nosec B310
+            text = resp.read().decode('utf-8')
+
+        self.catalog_cache_file.write_text(text, encoding='utf-8')
+        reader = csv.DictReader(text.splitlines(), delimiter='\t')
+        rows = list(reader)
+        logger.info(f"Loaded {len(rows)} datasets from URL and cached (csv fallback)")
+        return rows
+
+    def _catalog_find_first_shortname(self, catalog: Any, query: str) -> Optional[str]:
+        """Find the first matching ShortName by text query across catalog formats."""
+        if not query:
+            return None
+
+        q = query.lower()
+
+        # pandas DataFrame path
+        if PANDAS_AVAILABLE and hasattr(catalog, 'columns'):
+            try:
+                mask = (
+                    catalog['ShortName'].str.contains(query, case=False, na=False)
+                    | catalog['EntryTitle'].str.contains(query, case=False, na=False)
+                )
+                filtered = catalog[mask]
+                if not filtered.empty:
+                    return filtered.iloc[0]['ShortName']
+            except Exception:
+                return None
+
+        # csv rows path
+        if isinstance(catalog, list):
+            for row in catalog:
+                short_name = str(row.get('ShortName', '') or '')
+                entry_title = str(row.get('EntryTitle', '') or '')
+                if q in short_name.lower() or q in entry_title.lower():
+                    return short_name or None
+
+        return None
 
     def search_unified(
         self,
@@ -225,9 +278,6 @@ class NasaEarthdataConnector(ConnectorBase):
         """Load and cache NASA EarthData catalog"""
         import time
         
-        if not self._check_pandas_available():
-            return None
-        
         # Check cache
         if self._catalog_cache is not None:
             cache_age = time.time() - self._catalog_cache_time
@@ -244,25 +294,37 @@ class NasaEarthdataConnector(ConnectorBase):
                 logger.debug(f"Loading catalog from file cache (age: {cache_age:.0f}s)")
         
         try:
-            if use_file_cache:
-                df = pd.read_csv(self.catalog_cache_file, sep='\t')
-                logger.info(f"Loaded {len(df)} datasets from file cache")
+            if PANDAS_AVAILABLE:
+                if use_file_cache:
+                    df = pd.read_csv(self.catalog_cache_file, sep='\t')
+                    logger.info(f"Loaded {len(df)} datasets from file cache")
+                else:
+                    logger.info(f"Fetching NASA EarthData catalog from {self.CATALOG_URL}")
+                    df = pd.read_csv(self.CATALOG_URL, sep='\t')
+                    # Save to file cache
+                    df.to_csv(self.catalog_cache_file, sep='\t', index=False)
+                    logger.info(f"Loaded {len(df)} datasets from URL and cached")
+
+                catalog_obj: Any = df
             else:
-                logger.info(f"Fetching NASA EarthData catalog from {self.CATALOG_URL}")
-                df = pd.read_csv(self.CATALOG_URL, sep='\t')
-                # Save to file cache
-                df.to_csv(self.catalog_cache_file, sep='\t', index=False)
-                logger.info(f"Loaded {len(df)} datasets from URL and cached")
+                catalog_obj = self._load_catalog_csv_rows(from_cache=use_file_cache)
             
             # Cache in memory
-            self._catalog_cache = df
+            self._catalog_cache = catalog_obj
             self._catalog_cache_time = time.time()
             
             # Extract short names for collections
-            if 'ShortName' in df.columns:
-                self._catalog_names = df['ShortName'].tolist()
+            if PANDAS_AVAILABLE and hasattr(catalog_obj, 'columns'):
+                if 'ShortName' in catalog_obj.columns:
+                    self._catalog_names = catalog_obj['ShortName'].tolist()
+            elif isinstance(catalog_obj, list):
+                self._catalog_names = [
+                    str(r.get('ShortName', '')).strip()
+                    for r in catalog_obj
+                    if str(r.get('ShortName', '')).strip()
+                ]
             
-            return df
+            return catalog_obj
             
         except Exception as e:
             logger.error(f"Failed to load NASA EarthData catalog: {e}")
@@ -355,24 +417,46 @@ class NasaEarthdataConnector(ConnectorBase):
         cols: List[Dict[str, Any]] = []
         
         # Load catalog
-        df = self._load_catalog()
-        if df is None or df.empty:
+        catalog = self._load_catalog()
+        if catalog is None:
             logger.warning('NASA EarthData: catalog not loaded')
             return cols
-        
-        # Count datasets
-        total_count = len(df)
-        
-        # Group by major categories (if available)
-        if 'Category' in df.columns:
-            categories = df['Category'].value_counts().to_dict()
-            for category, count in categories.items():
-                if pd.notna(category):
-                    cols.append({
-                        'id': str(category),
-                        'title': str(category),
-                        'dataset_count': count
-                    })
+
+        # pandas DataFrame path
+        if PANDAS_AVAILABLE and hasattr(catalog, 'empty'):
+            if catalog.empty:
+                logger.warning('NASA EarthData: catalog not loaded')
+                return cols
+
+            total_count = len(catalog)
+            if 'Category' in catalog.columns:
+                categories = catalog['Category'].value_counts().to_dict()
+                for category, count in categories.items():
+                    if pd.notna(category):
+                        cols.append({
+                            'id': str(category),
+                            'title': str(category),
+                            'dataset_count': count
+                        })
+        else:
+            # csv rows path
+            if not isinstance(catalog, list) or not catalog:
+                logger.warning('NASA EarthData: catalog not loaded')
+                return cols
+
+            total_count = len(catalog)
+            categories_count: Dict[str, int] = {}
+            for row in catalog:
+                category = str(row.get('Category', '') or '').strip()
+                if not category:
+                    continue
+                categories_count[category] = categories_count.get(category, 0) + 1
+            for category, count in categories_count.items():
+                cols.append({
+                    'id': category,
+                    'title': category,
+                    'dataset_count': count
+                })
         
         # Add "All Datasets" entry
         cols.insert(0, {
@@ -424,17 +508,11 @@ class NasaEarthdataConnector(ConnectorBase):
         
         # If no collection specified but query provided, search catalog first
         if not collection and query:
-            df = self._load_catalog()
-            if df is not None:
-                # Filter catalog by query
-                mask = (
-                    df['ShortName'].str.contains(query, case=False, na=False) |
-                    df['EntryTitle'].str.contains(query, case=False, na=False)
-                )
-                filtered = df[mask]
-                if not filtered.empty:
-                    # Use first match
-                    collection = filtered.iloc[0]['ShortName']
+            catalog = self._load_catalog()
+            if catalog is not None:
+                collection_match = self._catalog_find_first_shortname(catalog, query)
+                if collection_match:
+                    collection = collection_match
                     logger.info(f"Found dataset: {collection}")
         
         if not collection:

@@ -22,6 +22,7 @@ class ConnectorBase:
 
     def __init__(self):
         """Initialize connector with proxy support"""
+        self._logger = logger
         self._session = None
         self._proxies = None
         self._verify_ssl = True
@@ -38,10 +39,11 @@ class ConnectorBase:
             self._session = get_session()
             self._proxies = get_proxies_dict()
             self._verify_ssl = get_verify_ssl()
-            logger.info("Connector initialized with proxy configuration (legacy mode)")
+            self._logger.info("Connector initialized with proxy configuration (legacy mode)")
         except Exception as e:
-            logger.warning(f"Failed to initialize proxy for connector: {e}")
-            logger.warning("Connector will use direct connection or QGIS network manager")
+            fallback_logger = getattr(self, '_logger', logging.getLogger(__name__))
+            fallback_logger.warning(f"Failed to initialize proxy for connector: {e}")
+            fallback_logger.warning("Connector will use direct connection or QGIS network manager")
             self._session = None
 
     def get_session(self):
