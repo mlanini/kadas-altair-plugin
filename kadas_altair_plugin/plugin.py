@@ -586,6 +586,7 @@ class KadasAltair(QObject):
                 self._smart_tasking_dock = SmartTaskingDockWidget(self.iface, self.iface.mainWindow())
                 self._smart_tasking_dock.setObjectName('AltairSmartTaskingDock')
                 self._smart_tasking_dock.visibilityChanged.connect(self._on_smart_tasking_visibility_changed)
+                self._smart_tasking_dock.order_requested.connect(self._open_tasking_from_smart_tasking)
 
                 self.iface.mainWindow().addDockWidget(Qt.RightDockWidgetArea, self._smart_tasking_dock)
                 self._tabify_dock(self._smart_tasking_dock)
@@ -641,6 +642,20 @@ class KadasAltair(QObject):
             self._tasking_dock.raise_()
         except Exception as e:
             logger.warning(f"Could not prefill Tasking dock from archive result: {e}")
+
+    def _open_tasking_from_smart_tasking(self, data: dict):
+        """Open Tasking dock and prefill from Smart Tasking payload."""
+        try:
+            if self._tasking_dock is None:
+                self.toggle_tasking_dock()
+            if self._tasking_dock is None:
+                return
+
+            self._tasking_dock.prefill_from_smart_tasking(data)
+            self._tasking_dock.show()
+            self._tasking_dock.raise_()
+        except Exception as e:
+            logger.warning(f'Could not prefill Tasking dock from Smart Tasking: {e}')
 
     def show_help(self):
         """Show online documentation in browser"""

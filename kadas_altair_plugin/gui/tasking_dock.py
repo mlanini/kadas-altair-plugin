@@ -466,3 +466,114 @@ class TaskingDockWidget(QDockWidget):
 
         self.status_label.setText('Form cleared')
         self.status_label.setStyleSheet(f'color: {self._LABEL_COLOR}; font-size: 10px;')
+
+    # ------------------------------------------------------------------
+    # Pre-fill from Smart Tasking dock
+    # ------------------------------------------------------------------
+
+    def prefill_from_smart_tasking(self, data: dict):
+        """Populate the form with fields derived by the Smart Tasking dock.
+
+        *data* is a dict that may contain any subset of:
+            _source       – 'archive' or 'overpass'
+            _provider     – provider label to match against PROVIDERS list
+            satellite     – constellation name
+            sensor_type   – 'Optical', 'SAR', or 'Optical + SAR'
+            gsd_m         – float, ground sample distance in metres
+            bbox          – [minlon, minlat, maxlon, maxlat]
+            date          – 'YYYY-MM-DD' string
+            day_night     – 'Any', 'Day only', 'Night only'
+            sar_mode      – SAR mode text
+            sar_polarization – SAR polarization text
+            notes         – free-text context
+        """
+        # Provider
+        provider = data.get('_provider', '')
+        if provider:
+            idx = self.provider_combo.findText(provider)
+            if idx >= 0:
+                self.provider_combo.setCurrentIndex(idx)
+            else:
+                # Try partial match
+                for i in range(self.provider_combo.count()):
+                    if provider.lower() in self.provider_combo.itemText(i).lower():
+                        self.provider_combo.setCurrentIndex(i)
+                        break
+
+        # Sensor type
+        sensor = data.get('sensor_type', '')
+        if sensor:
+            idx = self.sensor_type_combo.findText(sensor)
+            if idx >= 0:
+                self.sensor_type_combo.setCurrentText(sensor)
+
+        # GSD / resolution
+        gsd = data.get('gsd_m')
+        if gsd is not None:
+            try:
+                self.resolution_m.setValue(float(gsd))
+            except (ValueError, TypeError):
+                pass
+
+        # AOI bbox
+        bbox = data.get('bbox')
+        if bbox and len(bbox) >= 4 and self.extent_widget:
+            try:
+                from qgis.core import QgsRectangle, QgsCoordinateReferenceSystem
+                rect = QgsRectangle(
+                    float(bbox[0]), float(bbox[1]),
+                    float(bbox[2]), float(bbox[3]),
+                )
+                wgs84 = QgsCoordinateReferenceSystem('EPSG:4326')
+                self.extent_widget.setCurrentExtent(rect, wgs84)
+                self.extent_widget.setOriginalExtent(rect, wgs84)
+                self.extent_widget.setOutputCrs(wgs84)
+            except Exception:
+                pass
+
+        # Dates
+        dt_str = data.get('date', '')
+        if dt_str:
+            try:
+                parts = dt_str.split('-')
+                qd = QDate(int(parts[0]), int(parts[1]), int(parts[2]))
+                self.start_date.setDate(qd)
+                self.end_date.setDate(qd.addDays(7))
+                self.delivery_date.setDate(qd.addDays(14))
+            except (ValueError, IndexError):
+                pass
+
+        # Day/Night
+        dn = data.get('day_night', '')
+        if dn:
+            idx = self.day_night_combo.findText(dn)
+            if idx >= 0:
+                self.day_night_combo.setCurrentIndex(idx)
+
+        # SAR specifics
+        sar_mode = data.get('sar_mode', '')
+        if sar_mode:
+            idx = self.sar_mode.findText(sar_mode)
+            if idx >= 0:
+                self.sar_mode.setCurrentIndex(idx)
+
+        sar_pol = data.get('sar_polarization', '')
+        if sar_pol:
+            idx = self.sar_polarization.findText(sar_pol)
+            if idx >= 0:
+                self.sar_polarization.setCurrentIndex(idx)
+
+        # Notes (append, don't overwrite)
+        notes = data.get('notes', '')
+        if notes:
+            existing = self.notes.toPlainText().strip()
+            if existing:
+                self.notes.setPlainText(f'{existing}\n\n--- Smart Tasking ---\n{notes}')
+            else:
+                self.notes.setPlainText(notes)
+
+        source = data.get('_source', 'Smart Tasking')
+        sat = data.get('satellite', '')
+        self.status_label.setText(
+            f'Pre-filled from {source}: {sat or data.get("_provider", "?")}')
+        self.status_label.setStyleSheet('color: #00e5ff; font-size: 10px;')

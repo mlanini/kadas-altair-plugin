@@ -22,7 +22,7 @@ import urllib.request
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-from qgis.PyQt.QtCore import QDate, Qt, QSettings, QUrl, QVariant
+from qgis.PyQt.QtCore import QDate, Qt, QSettings, QUrl, QVariant, pyqtSignal
 from qgis.PyQt.QtGui import QColor, QFont
 from qgis.PyQt.QtWidgets import (
     QAbstractItemView,
@@ -1040,6 +1040,8 @@ class _OverpassTask(QgsTask if QGIS_AVAILABLE else object):  # type: ignore
 class SmartTaskingDockWidget(QDockWidget):
     """Smart Tasking dock — flip switches, pick a satellite, search or predict."""
 
+    order_requested = pyqtSignal(dict)   # payload for Tasking dock prefill
+
     _LABEL_COLOR = '#303030'
 
     # Archive-results table column indices
@@ -1371,6 +1373,15 @@ class SmartTaskingDockWidget(QDockWidget):
         self.results_tabs.addTab(summary_tab, '📋 Summary')
 
         layout.addWidget(self.results_tabs)
+
+        # --- Send to Tasking button ---
+        self.send_to_tasking_btn = QPushButton('📨 Send to Tasking Order')
+        self.send_to_tasking_btn.setToolTip(
+            'Pre-fill the Tasking Order form with the selected archive scene '
+            'or predicted overpass.'
+        )
+        self.send_to_tasking_btn.clicked.connect(self._send_to_tasking)
+        layout.addWidget(self.send_to_tasking_btn)
 
         # --- Status ---
         self.status_label = QLabel('Ready — flip switches and pick a satellite.')
@@ -2264,6 +2275,202 @@ class SmartTaskingDockWidget(QDockWidget):
         self.summary_text.setPlainText('\n'.join(lines))
         self.results_tabs.setCurrentIndex(2)
         logger.info(f'Smart Tasking summary: {len(selected)} satellites, mode={mode}')
+
+    # ------------------------------------------------------------------
+    # Send selected result to the Tasking Order dock
+    # ------------------------------------------------------------------
+
+    # Operator name (catalogue) → Tasking dock PROVIDERS list label
+    _OPERATOR_TO_PROVIDER = {
+        'Maxar': 'Maxar',
+        'Planet': 'Planet Labs',
+        'Airbus': 'Airbus',
+        'ICEYE': 'ICEYE',
+        'Capella': 'Capella Space',
+        'BlackSky': 'BlackSky',
+    }
+
+    def _send_to_tasking(self):
+        """Build a prefill payload from the active tab's selected row and emit *order_requested*."""
+        tab_idx = self.results_tabs.currentIndex()
+
+        payload: Dict[str, Any] = {}
+
+        # Grab AOI from the Smart Tasking extent widget (if available)
+        if self.extent_widget:
+            try:
+                ext = self.extent_widget.outputExtent()
+                crs = self.extent_widget.outputCrs()
+                if ext and not ext.isEmpty() and crs and crs.isValid():
+                    if crs.authid() != 'EPSG:4326':
+                        tr = QgsCoordinateTransform(
+                            crs, QgsCoordinateReferenceSystem('EPSG:4326'),
+                            QgsProject.instance(),
+                        )
+                        ext = tr.transformBoundingBox(ext)
+                    payload['bbox'] = [
+                        ext.xMinimum(), ext.yMinimum(),
+                        ext.xMaximum(), ext.yMaximum(),
+                    ]
+            except Exception:
+                pass
+
+        if tab_idx == 0:
+            # --- Archive result ---
+            self._fill_payload_from_archive(payload)
+        elif tab_idx == 1:
+            # --- Overpass prediction ---
+            self._fill_payload_from_overpass(payload)
+        else:
+            self.status_label.setText('Switch to Archive or Overpass tab first.')
+            self.status_label.setStyleSheet('color: #ffcc00; font-size: 10px;')
+            return
+
+        if not payload.get('_source'):
+            self.status_label.setText('Select a row first, then send to Tasking.')
+            self.status_label.setStyleSheet('color: #ffcc00; font-size: 10px;')
+            return
+
+        self.order_requested.emit(payload)
+        self.status_label.setText('Sent to Tasking Order dock ✔')
+        self.status_label.setStyleSheet('color: #00ffbf; font-size: 10px;')
+        logger.info(f'Sent to Tasking: {payload.get("_source")} — {payload.get("satellite", "?")}')
+
+    # ---- archive row → payload ----------------------------------------
+
+    def _fill_payload_from_archive(self, payload: Dict):
+        rows = sorted(
+            {idx.row() for idx in self.archive_table.selectionModel().selectedRows()}
+        )
+        if not rows or rows[0] >= len(self._search_results):
+            return
+        item = self._search_results[rows[0]]
+
+        payload['_source'] = 'archive'
+        payload['_provider'] = item.get('_provider', '')
+        payload['satellite'] = item.get('_satellite', '')
+
+        # Sensor type from provider hint or properties
+        sensor = 'Optical'
+        prov = payload['_provider'].lower()
+        if any(k in prov for k in ('iceye', 'umbra', 'capella', 'terrasar', 'sentinel-1')):
+            sensor = 'SAR'
+        payload['sensor_type'] = sensor
+
+        # Dates from item
+        props = item.get('properties', {})
+        dt_str = props.get('datetime') or props.get('start_datetime', '')
+        if dt_str:
+            payload['date'] = dt_str[:10]  # YYYY-MM-DD
+
+        # GSD
+        gsd = props.get('gsd') or props.get('eo:gsd')
+        if gsd:
+            try:
+                payload['gsd_m'] = float(gsd)
+            except (ValueError, TypeError):
+                pass
+
+        # Bbox from item (may override extent widget)
+        ibbox = item.get('bbox')
+        if ibbox and len(ibbox) >= 4:
+            payload['bbox'] = [float(v) for v in ibbox[:4]]
+
+        # Notes
+        payload['notes'] = (
+            f"Archive scene: {item.get('id', 'N/A')}\n"
+            f"Provider: {payload['_provider']}\n"
+            f"Satellite: {payload.get('satellite', 'N/A')}\n"
+            f"Date: {dt_str or 'N/A'}"
+        )
+
+    # ---- overpass row → payload ----------------------------------------
+
+    def _fill_payload_from_overpass(self, payload: Dict):
+        rows = sorted(
+            {idx.row() for idx in self.overpass_table.selectionModel().selectedRows()}
+        )
+        if not rows:
+            return
+        item_widget = self.overpass_table.item(rows[0], self._OV_SAT)
+        if not item_widget:
+            return
+        orig_idx = item_widget.data(Qt.UserRole)
+        if orig_idx is None or orig_idx >= len(self._overpass_results):
+            return
+        op = self._overpass_results[orig_idx]
+
+        payload['_source'] = 'overpass'
+        payload['satellite'] = op.get('satellite', '')
+        payload['operator'] = op.get('operator', '')
+
+        # Map operator → Tasking dock provider label
+        payload['_provider'] = self._OPERATOR_TO_PROVIDER.get(
+            payload['operator'], payload['operator']
+        )
+
+        # Look up catalogue entry for rich metadata
+        cat_entry = None
+        for s in SATELLITE_CATALOGUE:
+            if s['constellation'] == payload['satellite']:
+                cat_entry = s
+                break
+
+        # Sensor type
+        sensor_raw = (cat_entry or {}).get('sensor', 'Optical')
+        if 'sar' in sensor_raw.lower():
+            payload['sensor_type'] = 'SAR'
+        else:
+            payload['sensor_type'] = 'Optical'
+
+        # GSD
+        gsd = (cat_entry or {}).get('gsd_m')
+        if gsd:
+            payload['gsd_m'] = gsd
+
+        # Overpass datetime → acquisition window
+        dt_str = op.get('datetime_utc', '')  # "YYYY-MM-DD HH:MM UTC"
+        if dt_str:
+            payload['date'] = dt_str[:10]
+
+        # Day/Night
+        daylight = (cat_entry or {}).get('daylight', 'Day')
+        if daylight == 'Both':
+            payload['day_night'] = 'Any'
+        elif daylight == 'Night':
+            payload['day_night'] = 'Night only'
+        else:
+            payload['day_night'] = 'Day only'
+
+        # SAR specifics
+        if payload['sensor_type'] == 'SAR':
+            payload['sar_mode'] = 'Any'
+            payload['sar_polarization'] = 'Any'
+
+        # Off-nadir / distance → resolution hint
+        off_nadir = op.get('off_nadir_deg', 0)
+        ground_dist = op.get('ground_dist_km', 0)
+        direction = op.get('direction', '')
+        confidence = op.get('confidence', '')
+        duration = op.get('duration_min', 0)
+        elev = op.get('max_elevation', 0)
+        alt_km = op.get('orbit_alt_km', 0)
+
+        # Rich notes
+        lines = [
+            f'Satellite: {payload["satellite"]} ({payload["operator"]})',
+            f'Predicted pass: {dt_str}',
+            f'Direction: {direction}',
+            f'Off-nadir: {off_nadir}°  |  Ground dist: {ground_dist} km',
+            f'Max elevation: {elev}°  |  Duration: {duration} min',
+            f'Orbit altitude: {alt_km} km  |  Confidence: {confidence}',
+        ]
+        if cat_entry:
+            lines.append(
+                f'Sensor model: {cat_entry.get("sensor_model", "?")}  |  '
+                f'Max off-nadir: {cat_entry.get("max_off_nadir_deg", "?")}°'
+            )
+        payload['notes'] = '\n'.join(lines)
 
     # ------------------------------------------------------------------
     # Satellite selection helper
