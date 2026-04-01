@@ -9,6 +9,7 @@ from .umbra_stac import UmbraSTACConnector
 from .capella_stac import CapellaSTACConnector
 from .copernicus_stac import CopernicusStacConnector
 from .nasa_earthdata import NasaEarthdataConnector
+from .swisstopo_stac import SwisstopoStacConnector
 
 __all__ = [
 	"ConnectorBase",
@@ -23,4 +24,5 @@ __all__ = [
 	"CapellaSTACConnector",
 	"CopernicusStacConnector",
 	"NasaEarthdataConnector",
+	"SwisstopoStacConnector",
 ]

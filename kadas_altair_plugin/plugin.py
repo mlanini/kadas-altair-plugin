@@ -63,6 +63,7 @@ class KadasAltair(QObject):
         self._settings_dock = None
         self._tasking_dock = None
         self._archive_dock = None
+        self._smart_tasking_dock = None
         
         logger.info(f"Plugin directory: {self.plugin_dir}")
         logger.debug(f"QGIS interface type: {type(self.iface)}")
@@ -221,6 +222,16 @@ class KadasAltair(QObject):
             checkable=True,
             parent=self.iface.mainWindow(),
         )
+
+        # Smart Tasking action
+        self.smart_tasking_action = self.add_action(
+            main_icon,
+            self.tr("Smart Tasking"),
+            self.toggle_smart_tasking_dock,
+            status_tip=self.tr("Toggle Smart Tasking Panel"),
+            checkable=True,
+            parent=self.iface.mainWindow(),
+        )
         
         # Separator
         self.menu.addSeparator()
@@ -294,6 +305,10 @@ class KadasAltair(QObject):
         if self._archive_dock is not None:
             self._archive_dock.close()
             self._archive_dock = None
+
+        if self._smart_tasking_dock is not None:
+            self._smart_tasking_dock.close()
+            self._smart_tasking_dock = None
         
         # Remove menu
         if self.menu:
@@ -305,6 +320,21 @@ class KadasAltair(QObject):
             if action:
                 action.triggered.disconnect()
         self.actions.clear()
+
+    def _tabify_dock(self, new_dock):
+        """Tabify *new_dock* with the first existing Altair dock so panels
+        always appear superimposed (tabbed) rather than stacked vertically."""
+        mw = self.iface.mainWindow()
+        for candidate in (
+            self._main_dock,
+            self._settings_dock,
+            self._tasking_dock,
+            self._archive_dock,
+            self._smart_tasking_dock,
+        ):
+            if candidate is not None and candidate is not new_dock:
+                mw.tabifyDockWidget(candidate, new_dock)
+                return
 
     def toggle_main_dock(self):
         """Toggle main EO data dock"""
@@ -323,6 +353,7 @@ class KadasAltair(QObject):
                 
                 # Add as dock widget to main window - kadas-vantor pattern
                 self.iface.mainWindow().addDockWidget(Qt.RightDockWidgetArea, self._main_dock)
+                self._tabify_dock(self._main_dock)
                 self._main_dock.show()
                 self._main_dock.raise_()
                 return
@@ -355,6 +386,7 @@ class KadasAltair(QObject):
                             self._settings_dock.settings_saved.connect(self._main_dock.refresh_collections)
                         
                         self.iface.mainWindow().addDockWidget(Qt.RightDockWidgetArea, self._main_dock)
+                        self._tabify_dock(self._main_dock)
                         self._main_dock.show()
                         self._main_dock.raise_()
                         
@@ -401,12 +433,7 @@ class KadasAltair(QObject):
                 
                 # Add as dock widget to main window - kadas-vantor pattern
                 self.iface.mainWindow().addDockWidget(Qt.RightDockWidgetArea, self._settings_dock)
-                
-                # Tabify with main dock if it exists (dock widgets will overlap in tabs)
-                if self._main_dock:
-                    self.iface.mainWindow().tabifyDockWidget(self._main_dock, self._settings_dock)
-                    logger.debug("Tabified settings dock with main dock")
-                
+                self._tabify_dock(self._settings_dock)
                 self._settings_dock.show()
                 self._settings_dock.raise_()
                 return
@@ -439,10 +466,7 @@ class KadasAltair(QObject):
                             self._settings_dock.settings_saved.connect(self._main_dock.refresh_collections)
                         
                         self.iface.mainWindow().addDockWidget(Qt.RightDockWidgetArea, self._settings_dock)
-                        
-                        if self._main_dock:
-                            self.iface.mainWindow().tabifyDockWidget(self._main_dock, self._settings_dock)
-                        
+                        self._tabify_dock(self._settings_dock)
                         self._settings_dock.show()
                         self._settings_dock.raise_()
                         
@@ -483,12 +507,7 @@ class KadasAltair(QObject):
                 self._tasking_dock.visibilityChanged.connect(self._on_tasking_visibility_changed)
 
                 self.iface.mainWindow().addDockWidget(Qt.RightDockWidgetArea, self._tasking_dock)
-
-                if self._main_dock:
-                    self.iface.mainWindow().tabifyDockWidget(self._main_dock, self._tasking_dock)
-                elif self._settings_dock:
-                    self.iface.mainWindow().tabifyDockWidget(self._settings_dock, self._tasking_dock)
-
+                self._tabify_dock(self._tasking_dock)
                 self._tasking_dock.show()
                 self._tasking_dock.raise_()
                 return
@@ -529,14 +548,7 @@ class KadasAltair(QObject):
                 self._archive_dock.order_requested.connect(self._open_tasking_from_archive)
 
                 self.iface.mainWindow().addDockWidget(Qt.RightDockWidgetArea, self._archive_dock)
-
-                if self._main_dock:
-                    self.iface.mainWindow().tabifyDockWidget(self._main_dock, self._archive_dock)
-                elif self._settings_dock:
-                    self.iface.mainWindow().tabifyDockWidget(self._settings_dock, self._archive_dock)
-                elif self._tasking_dock:
-                    self.iface.mainWindow().tabifyDockWidget(self._tasking_dock, self._archive_dock)
-
+                self._tabify_dock(self._archive_dock)
                 self._archive_dock.show()
                 self._archive_dock.raise_()
                 return
@@ -564,6 +576,42 @@ class KadasAltair(QObject):
     def _on_archive_visibility_changed(self, visible):
         """Sync action checked state with archive dock visibility"""
         self.archive_action.setChecked(visible)
+
+    def toggle_smart_tasking_dock(self):
+        """Toggle Smart Tasking dock"""
+        if self._smart_tasking_dock is None:
+            try:
+                from .gui.smart_tasking_dock import SmartTaskingDockWidget
+
+                self._smart_tasking_dock = SmartTaskingDockWidget(self.iface, self.iface.mainWindow())
+                self._smart_tasking_dock.setObjectName('AltairSmartTaskingDock')
+                self._smart_tasking_dock.visibilityChanged.connect(self._on_smart_tasking_visibility_changed)
+
+                self.iface.mainWindow().addDockWidget(Qt.RightDockWidgetArea, self._smart_tasking_dock)
+                self._tabify_dock(self._smart_tasking_dock)
+                self._smart_tasking_dock.show()
+                self._smart_tasking_dock.raise_()
+                return
+
+            except Exception as e:
+                error_msg = str(e)
+                logger.error(f'Failed to create Smart Tasking panel: {error_msg}', exc_info=True)
+                QMessageBox.critical(
+                    self.iface.mainWindow(), 'Error',
+                    f'Failed to create Smart Tasking panel:\n{error_msg}',
+                )
+                self.smart_tasking_action.setChecked(False)
+                return
+
+        if self._smart_tasking_dock.isVisible():
+            self._smart_tasking_dock.hide()
+        else:
+            self._smart_tasking_dock.show()
+            self._smart_tasking_dock.raise_()
+
+    def _on_smart_tasking_visibility_changed(self, visible):
+        """Sync action checked state with Smart Tasking dock visibility"""
+        self.smart_tasking_action.setChecked(visible)
 
     def _open_tasking_from_archive(self, item):
         """Open Tasking dock and prefill minimal provider/AOI context from archive result."""

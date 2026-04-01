@@ -587,7 +587,15 @@ Save as `test/<connector_name>.py` and document in this section.
 
 ---
 
-## �🤝 Getting Help
+## 🙏 Inspiring Projects
+
+The Smart Tasking prediction engine draws inspiration from:
+- **[eo-predictor](https://github.com/developmentseed/eo-predictor)** — Development Seed's satellite overpass prediction tool
+- **[sat-predict](https://sat-predict.davidhsu.cc/)** — David Hsu's interactive satellite pass visualisation
+
+---
+
+## 🤝 Getting Help
 
 - **GitHub Issues**: https://github.com/mlanini/kadas-altair/issues
 - **Email**: mlanini(at)proton(dot)me

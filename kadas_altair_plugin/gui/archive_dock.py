@@ -120,6 +120,7 @@ ARCHIVE_PROVIDERS: Dict[str, str] = {
     'Vantor':             'vantor',
     'NASA EarthData':     'nasa_earthdata',
     'Copernicus':         'copernicus_stac',
+    'swisstopo S2-SR':    'swisstopo_stac',
 }
 
 
@@ -314,11 +315,12 @@ class ArchiveDockWidget(QDockWidget):
         prov_row1 = QHBoxLayout()
         prov_row2 = QHBoxLayout()
         names = list(ARCHIVE_PROVIDERS.keys())
+        split_idx = (len(names) + 1) // 2
         for i, name in enumerate(names):
             cb = QCheckBox(name)
             cb.setChecked(True)
             self._provider_checks[name] = cb
-            (prov_row1 if i < 3 else prov_row2).addWidget(cb)
+            (prov_row1 if i < split_idx else prov_row2).addWidget(cb)
 
         prov_row1.addStretch()
         prov_row2.addStretch()
@@ -653,6 +655,23 @@ class ArchiveDockWidget(QDockWidget):
                 logger.debug('NASA EarthData connector registered')
             except Exception as exc:
                 logger.warning(f'NASA EarthData connector unavailable: {exc}')
+
+            # swisstopo SWISSEO S2-SR (open-data STAC)
+            try:
+                from ..connectors.swisstopo_stac import SwisstopoStacConnector
+                swisstopo = SwisstopoStacConnector()
+                self._connector_manager.register_connector(
+                    'swisstopo_stac', swisstopo, 'swisstopo S2-SR',
+                    capabilities=[
+                        ConnectorCapability.BBOX_SEARCH,
+                        ConnectorCapability.DATE_RANGE,
+                        ConnectorCapability.CLOUD_COVER,
+                        ConnectorCapability.COG_SUPPORT,
+                    ]
+                )
+                logger.debug('swisstopo STAC connector registered')
+            except Exception as exc:
+                logger.warning(f'swisstopo STAC connector unavailable: {exc}')
 
             logger.info('ArchiveDockWidget: connector manager ready')
 

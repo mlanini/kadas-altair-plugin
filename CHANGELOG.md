@@ -5,6 +5,32 @@ All notable changes to KADAS Altair Plugin will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] - 2026-04-01
+
+### Added
+- **Smart Tasking dock** — satellite overpass prediction and 3D orbit visualisation:
+  - **Bearing-convergence engine**: iterative bisection detects when a satellite’s sensor footprint crosses the target AOI (replaces elevation-based scanning)
+  - **Sensor models**: `pushbroom` (swath-only) and `off_nadir` (swath + max scan angle) with per-satellite parameters in a 21-entry catalogue
+  - **SGP4 orbital propagation** via `sgp4` library with analytical sun-synchronous fallback
+  - **5-layer 3D visualisation** (QGIS native `qgis._3d` renderers):
+    - Orbit track — LineStringZ at orbital altitude (white)
+    - Ground track — LineString on surface (cyan)
+    - Swath corridor — Polygon ribbon (cyan, semi-transparent)
+    - Satellite position — PointZ at altitude (red sphere)
+    - Nadir axis — LineStringZ surface→satellite (red tube)
+  - **Archive search** tab with multi-connector parallel search (reuses connector framework)
+  - Antimeridian and pole-guard clamping for all generated geometries
+  - `blockSignals` guards to prevent spurious `itemSelectionChanged` during table repopulation
+
+### Changed
+- **Satellite catalogue** enriched with `sensor_model` and `max_off_nadir_deg` fields for all 21 entries
+- **metadata.txt**: Updated version to 0.4.2, description updated with Smart Tasking capabilities
+
+### Documentation
+- Added inspiring projects to Credits: [eo-predictor](https://github.com/developmentseed/eo-predictor), [sat-predict](https://sat-predict.davidhsu.cc/)
+- Updated ARCHITECTURE.md with Smart Tasking dock in architecture diagram and project structure
+- Updated README.md with Smart Tasking feature and version badge
+
 ## [0.4.1] - 2026-03-31
 
 ### Changed

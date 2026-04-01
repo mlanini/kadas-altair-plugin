@@ -213,7 +213,52 @@ Columns vary by connector, typically include:
 
 ---
 
-## 🔐 Authentication
+## �️ Smart Tasking
+
+The **Smart Tasking** dock predicts when a satellite's sensor footprint will cross your area of interest, using SGP4 orbital propagation and a bearing-convergence algorithm.
+
+### Opening Smart Tasking
+
+**Plugins** → **Altair** → **Smart Tasking**
+
+### Predicting Overpasses
+
+1. Select one or more constellations from the satellite list
+2. Define your AOI (draw on map, use map extent, or enter coordinates)
+3. Set the prediction time window (start/end date)
+4. Click **Predict** → results appear in the Overpass tab
+
+### Understanding Results
+
+Each predicted overpass shows:
+- **Date/Time (UTC)** — closest approach time
+- **Direction** — Ascending or Descending pass
+- **Max Elevation** — equivalent elevation angle from observer
+- **Off-Nadir (°)** — pointing angle from satellite nadir
+- **Duration** — time the target is within the sensor footprint
+- **Confidence** — `SGP4` (TLE-based) or `Approximate` (analytical model)
+
+### 3D Visualisation
+
+Click any row in the overpass table to render 5 layers in the QGIS 3D view:
+- **Orbit Track** (white) — full orbital period at satellite altitude
+- **Ground Track** (cyan) — sub-satellite trace on the surface
+- **Swath Corridor** (cyan, semi-transparent) — sensor footprint ribbon
+- **Satellite** (red sphere) — position at closest approach
+- **Nadir Axis** (red tube) — vertical line from surface to satellite
+
+### Sensor Models
+
+- **Pushbroom** (e.g. Sentinel-2, Landsat) — target must be within half the swath width
+- **Off-Nadir** (e.g. WorldView, Pléiades) — target within swath AND off-nadir angle ≤ maximum scan angle
+
+### Inspiring Projects
+
+The prediction engine was inspired by [eo-predictor](https://github.com/developmentseed/eo-predictor) and [sat-predict](https://sat-predict.davidhsu.cc/).
+
+---
+
+## �🔐 Authentication
 
 ### Copernicus STAC (Dataspace)
 

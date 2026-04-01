@@ -3,7 +3,7 @@
 **Multi-source satellite imagery browser for KADAS Albireo 2**
 
 [![License](https://img.shields.io/badge/License-GPL--2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/Version-0.4.1-success.svg)](https://github.com/mlanini/kadas-altair)
+[![Version](https://img.shields.io/badge/Version-0.4.2-success.svg)](https://github.com/mlanini/kadas-altair)
 [![Status](https://img.shields.io/badge/Status-Production-success.svg)](https://github.com)
 
 ## 📷 Screenshots
@@ -84,6 +84,7 @@ cp -r kadas_altair_plugin ~/.local/share/Kadas/Kadas/profiles/default/python/plu
 - ✅ **Footprint Selection** - Bidirectional map ↔ table sync with click-to-select on canvas
 - ✅ **Quicklook Preview** - Georeferenced thumbnail preview panel (WGS84 CRS fix)
 - ✅ **Tasking Integration** - Satellite tasking orders via mailto workflow
+- ✅ **Smart Tasking** - Satellite overpass prediction via SGP4 bearing-convergence + 3D orbit visualisation
 - ✅ **Proxy Support** - QgsNetworkAccessManager for SSL/proxy handling
 - ✅ **Logging System** - Comprehensive debug and error tracking
 
@@ -182,7 +183,7 @@ This plugin integrates with:
 
 **Author**: Michael Lanini  
 **Email**: mlanini@proton.me  
-**Version**: 0.4.1
+**Version**: 0.4.2
 - 📦 **COG Loading** - Cloud-Optimized GeoTIFF via GDAL vsicurl (no download)
 
 ### Technical Capabilities
@@ -361,6 +362,8 @@ This program is free software; you can redistribute it and/or modify it under th
 - GDAL vsicurl for COG streaming
 
 **Inspired By**:
+- [eo-predictor](https://github.com/developmentseed/eo-predictor) - Satellite overpass prediction concepts
+- [sat-predict](https://sat-predict.davidhsu.cc/) - Interactive satellite pass visualisation
 - [kadas-vantor-plugin](https://github.com/mlanini/kadas-vantor-plugin) - Footprint interaction patterns
 - [qgis-maxar-plugin](https://github.com/opengeos/qgis-maxar-plugin) - STAC integration concepts
 

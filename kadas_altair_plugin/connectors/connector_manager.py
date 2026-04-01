@@ -33,6 +33,7 @@ class ConnectorType(Enum):
     UMBRA_STAC = "umbra_stac"
     CAPELLA_STAC = "capella_stac"
     NASA_EARTHDATA = "nasa_earthdata"
+    SWISSTOPO_STAC = "swisstopo_stac"
 
 
 class ConnectorCapability(Enum):

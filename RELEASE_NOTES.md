@@ -1,3 +1,60 @@
+# Release Notes - KADAS Altair Plugin v0.4.2
+
+## 🛰️ Smart Tasking: Bearing-Convergence Overpass Prediction + 3D Orbit Visualisation
+
+v0.4.2 introduces the **Smart Tasking** dock — a satellite overpass predictor that answers *"when does a satellite's sensor footprint cross my target?"* using an iterative bearing-convergence algorithm, with full 3D orbit visualisation inside QGIS.
+
+---
+
+## ✨ Highlights
+
+### 🔭 Bearing-Convergence Prediction Engine
+- Replaces simple elevation-based scanning with a physically-motivated approach:
+  1. Propagate satellite via **SGP4** (or analytical sun-synchronous fallback)
+  2. Compute angle between velocity vector and satellite→target direction
+  3. Detect 90° zero-crossing → bisect with 20× shrink → converge to < 0.0001°
+  4. Apply **sensor model** constraints at closest approach
+- Two sensor models:
+  - **Pushbroom** (e.g. Sentinel-2, Landsat) — target within half-swath width
+  - **Off-Nadir** (e.g. WorldView, Pléiades) — within swath AND off-nadir angle ≤ max
+
+### 📡 21-Satellite Catalogue
+- Covers EO + SAR constellations: WorldView-3/2/Legion, Pléiades Neo, SPOT 6/7, SkySat, PlanetScope, BlackSky, Sentinel-1/2, Landsat 9, ICEYE, Capella, Umbra, TerraSAR-X, NISAR, and more
+- Each entry includes orbit parameters (altitude, inclination, period, LTAN), NORAD ID, swath width, `sensor_model`, and `max_off_nadir_deg`
+
+### 🌍 5-Layer 3D Visualisation
+Selecting an overpass in the results table renders:
+| Layer | Geometry | Colour |
+|---|---|---|
+| **Orbit Track** | LineStringZ at orbital altitude (~1 full period) | White |
+| **Ground Track** | LineString on surface | Cyan |
+| **Swath Corridor** | Polygon ribbon along ground track | Cyan (semi-transparent) |
+| **Satellite** | PointZ at orbital altitude | Red sphere |
+| **Nadir Axis** | LineStringZ surface→satellite | Red tube |
+
+Uses QGIS native `qgis._3d` renderers (`QgsPoint3DSymbol`, `QgsLine3DSymbol`, `QgsPolygon3DSymbol`) with automatic 2D fallback.
+
+### 📦 Archive Search
+- Multi-connector parallel search (reuses existing connector framework)
+- Results displayed in sortable table with footprint visualisation
+
+---
+
+## 🙏 Inspiring Projects
+
+The Smart Tasking prediction engine was inspired by:
+- **[eo-predictor](https://github.com/developmentseed/eo-predictor)** — Development Seed's satellite overpass prediction tool
+- **[sat-predict](https://sat-predict.davidhsu.cc/)** — David Hsu's interactive satellite pass visualisation
+
+---
+
+## 📦 Packaging
+
+- Full package: `KADAS_SKIP_PIP=1 python package_plugin_full.py`
+- Output: `kadas_altair_plugin_full_v0.4.2.zip`
+
+---
+
 # Release Notes - KADAS Altair Plugin v0.4.1
 
 ## 🔐 NASA EarthData Auth Update + Release Packaging

@@ -36,6 +36,11 @@ KADAS Altair follows a **middleware architecture** that decouples the UI from da
 │  │  dock.py   │  │ settings   │  │  log_viewer.py   │  │
 │  │ (Main UI)  │  │  _dock.py  │  │   (Debugging)    │  │
 │  └─────┬──────┘  └────────────┘  └──────────────────┘  │
+│  ┌──────────────────────────────────────────────┐  │
+│  │ smart_tasking_dock.py (Smart Tasking)            │  │
+│  │ SGP4 bearing-convergence overpass prediction      │  │
+│  │ + 3D orbit/ground track/swath visualisation       │  │
+│  └──────────────────────────────────────────────┘  │
 └────────┼─────────────────────────────────────────────────┘
          │
 ┌────────▼─────────────────────────────────────────────────┐
@@ -106,6 +111,8 @@ kadas_altair_plugin/
 │   ├── __init__.py
 │   ├── dock.py              # Main panel (search, results, loading)
 │   ├── dock_clean.py        # Refactored dock (experimental)
+│   ├── smart_tasking_dock.py # Smart Tasking (SGP4 overpass prediction)
+│   ├── archive_dock.py      # Archive search dock
 │   ├── settings_dock.py     # Settings dialog
 │   ├── log_viewer.py        # Log viewer window
 │   └── footprint_tool.py    # Map selection tool
