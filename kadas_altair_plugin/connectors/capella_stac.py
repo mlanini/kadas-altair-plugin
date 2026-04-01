@@ -71,7 +71,31 @@ class CapellaSTACConnector(ConnectorBase):
         self._catalog = None
         self._collections = {}
         self._items_cache = {}
+        self._error_count = 0
+        self._max_consecutive_errors = 10
         logger.info("Initialized Capella Space SAR Open Data STAC connector")
+
+    # ------------------------------------------------------------------
+    # URL helpers
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _resolve_href(href: str, parent_url: str) -> str:
+        """Resolve a possibly-relative *href* against *parent_url*.
+
+        Handles:
+        - Absolute URLs (https://…) → returned as-is
+        - Relative paths starting with './' → stripped then joined
+        - Bare relative filenames → joined to parent directory
+        - Empty strings → returned empty (caller must guard)
+        """
+        if not href:
+            return ''
+        if href.startswith('http://') or href.startswith('https://'):
+            return href
+        base = parent_url.rsplit('/', 1)[0]
+        if href.startswith('./'):
+            href = href[2:]
+        return f"{base}/{href}"
     
     def authenticate(self, credentials: dict) -> bool:
         """
@@ -172,7 +196,7 @@ class CapellaSTACConnector(ConnectorBase):
                         continue
                 
                 # Resolve relative URLs
-                full_href = f"{self.CATALOG_BASE}/{href}" if href.startswith('./') else href
+                full_href = self._resolve_href(href, self.CATALOG_URL)
                 
                 # Fetch catalog to count subcollections/items
                 asset_count = 0
@@ -200,7 +224,6 @@ class CapellaSTACConnector(ConnectorBase):
                 })
         
         logger.info(f"Found {len(collections)} collections (org filter: {organization})")
-        return collections
         return collections
     
     def get_subcollections(self, catalog_href: str, timeout: Optional[float] = None) -> List[Dict]:
@@ -232,12 +255,9 @@ class CapellaSTACConnector(ConnectorBase):
             for link in catalog.get('links', []):
                 if link.get('rel') in ['child', 'item']:
                     href_relative = link.get('href', '')
-                    # Convert relative to absolute URL
-                    if href_relative.startswith('./'):
-                        base_url = catalog_href.rsplit('/', 1)[0]
-                        href_absolute = f"{base_url}/{href_relative[2:]}"
-                    else:
-                        href_absolute = href_relative
+                    href_absolute = self._resolve_href(href_relative, catalog_href)
+                    if not href_absolute:
+                        continue
                     
                     subcollections.append({
                         'id': link.get('title', 'Unknown'),
@@ -314,6 +334,7 @@ class CapellaSTACConnector(ConnectorBase):
         instrument_mode = query.get('instrument_mode')
         
         results = []
+        self._error_count = 0           # reset per search
         
         # Determine which organization to search
         if product_type:
@@ -329,6 +350,9 @@ class CapellaSTACConnector(ConnectorBase):
         
         for collection in collections:
             if len(results) >= limit:
+                break
+            if self._error_count >= self._max_consecutive_errors:
+                logger.warning(f"Aborting search after {self._error_count} consecutive errors")
                 break
             
             # Recursively fetch items from this collection
@@ -374,31 +398,27 @@ class CapellaSTACConnector(ConnectorBase):
                 # This is a STAC collection - look for items
                 for link in catalog.get('links', []):
                     if link.get('rel') == 'item':
-                        item_href = link.get('href', '')
-                        if item_href.startswith('./'):
-                            base_url = collection_href.rsplit('/', 1)[0]
-                            item_href = f"{base_url}/{item_href[2:]}"
-                        
+                        item_href = self._resolve_href(link.get('href', ''), collection_href)
+                        if not item_href:
+                            continue
                         item = self._fetch_item(item_href)
                         if item:
                             items.append(item)
             else:
                 # This is a catalog - recurse into children
                 for link in catalog.get('links', []):
+                    if self._error_count >= self._max_consecutive_errors:
+                        break
                     if link.get('rel') == 'child':
-                        child_href = link.get('href', '')
-                        if child_href.startswith('./'):
-                            base_url = collection_href.rsplit('/', 1)[0]
-                            child_href = f"{base_url}/{child_href[2:]}"
-                        
+                        child_href = self._resolve_href(link.get('href', ''), collection_href)
+                        if not child_href:
+                            continue
                         child_items = self._fetch_collection_items(child_href, max_depth - 1)
                         items.extend(child_items)
                     elif link.get('rel') == 'item':
-                        item_href = link.get('href', '')
-                        if item_href.startswith('./'):
-                            base_url = collection_href.rsplit('/', 1)[0]
-                            item_href = f"{base_url}/{item_href[2:]}"
-                        
+                        item_href = self._resolve_href(link.get('href', ''), collection_href)
+                        if not item_href:
+                            continue
                         item = self._fetch_item(item_href)
                         if item:
                             items.append(item)
@@ -473,6 +493,9 @@ class CapellaSTACConnector(ConnectorBase):
         Returns:
             Response content as string or None
         """
+        if not url:
+            logger.warning("_fetch_qgis called with empty URL — skipping")
+            return None
         try:
             # Setup proxy
             QgsNetworkAccessManager.instance().setupDefaultProxyAndCache()
@@ -498,9 +521,11 @@ class CapellaSTACConnector(ConnectorBase):
             timer.stop()
             
             if error != QgsBlockingNetworkRequest.NoError:
+                self._error_count += 1
                 logger.error(f"QGIS network request failed: {blocking_request.errorMessage()}")
                 return None
             
+            self._error_count = 0      # reset on success
             reply = blocking_request.reply()
             content = reply.content()
             
