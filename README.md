@@ -11,6 +11,7 @@
 ![Vantor EO Open Data Connector](screenshots/screenshot01_vantor.jpg)
 ![ICEYE SAR Open Data Connector](screenshots/screenshot02_iceye.jpg)
 ![Archive Search — Copernicus](screenshots/screenshot03_copernicus.jpg)
+![Smart Tasking with orbit prediction](screenshots/screenshot04_smarttasking.jpg)
 
 ---
 
