@@ -212,7 +212,7 @@ Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines 
 
 ## License
 
-**GNU General Public License v2 or later** — see [LICENSE](LICENSE).
+**MIT License** — see [LICENSE](LICENSE).
 
 ---
 
