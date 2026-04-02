@@ -933,58 +933,6 @@ class AltairDockWidget(QDockWidget):
         
         # Connector decommissioned
         
-        # Register NASA EarthData connector (9,000+ Earth science datasets)
-        try:
-            from ..connectors import NasaEarthdataConnector
-            
-            # Try to get credentials from settings and secure storage
-            settings = QSettings()
-            username = settings.value('altair/nasa_username', None)
-            password = settings.value('altair/nasa_password', None)
-            access_token = settings.value('altair/nasa_access_token', None)
-
-            if self.secure_storage:
-                try:
-                    nasa_creds = self.secure_storage.get_credentials('nasa_earthdata') or {}
-                    username = nasa_creds.get('username', username)
-                    password = nasa_creds.get('password', password)
-                    access_token = nasa_creds.get('access_token', nasa_creds.get('token', access_token))
-                except Exception as e:
-                    logger.debug(f"NASA secure storage read failed: {e}")
-            
-            nasa_connector = NasaEarthdataConnector(
-                username=username,
-                password=password,
-                access_token=access_token,
-            )
-            
-            self.connector_manager.register_connector(
-                connector_id='nasa_earthdata',
-                connector_instance=nasa_connector,
-                display_name='NASA EarthData',
-                capabilities=[
-                    ConnectorCapability.BBOX_SEARCH,
-                    ConnectorCapability.DATE_RANGE,
-                    ConnectorCapability.CLOUD_COVER,
-                    ConnectorCapability.COLLECTIONS,
-                    ConnectorCapability.COG_SUPPORT,
-                    ConnectorCapability.DOWNLOAD,
-                    ConnectorCapability.AUTHENTICATION
-                ],
-                description='Browse 9,000+ NASA Earth science datasets (GEDI, MODIS, Landsat, Sentinel, etc.)'
-            )
-            logger.info("Registered NASA EarthData connector")
-            
-            self.nasa_connector = nasa_connector
-            
-        except ImportError as e:
-            logger.warning(f"NASA EarthData connector not available: {e}")
-            logger.info("Install earthaccess to enable NASA EarthData: pip install earthaccess pandas")
-            self.nasa_connector = None
-        except Exception as e:
-            logger.error(f"Failed to register NASA EarthData connector: {e}")
-            self.nasa_connector = None
-        
         # Populate connector dropdown
         self._populate_connector_combo()
         

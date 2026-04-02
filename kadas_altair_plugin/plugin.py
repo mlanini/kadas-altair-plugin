@@ -757,7 +757,7 @@ class KadasAltair(QObject):
 
 <p style="font-size: 9px; color: gray;">
 KADAS Altair is open source software.<br>
-Licensed under GNU GPL v2 or later.<br>
+Licensed under the MIT License.<br>
 © 2026 {author}
 </p>
 """

@@ -32,7 +32,6 @@ kadas_altair_plugin/
 │   ├── vantor.py           # Maxar/Vantor Open Data
 │   ├── oneatlas.py         # OneAtlas (stub)
 │   ├── planet.py           # Planet (stub)
-│   ├── gee.py              # Google Earth Engine (stub)
 │   └── nasa_earthdata.py   # NASA EarthData (stub)
 ├── gui/                    # User interface
 │   ├── dock.py             # Main panel (search & results)

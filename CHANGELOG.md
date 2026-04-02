@@ -194,7 +194,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Capella SAR Open Data**: ~1000 SAR images, X-band radar, multiple product formats
   - **Maxar Open Data (Vantor STAC)**: 55+ disaster event collections, sub-meter optical
   - **Copernicus Dataspace**: Sentinel-1/2/3/5P via OAuth2 and STAC API
-- 4 additional experimental connectors: Planet, Google Earth Engine, NASA EarthData, OneAtlas
+- 3 additional experimental connectors: Planet, NASA EarthData, OneAtlas
 - Interactive map-based footprint selection with bidirectional table sync
 - Cloud-Optimized GeoTIFF (COG) loading via GDAL vsicurl
 - Advanced search filters: bbox, date range, cloud cover

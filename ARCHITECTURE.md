@@ -104,7 +104,6 @@ kadas_altair_plugin/
 │   ├── copernicus_stac.py   # Copernicus STAC (OAuth2 + REST)
 │   ├── oneatlas.py          # OneAtlas (stub)
 │   ├── planet.py            # Planet (stub)
-│   ├── gee.py               # Google Earth Engine (stub)
 │   └── nasa_earthdata.py    # NASA EarthData (stub)
 │
 ├── gui/                      # User interface

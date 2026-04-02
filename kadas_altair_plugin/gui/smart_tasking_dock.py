@@ -12,7 +12,7 @@ and lists results in the same tabular format as the Archive dock.
 using SGP4 orbital propagation (when available) or a fast analytical
 sun-synchronous model.  Think *eo-predictor* but inside QGIS.
 
-No PhDs required.  No animals were harmed.  Probably.
+No animals were harmed.  Probably.
 """
 
 from __future__ import annotations
@@ -238,17 +238,6 @@ SATELLITE_CATALOGUE: List[Dict] = [
         'orbit_alt_km': 705, 'orbit_inc_deg': 98.2,
         'orbit_period_min': 98.9, 'swath_km': 185.0,
         'revisit_days': 16.0, 'ltan_hour': 10.0,
-        'sensor_model': 'pushbroom', 'max_off_nadir_deg': 0.0,
-    },
-    {
-        'id': 'swisstopo_s2sr', 'operator': 'swisstopo',
-        'constellation': 'SWISSEO S2-SR', 'sensor': 'Optical',
-        'gsd_m': 10.0, 'access': 'Free', 'daylight': 'Day',
-        'fun_fact': 'Swiss-made, cheese-free. Surface reflectance for the Alps.',
-        'norad_id': 40697, 'connector_ids': ['swisstopo_stac'],
-        'orbit_alt_km': 786, 'orbit_inc_deg': 98.6,
-        'orbit_period_min': 100.6, 'swath_km': 290.0,
-        'revisit_days': 5.0, 'ltan_hour': 10.5,
         'sensor_model': 'pushbroom', 'max_off_nadir_deg': 0.0,
     },
     {
@@ -1078,6 +1067,7 @@ class SmartTaskingDockWidget(QDockWidget):
         self._connector_manager = None
         self._active_search_task = None
         self._active_overpass_task = None
+        self._updating_archive_table = False
         self._footprints_layer = None
         self._3d_orbit_layer = None
         self._3d_ground_layer = None
@@ -1127,9 +1117,6 @@ class SmartTaskingDockWidget(QDockWidget):
                 ('nasa_earthdata',  '..connectors.nasa_earthdata',  'NasaEarthdataConnector',   'NASA EarthData',
                  [ConnectorCapability.BBOX_SEARCH, ConnectorCapability.DATE_RANGE,
                   ConnectorCapability.AUTHENTICATION, ConnectorCapability.COG_SUPPORT]),
-                ('swisstopo_stac',  '..connectors.swisstopo_stac',  'SwisstopoStacConnector',   'swisstopo',
-                 [ConnectorCapability.BBOX_SEARCH, ConnectorCapability.DATE_RANGE,
-                  ConnectorCapability.CLOUD_COVER, ConnectorCapability.COG_SUPPORT]),
             ]
 
             import importlib
@@ -1544,8 +1531,35 @@ class SmartTaskingDockWidget(QDockWidget):
     # Dispatch (Search / Predict / both)
     # ------------------------------------------------------------------
 
+    def _is_task_active(self, task) -> bool:
+        """Return True when a QgsTask is still queued/running."""
+        if not task or not QGIS_AVAILABLE:
+            return False
+        try:
+            status = task.status()
+            active_states = []
+            for name in ('Queued', 'OnHold', 'Running'):
+                if hasattr(QgsTask, name):
+                    active_states.append(getattr(QgsTask, name))
+            return status in active_states
+        except Exception:
+            return False
+
+    def _has_active_tasks(self) -> bool:
+        """Check whether archive search and/or overpass prediction is active."""
+        return self._is_task_active(self._active_search_task) or self._is_task_active(self._active_overpass_task)
+
+    def _update_go_button_state(self):
+        """Enable the action button only when no background task is active."""
+        self.go_btn.setEnabled(not self._has_active_tasks())
+
     def _on_go_clicked(self):
         """Central dispatch — detect mode and launch appropriate task(s)."""
+        if self._has_active_tasks():
+            self.status_label.setText('Operation already running — wait for completion before starting a new search.')
+            self.status_label.setStyleSheet('color: #ffcc00; font-size: 10px;')
+            return
+
         today = date.today()
         start_py = self.date_start.date().toPyDate()
         end_py = self.date_end.date().toPyDate()
@@ -1613,7 +1627,6 @@ class SmartTaskingDockWidget(QDockWidget):
             'connector_ids': ready_ids,
         }
 
-        self.go_btn.setEnabled(False)
         self.status_label.setText('Searching archives …')
         self.status_label.setStyleSheet('color: #88ccff; font-size: 10px;')
 
@@ -1622,73 +1635,97 @@ class SmartTaskingDockWidget(QDockWidget):
             self._active_search_task = task
             task.taskCompleted.connect(lambda: self._on_search_done(task))
             task.taskTerminated.connect(lambda: self._on_search_error(task))
+            self._update_go_button_state()
             QgsApplication.taskManager().addTask(task)
         else:
             # Synchronous fallback
             task = _SmartSearchTask(self._connector_manager, params)
+            self._active_search_task = task
+            self._update_go_button_state()
             task.run()
             self._on_search_done(task)
 
     def _on_search_done(self, task: _SmartSearchTask):
-        self.go_btn.setEnabled(True)
+        if task is not self._active_search_task:
+            logger.debug('Ignoring stale archive-search completion callback')
+            return
+
+        self._active_search_task = None
         self._search_results = task.results or []
         self._populate_archive_table()
         self.results_tabs.setCurrentIndex(0)
         n = len(self._search_results)
         self.status_label.setText(f'Archive search complete — {n} scene(s)')
         self.status_label.setStyleSheet('color: #00ffbf; font-size: 10px;')
+        self._update_go_button_state()
 
     def _on_search_error(self, task: _SmartSearchTask):
-        self.go_btn.setEnabled(True)
+        if task is not self._active_search_task:
+            logger.debug('Ignoring stale archive-search error callback')
+            return
+
+        self._active_search_task = None
         msg = task.error_message or 'Unknown error'
         self.status_label.setText(f'Archive search failed: {msg}')
         self.status_label.setStyleSheet('color: #ff6b6b; font-size: 10px;')
+        self._update_go_button_state()
 
     def _populate_archive_table(self):
+        self._updating_archive_table = True
+        self.archive_table.blockSignals(True)
         self.archive_table.setSortingEnabled(False)
         self.archive_table.setRowCount(0)
 
-        for row_idx, item in enumerate(self._search_results):
-            props = item.get('properties', item)
-            provider  = str(item.get('_provider', props.get('provider', '')))
-            date_str  = str(props.get('datetime', props.get('date', '')))[:10]
-            satellite = str(props.get('platform', props.get('satellite_id',
-                            props.get('constellation', ''))))
-            cloud_raw = props.get('eo:cloud_cover', props.get('cloud_cover', ''))
-            cloud_str = f'{float(cloud_raw):.1f}' if cloud_raw not in ('', None) else 'N/A'
-            gsd_raw   = props.get('gsd', props.get('eo:gsd', ''))
-            gsd_str   = f'{float(gsd_raw):.1f}' if gsd_raw not in ('', None) else 'N/A'
-            scene_id  = str(item.get('id', props.get('id', '')))
+        try:
+            for row_idx, item in enumerate(self._search_results):
+                props = item.get('properties', item)
+                provider = str(item.get('_provider', props.get('provider', '')))
+                date_str = str(props.get('datetime', props.get('date', '')))[:10]
+                satellite = str(props.get('platform', props.get('satellite_id',
+                                props.get('constellation', ''))))
+                cloud_raw = props.get('eo:cloud_cover', props.get('cloud_cover', ''))
+                cloud_str = f'{float(cloud_raw):.1f}' if cloud_raw not in ('', None) else 'N/A'
+                gsd_raw = props.get('gsd', props.get('eo:gsd', ''))
+                gsd_str = f'{float(gsd_raw):.1f}' if gsd_raw not in ('', None) else 'N/A'
+                scene_id = str(item.get('id', props.get('id', '')))
 
-            self.archive_table.insertRow(row_idx)
-            pi = QTableWidgetItem(provider)
-            pi.setData(Qt.UserRole, row_idx)
-            self.archive_table.setItem(row_idx, self._COL_PROVIDER,  pi)
-            self.archive_table.setItem(row_idx, self._COL_DATE,      QTableWidgetItem(date_str))
-            self.archive_table.setItem(row_idx, self._COL_SATELLITE, QTableWidgetItem(satellite))
-            ci = _NumItem(cloud_str); ci.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            self.archive_table.setItem(row_idx, self._COL_CLOUD, ci)
-            gi = _NumItem(gsd_str);   gi.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            self.archive_table.setItem(row_idx, self._COL_GSD, gi)
-            self.archive_table.setItem(row_idx, self._COL_ID, QTableWidgetItem(scene_id))
+                self.archive_table.insertRow(row_idx)
+                pi = QTableWidgetItem(provider)
+                pi.setData(Qt.UserRole, row_idx)
+                self.archive_table.setItem(row_idx, self._COL_PROVIDER, pi)
+                self.archive_table.setItem(row_idx, self._COL_DATE, QTableWidgetItem(date_str))
+                self.archive_table.setItem(row_idx, self._COL_SATELLITE, QTableWidgetItem(satellite))
+                ci = _NumItem(cloud_str); ci.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                self.archive_table.setItem(row_idx, self._COL_CLOUD, ci)
+                gi = _NumItem(gsd_str); gi.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                self.archive_table.setItem(row_idx, self._COL_GSD, gi)
+                self.archive_table.setItem(row_idx, self._COL_ID, QTableWidgetItem(scene_id))
+        finally:
+            self.archive_table.setSortingEnabled(True)
+            self.archive_table.blockSignals(False)
+            self._updating_archive_table = False
 
-        self.archive_table.setSortingEnabled(True)
         count = len(self._search_results)
         self.archive_count_label.setText(f'{count} result(s) found')
 
         if count > 0:
             self._refresh_footprints_layer()
+        else:
+            self._clear_footprints_layer()
 
     def _on_archive_row_selected(self):
         """Highlight selected footprints on map."""
-        rows = {idx.row() for idx in self.archive_table.selectionModel().selectedRows()}
-        if not self._footprints_layer or not QGIS_AVAILABLE:
+        if self._updating_archive_table or not QGIS_AVAILABLE:
             return
+        model = self.archive_table.selectionModel()
+        if model is None or self._footprints_layer is None:
+            return
+
+        rows = {idx.row() for idx in model.selectedRows()}
         try:
-            layer = QgsProject.instance().mapLayersByName('SmartTasking Footprints')
-            if not layer:
+            layer = self._footprints_layer
+            if layer is None:
                 return
-            layer = layer[0]
             fids = []
             for feat in layer.getFeatures():
                 if feat.attribute('index') in rows:
@@ -1979,9 +2016,34 @@ class SmartTaskingDockWidget(QDockWidget):
             pt_mat.setDiffuse(QColor(255, 0, 0))
             pt_mat.setAmbient(QColor(204, 0, 0))
             pt_sym.setMaterialSettings(pt_mat)
-            pt_sym.setShape(1)                       # 1 = Sphere
+
+            # QGIS/KADAS API compatibility: setShape() may expect an enum
+            # (newer versions) or accept raw integer values (older versions).
+            shape_candidates = []
+            shape_enum = getattr(QgsPoint3DSymbol, 'Shape', None)
+            if shape_enum is not None and hasattr(shape_enum, 'Sphere'):
+                shape_candidates.append(getattr(shape_enum, 'Sphere'))
+            if hasattr(QgsPoint3DSymbol, 'Sphere'):
+                shape_candidates.append(getattr(QgsPoint3DSymbol, 'Sphere'))
+            shape_candidates.append(1)  # legacy fallback
+
+            shape_set = False
+            for shape_value in shape_candidates:
+                try:
+                    pt_sym.setShape(shape_value)
+                    shape_set = True
+                    break
+                except TypeError:
+                    continue
+
+            if not shape_set:
+                logger.debug('QgsPoint3DSymbol shape enum not resolved; using default point shape')
+
             radius = max(3000.0, alt_m * 0.008)
-            pt_sym.setShapeProperties({'radius': radius})
+            try:
+                pt_sym.setShapeProperties({'radius': radius})
+            except Exception as exc:
+                logger.debug(f'Could not apply 3D point radius property: {exc}')
             pt_sym.setAltitudeClamping(_CLAMP)
             r1 = QgsVectorLayer3DRenderer()
             r1.setSymbol(pt_sym)
@@ -2025,13 +2087,36 @@ class SmartTaskingDockWidget(QDockWidget):
     # Footprints layer (for archive results)
     # ------------------------------------------------------------------
 
+    def _clear_footprints_layer(self):
+        """Safely remove SmartTasking footprint layers from the project."""
+        if not QGIS_AVAILABLE:
+            self._footprints_layer = None
+            return
+        try:
+            project = QgsProject.instance()
+
+            # Remove tracked layer first
+            layer = self._footprints_layer
+            if layer is not None:
+                try:
+                    project.removeMapLayer(layer.id())
+                except Exception:
+                    pass
+
+            # Defensive cleanup of any leftover layers with same display name
+            for leftover in project.mapLayersByName('SmartTasking Footprints'):
+                try:
+                    project.removeMapLayer(leftover.id())
+                except Exception:
+                    pass
+        finally:
+            self._footprints_layer = None
+
     def _refresh_footprints_layer(self):
         if not QGIS_AVAILABLE or not self._search_results:
             return
         try:
-            existing = QgsProject.instance().mapLayersByName('SmartTasking Footprints')
-            if existing:
-                QgsProject.instance().removeMapLayer(existing[0].id())
+            self._clear_footprints_layer()
 
             layer = QgsVectorLayer('Polygon?crs=EPSG:4326', 'SmartTasking Footprints', 'memory')
             pr = layer.dataProvider()
@@ -2126,15 +2211,22 @@ class SmartTaskingDockWidget(QDockWidget):
             self._active_overpass_task = task
             task.taskCompleted.connect(lambda: self._on_overpass_done(task))
             task.taskTerminated.connect(lambda: self._on_overpass_error(task))
+            self._update_go_button_state()
             QgsApplication.taskManager().addTask(task)
         else:
             # Synchronous fallback
             task = _OverpassTask(satellites, lat, lon, start_dt, end_dt)
+            self._active_overpass_task = task
+            self._update_go_button_state()
             task.run()
             self._on_overpass_done(task)
 
     def _on_overpass_done(self, task: _OverpassTask):
-        self.go_btn.setEnabled(True)
+        if task is not self._active_overpass_task:
+            logger.debug('Ignoring stale overpass completion callback')
+            return
+
+        self._active_overpass_task = None
         self._overpass_results = task.results or []
         self._populate_overpass_table()
         self.results_tabs.setCurrentIndex(1)
@@ -2142,12 +2234,18 @@ class SmartTaskingDockWidget(QDockWidget):
         method = 'SGP4' if _SGP4_OK else 'analytical model'
         self.status_label.setText(f'Prediction complete — {n} overpass(es) ({method})')
         self.status_label.setStyleSheet('color: #00e5ff; font-size: 10px;')
+        self._update_go_button_state()
 
     def _on_overpass_error(self, task: _OverpassTask):
-        self.go_btn.setEnabled(True)
+        if task is not self._active_overpass_task:
+            logger.debug('Ignoring stale overpass error callback')
+            return
+
+        self._active_overpass_task = None
         msg = task.error_message or 'Unknown error'
         self.status_label.setText(f'Overpass prediction failed: {msg}')
         self.status_label.setStyleSheet('color: #ff6b6b; font-size: 10px;')
+        self._update_go_button_state()
 
     def _populate_overpass_table(self):
         self.overpass_table.blockSignals(True)
@@ -2603,6 +2701,16 @@ class SmartTaskingDockWidget(QDockWidget):
     # ------------------------------------------------------------------
 
     def _reset_all(self):
+        # Cancel in-flight background work first to avoid stale callbacks
+        for task_attr in ('_active_search_task', '_active_overpass_task'):
+            task = getattr(self, task_attr, None)
+            if task and self._is_task_active(task):
+                try:
+                    task.cancel()
+                except Exception:
+                    pass
+            setattr(self, task_attr, None)
+
         self.date_start.setDate(QDate.currentDate().addMonths(-1))
         self.date_end.setDate(QDate.currentDate().addDays(14))
         self.sensor_combo.setCurrentIndex(0)
@@ -2621,9 +2729,11 @@ class SmartTaskingDockWidget(QDockWidget):
         self.summary_text.clear()
         self._search_results.clear()
         self._overpass_results.clear()
+        self._clear_footprints_layer()
         self._remove_3d_layers()
         self.fun_fact_label.setText('')
         self.archive_count_label.setText('No search performed')
         self.overpass_count_label.setText('No prediction performed')
         self.status_label.setText('Reset complete — switches back to default. Go again!')
         self.status_label.setStyleSheet(f'color: {self._LABEL_COLOR}; font-size: 10px;')
+        self._update_go_button_state()
