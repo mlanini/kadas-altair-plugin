@@ -6,6 +6,10 @@
 [![Version](https://img.shields.io/badge/Version-0.4.2-success.svg)](https://github.com/mlanini/kadas-altair-plugin)
 [![Status](https://img.shields.io/badge/Status-Production-success.svg)](https://github.com/mlanini/kadas-altair-plugin)
 
+## Wiki
+
+Visit the KADAS Altair [DeepWiki](https://deepwiki.com/mlanini/kadas-altair-plugin)!
+
 ## Screenshots
 
 ![Vantor EO Open Data Connector](screenshots/screenshot01_vantor.jpg)
