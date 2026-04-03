@@ -2,7 +2,7 @@
 
 **Multi-source satellite imagery browser for KADAS Albireo 2**
 
-[![License](https://img.shields.io/badge/License-GPL--2.0-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/Version-0.4.2-success.svg)](https://github.com/mlanini/kadas-altair-plugin)
 [![Status](https://img.shields.io/badge/Status-Production-success.svg)](https://github.com/mlanini/kadas-altair-plugin)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/mlanini/kadas-altair-plugin)
