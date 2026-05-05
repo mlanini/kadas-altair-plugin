@@ -874,6 +874,35 @@ class AltairDockWidget(QDockWidget):
         except Exception as e:
             logger.error(f"Failed to register ICEYE STAC connector: {e}")
             self.iceye_connector = None
+
+        # Register Jilin-1 Gaofen connector (STAC-compatible endpoint)
+        try:
+            from ..connectors.jilin_gaofen_stac import JilinGaofenStacConnector
+            jilin_connector = JilinGaofenStacConnector()
+
+            self.connector_manager.register_connector(
+                connector_id='jilin_gaofen_stac',
+                connector_instance=jilin_connector,
+                display_name='Jilin-1 Gaofen',
+                capabilities=[
+                    ConnectorCapability.BBOX_SEARCH,
+                    ConnectorCapability.DATE_RANGE,
+                    ConnectorCapability.CLOUD_COVER,
+                    ConnectorCapability.COLLECTIONS,
+                    ConnectorCapability.COG_SUPPORT
+                ],
+                description='Jilin-1 Gaofen archive via STAC-compatible API'
+            )
+            logger.info("Registered Jilin-1 Gaofen connector")
+
+            self.jilin_connector = jilin_connector
+
+        except ImportError as e:
+            logger.warning(f"Jilin-1 Gaofen connector not available: {e}")
+            self.jilin_connector = None
+        except Exception as e:
+            logger.error(f"Failed to register Jilin-1 Gaofen connector: {e}")
+            self.jilin_connector = None
         
         # Register Umbra STAC connector (Umbra SAR Open Data)
         try:

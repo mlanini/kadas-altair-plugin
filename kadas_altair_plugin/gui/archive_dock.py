@@ -4,6 +4,7 @@ Altair Commercial Archive Search Dock Widget
 Provides unified search across commercial satellite image archives:
   - Planet Labs (PlanetScope, SkySat, RapidEye, …)
   - Airbus OneAtlas (Pléiades, SPOT, Vision-1)
+    - Jilin-1 Gaofen constellation
   - ICEYE SAR constellation
   - Capella Space SAR
   - Maxar (via Vantor STAC)
@@ -114,6 +115,7 @@ except ImportError:
 ARCHIVE_PROVIDERS: Dict[str, str] = {
     'Planet Labs':        'planet',
     'OneAtlas (Airbus)':  'oneatlas',
+    'Jilin-1 Gaofen':     'jilin_gaofen_stac',
     'Umbra SAR':          'umbra_stac',
     'ICEYE SAR':          'iceye_stac',
     'Capella Space':      'capella_stac',
@@ -300,7 +302,7 @@ class ArchiveDockWidget(QDockWidget):
         layout.addWidget(header)
 
         subtitle = QLabel(
-            'Search commercial satellite archives (Planet, Airbus, Umbra, ICEYE, Capella, Maxar, '
+            'Search commercial satellite archives (Planet, Airbus, Jilin-1, Umbra, ICEYE, Capella, Maxar, '
             'Copernicus). Credentials are configured in Settings.'
         )
         subtitle.setWordWrap(True)
@@ -672,6 +674,25 @@ class ArchiveDockWidget(QDockWidget):
                 logger.debug('swisstopo STAC connector registered')
             except Exception as exc:
                 logger.warning(f'swisstopo STAC connector unavailable: {exc}')
+
+            # Jilin-1 Gaofen (STAC-compatible endpoint)
+            try:
+                from ..connectors.jilin_gaofen_stac import JilinGaofenStacConnector
+                jilin = JilinGaofenStacConnector()
+                self._connector_manager.register_connector(
+                    'jilin_gaofen_stac', jilin, 'Jilin-1 Gaofen',
+                    capabilities=[
+                        ConnectorCapability.BBOX_SEARCH,
+                        ConnectorCapability.DATE_RANGE,
+                        ConnectorCapability.CLOUD_COVER,
+                        ConnectorCapability.COLLECTIONS,
+                        ConnectorCapability.TEXT_SEARCH,
+                        ConnectorCapability.COG_SUPPORT,
+                    ]
+                )
+                logger.debug('Jilin-1 Gaofen connector registered')
+            except Exception as exc:
+                logger.warning(f'Jilin-1 Gaofen connector unavailable: {exc}')
 
             logger.info('ArchiveDockWidget: connector manager ready')
 

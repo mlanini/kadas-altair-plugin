@@ -3,7 +3,7 @@
 **Multi-source satellite imagery browser for KADAS Albireo 2**
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/Version-0.4.2-success.svg)](https://github.com/mlanini/kadas-altair-plugin)
+[![Version](https://img.shields.io/badge/Version-0.4.3-success.svg)](https://github.com/mlanini/kadas-altair-plugin)
 [![Status](https://img.shields.io/badge/Status-Production-success.svg)](https://github.com/mlanini/kadas-altair-plugin)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/mlanini/kadas-altair-plugin)
 
@@ -32,29 +32,28 @@
 
 ### Installation
 
-Download `kadas_altair_plugin_full_vX.Y.Z.zip` and install via:
-
-**KADAS Albireo** → `Plugins` → `Manage and Install Plugins` → `Install from ZIP`
-
-Or copy manually:
+Download `kadas_altair_plugin_full_vX.Y.Z.zip` and copy manually:
 
 ```powershell
 # Windows
-Copy-Item -Recurse kadas_altair_plugin "$env:APPDATA\Kadas\Kadas\profiles\default\python\plugins\"
+# Check you KADAS flavour first: Mil, Zivil or Light
+Copy-Item -Recurse kadas_altair_plugin "$env:APPDATA\Kadas\KadasZivil\profiles\default\python\plugins\"
 
 # Linux / macOS
-cp -r kadas_altair_plugin ~/.local/share/Kadas/Kadas/profiles/default/python/plugins/
+cp -r kadas_altair_plugin ~/.local/share/Kadas/KadasZivil/profiles/default/python/plugins/
 ```
 
 ### First Use
 
-1. `Plugins` → `Altair` → **Altair EO Data Panel**
-2. Select a connector (e.g. *Maxar Open Data*)
-3. Click **Authenticate** (no credentials needed for open-data sources)
-4. Pick a collection from the dropdown
-5. Draw a search area or use the map extent
-6. Click **Search** — results appear in the table
-7. Select a scene → **Load Layer** → done
+1. Activate **KADAS Albireo** → `Settings` → `Plugins` → `KADAS Altair vx.x.x` 
+2. Go to "EO" menu tab
+3. Choose **Altair Open Data Panel** from Altair menu button
+4. Select a connector (e.g. *Maxar Open Data*)
+5. Click **Authenticate** (no credentials needed for open-data sources)
+6. Pick a collection from the dropdown
+7. Draw a search area or use the map extent
+8. Click **Search** — results appear in the table
+9. Select a scene → **Load Layer** → done
 
 ---
 
@@ -62,7 +61,7 @@ cp -r kadas_altair_plugin ~/.local/share/Kadas/Kadas/profiles/default/python/plu
 
 ### Connectors
 
-6 production-ready connectors, 1 experimental, 2 stubs:
+7 production-ready connectors, 1 experimental, 2 stubs:
 
 | # | Connector | Type | Highlights | Status |
 |---|-----------|------|------------|--------|
@@ -72,9 +71,10 @@ cp -r kadas_altair_plugin ~/.local/share/Kadas/Kadas/profiles/default/python/plu
 | 4 | **Maxar Open Data** | Optical | 55+ disaster events · 0.3–0.5 m (Vantor STAC) | Production |
 | 5 | **swisstopo RapidMapping** | Optical | Swiss emergency events · sub-meter | Production |
 | 6 | **Copernicus Data Space** | Multi | Sentinel-1/2/3/5P · OAuth2 · 10 m–7 km | Production |
-| 7 | **NASA EarthData** | Multi | CMR granule search · STAC catalog | Experimental |
-| 8 | **Planet** | Optical | PSScene, SkySatScene · 0.5–3 m | Stub |
-| 9 | **OneAtlas** | Optical | Airbus imagery · 0.5 m | Stub |
+| 7 | **Jilin-1 Gaofen** | Optical | CGSTL constellation · 0.72 m · STAC API | Production |
+| 8 | **NASA EarthData** | Multi | CMR granule search · STAC catalog | Experimental |
+| 9 | **Planet** | Optical | PSScene, SkySatScene · 0.5–3 m | Stub |
+| 10 | **OneAtlas** | Optical | Airbus imagery · 0.5 m | Stub |
 
 ### Search & Visualization
 
@@ -87,7 +87,7 @@ cp -r kadas_altair_plugin ~/.local/share/Kadas/Kadas/profiles/default/python/plu
 
 ### Smart Tasking
 
-- **Satellite catalogue** — 21 EO satellites with TLE, sensor model, off-nadir limits
+- **Satellite catalogue** — 22 EO satellites with TLE, sensor model, off-nadir limits
 - **Overpass prediction** — SGP4 bearing-convergence algorithm (sensor footprint × AOI)
 - **3D orbit visualisation** — orbit track, ground track, swath corridor, satellite marker, nadir axis
 - **Archive search** — per-satellite historical scene lookup across all STAC connectors
@@ -139,6 +139,7 @@ kadas-altair-plugin/
     │   ├── swisstopo_stac.py
     │   ├── copernicus_stac.py      # OAuth2 STAC 1.1
     │   ├── nasa_earthdata.py
+    │   ├── jilin_gaofen_stac.py    # Jilin-1 Gaofen (CGSTL)
     │   ├── planet.py               # Stub
     │   └── oneatlas.py             # Stub
     ├── gui/
@@ -203,7 +204,7 @@ Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines 
 
 **Before submitting issues:**
 - Check logs: `Plugins` → `Altair` → `View Log`
-- Include KADAS version, plugin version (`0.4.2`), and steps to reproduce
+- Include KADAS version, plugin version (`0.4.3`), and steps to reproduce
 
 ---
 
@@ -224,7 +225,7 @@ Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines 
 [eo-predictor](https://github.com/developmentseed/eo-predictor) · [sat-predict](https://sat-predict.davidhsu.cc/) · [kadas-vantor-plugin](https://github.com/mlanini/kadas-vantor-plugin) · [qgis-maxar-plugin](https://github.com/opengeos/qgis-maxar-plugin)
 
 **Open-data providers:**
-ICEYE · Umbra · Capella · Maxar · swisstopo · Copernicus · NASA
+ICEYE · Umbra · Capella · Maxar · swisstopo · Copernicus · NASA · CGSTL (Jilin-1)
 
 ---
 

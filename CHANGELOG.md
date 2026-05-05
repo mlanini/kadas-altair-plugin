@@ -5,6 +5,25 @@ All notable changes to KADAS Altair Plugin will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.3] - 2026-05-05
+
+### Added
+- **Jilin-1 Gaofen STAC connector** (`jilin_gaofen_stac.py`) — access to CGSTL's Jilin-1 high-resolution optical constellation:
+  - 0.72 m GSD, 17 km swath, SSO at 535 km / 10:30 LTAN
+  - Bearer-token authentication via QSettings (`altair/jilin_access_token`) or credentials dict
+  - STAC POST `/search` with bbox + date + cloud cover + collection filters; GET fallback for collections without POST search
+  - Registered in Archive, Smart Tasking, and main dock with capabilities: `BBOX_SEARCH`, `DATE_RANGE`, `CLOUD_COVER`, `COLLECTIONS`, `TEXT_SEARCH`, `COG_SUPPORT`
+- **Jilin-1 entry in satellite catalogue** (Smart Tasking dock): NORAD 52836, 0.72 m GSD, off-nadir model, max 30°, 1-day revisit
+
+### Fixed
+- **KADAS AOI crash** — removed `QgsExtentWidget.setMapCanvas()` call in `smart_tasking_dock.py` and `tasking_dock.py`.
+  KADAS uses `KadasMapCanvas` which is incompatible with `QgsMapToolExtent` (the draw-on-canvas tool installed by `setMapCanvas()`), causing a hard segfault when the user clicked the draw button. The widget retains full manual-coordinate and "use current extent" functionality.
+
+### Changed
+- **Satellite catalogue** expanded from 21 to 22 entries
+- **Connector count**: 7 production-ready connectors (was 6)
+- **metadata.txt**: version bumped to 0.4.3
+
 ## [0.4.2] - 2026-04-01
 
 ### Added

@@ -45,7 +45,7 @@ logger = get_logger('gui.tasking')
 class TaskingDockWidget(QDockWidget):
     """Dock widget with a generic satellite tasking order form."""
 
-    TARGET_EMAIL = 'mlanini@proton.me'
+    TARGET_EMAIL = 'test_recipient@example.com'
 
     PROVIDERS = [
         'Maxar',
@@ -169,7 +169,10 @@ class TaskingDockWidget(QDockWidget):
         self.extent_widget = None
         if QgsExtentWidget and self.iface:
             self.extent_widget = QgsExtentWidget(parent=aoi_group)
-            self.extent_widget.setMapCanvas(self.iface.mapCanvas())
+            # NOTE: Do NOT call setMapCanvas() here. KADAS uses KadasMapCanvas
+            # which is incompatible with QgsMapToolExtent (used internally by
+            # QgsExtentWidget's draw-on-canvas button), causing a hard crash.
+            # The widget still works for manual coordinate input.
             canvas = self.iface.mapCanvas()
             canvas_extent = canvas.extent()
             canvas_crs = canvas.mapSettings().destinationCrs()

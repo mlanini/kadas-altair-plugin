@@ -1,3 +1,47 @@
+# Release Notes - KADAS Altair Plugin v0.4.3
+
+## 🛰️ Jilin-1 Gaofen Connector + AOI Crash Fix
+
+v0.4.3 adds the **Jilin-1 Gaofen** optical constellation connector from CGSTL and resolves a hard crash triggered when drawing an AOI on the KADAS map canvas.
+
+---
+
+## ✨ Highlights
+
+### 🌏 Jilin-1 Gaofen STAC Connector
+- **CGSTL Jilin-1** constellation — 0.72 m GSD, 17 km swath, SSO at 535 km altitude / 10:30 LTAN
+- Bearer-token authentication stored in QSettings (`altair/jilin_access_token`) or passed via credentials dict
+- **STAC v1.0 search**: POST `/search` with bbox, date range, cloud cover and collection filters; auto-falls back to GET `collections/{id}/items` for endpoints that do not expose POST search
+- Response normalisation: ensures all returned items are valid GeoJSON `Feature` objects with `id`, `properties`, and `assets`
+- Registered in Archive Search, Smart Tasking (satellite catalogue entry), and main dock
+- Capabilities: `BBOX_SEARCH`, `DATE_RANGE`, `CLOUD_COVER`, `COLLECTIONS`, `TEXT_SEARCH`, `COG_SUPPORT`
+
+### 🗺️ Smart Tasking: Jilin-1 Satellite Entry
+| Field | Value |
+|---|---|
+| Operator | CGSTL |
+| Sensor | Optical |
+| GSD | 0.72 m |
+| NORAD ID | 52836 |
+| Orbit alt | 535 km SSO |
+| LTAN | 10:30 |
+| Swath | 17 km |
+| Revisit | 1 day |
+| Sensor model | `off_nadir`, max 30° |
+
+### 🐛 KADAS AOI Crash Fix
+- **Root cause**: `QgsExtentWidget.setMapCanvas()` installs a `QgsMapToolExtent` on the canvas. KADAS's `KadasMapCanvas` is incompatible with this standard QGIS map tool at the C++ level, producing a **hard segfault** when the draw-on-canvas button is clicked.
+- **Fix**: removed `setMapCanvas()` call in both `smart_tasking_dock.py` and `tasking_dock.py`. The `QgsExtentWidget` retains full functionality for manual coordinate input and "use current canvas extent"; only the draw-on-canvas button is suppressed.
+
+---
+
+## 📦 Packaging
+
+- Full package: `KADAS_SKIP_PIP=1 python package_plugin_full.py`
+- Output: `kadas_altair_plugin_full_v0.4.3.zip`
+
+---
+
 # Release Notes - KADAS Altair Plugin v0.4.2
 
 ## 🛰️ Smart Tasking: Bearing-Convergence Overpass Prediction + 3D Orbit Visualisation

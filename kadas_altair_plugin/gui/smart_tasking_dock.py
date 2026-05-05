@@ -207,6 +207,17 @@ SATELLITE_CATALOGUE: List[Dict] = [
         'sensor_model': 'off_nadir', 'max_off_nadir_deg': 40.0,
     },
     {
+        'id': 'jilin_gaofen', 'operator': 'CGSTL',
+        'constellation': 'Jilin-1 Gaofen', 'sensor': 'Optical',
+        'gsd_m': 0.72, 'access': 'Paid', 'daylight': 'Day',
+        'fun_fact': 'Large agile fleet focused on high-frequency revisit tasking.',
+        'norad_id': 52836, 'connector_ids': ['jilin_gaofen_stac'],
+        'orbit_alt_km': 535, 'orbit_inc_deg': 97.5,
+        'orbit_period_min': 95.3, 'swath_km': 17.0,
+        'revisit_days': 1.0, 'ltan_hour': 10.5,
+        'sensor_model': 'off_nadir', 'max_off_nadir_deg': 30.0,
+    },
+    {
         'id': 'esi_wv', 'operator': 'European Space Imaging',
         'constellation': 'WorldView (reseller)', 'sensor': 'Optical',
         'gsd_m': 0.31, 'access': 'Paid', 'daylight': 'Day',
@@ -1099,6 +1110,11 @@ class SmartTaskingDockWidget(QDockWidget):
                  [ConnectorCapability.BBOX_SEARCH, ConnectorCapability.DATE_RANGE,
                   ConnectorCapability.CLOUD_COVER, ConnectorCapability.AUTHENTICATION,
                   ConnectorCapability.COMMERCIAL]),
+                                ('jilin_gaofen_stac', '..connectors.jilin_gaofen_stac', 'JilinGaofenStacConnector', 'Jilin-1 Gaofen',
+                                 [ConnectorCapability.BBOX_SEARCH, ConnectorCapability.DATE_RANGE,
+                                    ConnectorCapability.CLOUD_COVER, ConnectorCapability.COLLECTIONS,
+                                    ConnectorCapability.TEXT_SEARCH, ConnectorCapability.COG_SUPPORT,
+                                    ConnectorCapability.COMMERCIAL]),
                 ('iceye_stac',      '..connectors.iceye_stac',      'IceyeStacConnector',       'ICEYE',
                  [ConnectorCapability.BBOX_SEARCH, ConnectorCapability.DATE_RANGE,
                   ConnectorCapability.AUTHENTICATION, ConnectorCapability.COMMERCIAL]),
@@ -1260,7 +1276,10 @@ class SmartTaskingDockWidget(QDockWidget):
         self.extent_widget = None
         if QgsExtentWidget and self.iface:
             self.extent_widget = QgsExtentWidget(parent=aoi_group)
-            self.extent_widget.setMapCanvas(self.iface.mapCanvas())
+            # NOTE: Do NOT call setMapCanvas() here. KADAS uses KadasMapCanvas
+            # which is incompatible with QgsMapToolExtent (used internally by
+            # QgsExtentWidget's draw-on-canvas button), causing a hard crash.
+            # The widget still works for manual coordinate input.
             canvas = self.iface.mapCanvas()
             canvas_extent = canvas.extent()
             canvas_crs = canvas.mapSettings().destinationCrs()
