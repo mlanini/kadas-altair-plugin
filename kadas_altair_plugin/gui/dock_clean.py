@@ -27,7 +27,7 @@ class AltairDockWidget(QtWidgets.QDockWidget):
         self.main_layout.addWidget(self.filters_widget, 1)
 
         self.service_combo = QtWidgets.QComboBox()
-        self.service_combo.addItems(['OneAtlas', 'Planet', 'Copernicus', 'Maxar OpenData (Vantor STAC)'])
+        self.service_combo.addItems(['OneAtlas', 'Planet', 'Copernicus', 'Vantor Open Data'])
         self.filters_layout.addWidget(QtWidgets.QLabel('Service'))
         self.filters_layout.addWidget(self.service_combo)
 
@@ -70,7 +70,7 @@ class AltairDockWidget(QtWidgets.QDockWidget):
             'OneAtlas': OneAtlasConnector(),
             'Planet': PlanetConnector(),
             'Copernicus': CopernicusConnector(),
-            'Maxar OpenData (Vantor STAC)': VantorStacConnector(),
+            'Vantor Open Data': VantorStacConnector(),
         }
 
         self.results = []
@@ -293,7 +293,7 @@ class AltairDockWidget(QtWidgets.QDockWidget):
         self.main_layout.addWidget(self.filters_widget, 1)
 
         self.service_combo = QtWidgets.QComboBox()
-        self.service_combo.addItems(['OneAtlas', 'Planet', 'Copernicus', 'Maxar OpenData (Vantor STAC)'])
+        self.service_combo.addItems(['OneAtlas', 'Planet', 'Copernicus', 'Vantor Open Data'])
         self.filters_layout.addWidget(QtWidgets.QLabel('Service'))
         self.filters_layout.addWidget(self.service_combo)
 
@@ -332,7 +332,7 @@ class AltairDockWidget(QtWidgets.QDockWidget):
             'OneAtlas': OneAtlasConnector(),
             'Planet': PlanetConnector(),
             'Copernicus': CopernicusConnector(),
-            'Maxar OpenData (Vantor STAC)': VantorStacConnector(),
+            'Vantor Open Data': VantorStacConnector(),
         }
 
         self.results = []
@@ -373,7 +373,7 @@ class AltairDockWidget(QtWidgets.QDockWidget):
                 self.main_layout.addWidget(self.filters_widget, 1)
 
                 self.service_combo = QtWidgets.QComboBox()
-                self.service_combo.addItems(['OneAtlas', 'Planet', 'Copernicus', 'Maxar OpenData (Vantor STAC)'])
+                self.service_combo.addItems(['OneAtlas', 'Planet', 'Copernicus', 'Vantor Open Data'])
                 self.filters_layout.addWidget(QtWidgets.QLabel('Service'))
                 self.filters_layout.addWidget(self.service_combo)
 
@@ -412,7 +412,7 @@ class AltairDockWidget(QtWidgets.QDockWidget):
                     'OneAtlas': OneAtlasConnector(),
                     'Planet': PlanetConnector(),
                     'Copernicus': CopernicusConnector(),
-                    'Maxar OpenData (Vantor STAC)': VantorStacConnector(),
+                    'Vantor Open Data': VantorStacConnector(),
                 }
 
                 self.collections_list = QtWidgets.QListWidget()

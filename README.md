@@ -48,7 +48,7 @@ cp -r kadas_altair_plugin ~/.local/share/Kadas/KadasZivil/profiles/default/pytho
 1. Activate **KADAS Albireo** → `Settings` → `Plugins Manager` → `KADAS Altair v0.4.3` 
 2. Go to "EO" menu tab
 3. Choose **Altair Open Data Panel** from Altair menu button
-4. Select a connector (e.g. *Maxar Open Data*)
+4. Select a connector (e.g. *Vantor Open Data*)
 5. Pick a collection from the dropdown
 6. Draw a search area or use the map extent
 7. Click **Search** — results appear in the table
@@ -67,7 +67,7 @@ cp -r kadas_altair_plugin ~/.local/share/Kadas/KadasZivil/profiles/default/pytho
 | 1 | **ICEYE SAR** | Radar | 3 collections · 196 items · 1–3 m | Production |
 | 2 | **Umbra SAR** | Radar | Recursive STAC · 16–25 cm · GEC/SICD/SIDD/CPHD | Production |
 | 3 | **Capella SAR** | Radar | ~1 000 images · X-band · ~1 m | Production |
-| 4 | **Maxar Open Data** | Optical | 55+ disaster events · 0.3–0.5 m (Vantor STAC) | Production |
+| 4 | **Vantor Open Data** | Optical | 55+ disaster events · 0.3–0.5 m (Vantor STAC) | Production |
 | 5 | **swisstopo RapidMapping** | Optical | Swiss emergency events · sub-meter | Production |
 | 6 | **Copernicus Data Space** | Multi | Sentinel-1/2/3/5P · OAuth2 · 10 m–7 km | Production |
 | 7 | **NASA EarthData** | Multi | CMR granule search · STAC catalog | Experimental |
@@ -133,7 +133,7 @@ kadas-altair-plugin/
     │   ├── iceye_stac.py
     │   ├── umbra_stac.py
     │   ├── capella_stac.py
-    │   ├── vantor.py               # Maxar Open Data
+    │   ├── vantor.py               # Vantor Open Data
     │   ├── swisstopo_stac.py
     │   ├── copernicus_stac.py      # OAuth2 STAC 1.1
     │   ├── nasa_earthdata.py
@@ -222,7 +222,7 @@ Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines 
 [eo-predictor](https://github.com/developmentseed/eo-predictor) · [sat-predict](https://sat-predict.davidhsu.cc/) · [kadas-vantor-plugin](https://github.com/mlanini/kadas-vantor-plugin) · [qgis-maxar-plugin](https://github.com/opengeos/qgis-maxar-plugin)
 
 **Open-data providers:**
-ICEYE · Umbra · Capella · Maxar · swisstopo · Copernicus · NASA
+ICEYE · Umbra · Capella · Vantor · swisstopo · Copernicus · NASA
 
 ---
 

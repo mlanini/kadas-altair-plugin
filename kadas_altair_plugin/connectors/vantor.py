@@ -1,4 +1,4 @@
-"""Vantor (Maxar Open Data) Connector
+"""Vantor Open Data Connector
 
 Architecture inspired by kadas-vantor-plugin:
 - GitHub dataset: datasets.csv + {event}.geojson
@@ -31,14 +31,14 @@ from ..logger import get_logger
 logger = get_logger('connectors.vantor')
 
 
-# GitHub URLs for Maxar Open Data (same pattern as kadas-vantor-plugin)
+# GitHub URLs for Vantor Open Data (same pattern as kadas-vantor-plugin)
 GITHUB_RAW_URL = "https://raw.githubusercontent.com/opengeos/maxar-open-data/master"
 DATASETS_CSV_URL = f"{GITHUB_RAW_URL}/datasets.csv"
 GEOJSON_URL_TEMPLATE = f"{GITHUB_RAW_URL}/datasets/{{event}}.geojson"
 
 # STAC catalog URLs - primary is the official Vantor Open Data catalog
 # (same as qgis-vantor-plugin reference implementation)
-# Fallback to legacy Maxar Open Data bucket for backwards compatibility
+# Fallback to legacy Vantor Open Data bucket for backwards compatibility
 STAC_CATALOG_URLS = [
     "https://vantor-opendata.s3.amazonaws.com/events/catalog.json",
     "https://maxar-opendata.s3.amazonaws.com/events/catalog.json",
@@ -51,7 +51,7 @@ TIMEOUT_FOOTPRINTS = 180  # seconds for large GeoJSON files
 
 
 class VantorConnector(ConnectorBase):
-    """Vantor/Maxar Open Data connector using GitHub dataset
+    """Vantor Open Data connector using GitHub dataset
     
     Features (from kadas-vantor-plugin):
     - Event browsing from datasets.csv
@@ -259,7 +259,7 @@ class VantorConnector(ConnectorBase):
                 raise
 
     def _load_events_from_stac(self) -> List[Tuple[str, int]]:
-        """Load events from Maxar Open Data STAC catalog as fallback.
+        """Load events from Vantor Open Data STAC catalog as fallback.
 
         Returns:
             List[Tuple[str, int]]: List of (event_name, tile_count). tile_count
@@ -637,7 +637,7 @@ class VantorConnector(ConnectorBase):
         assets = {}
 
         # Feature-level assets dict (native STAC items from vantor-opendata S3
-        # and newer Maxar GeoJSON schema both store URLs here)
+        # and newer vantor GeoJSON schema both store URLs here)
         feature_assets: Dict[str, Any] = {}
         if isinstance(feature, dict):
             feature_assets = feature.get('assets', {}) or {}

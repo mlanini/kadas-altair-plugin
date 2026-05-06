@@ -29,7 +29,7 @@ kadas_altair_plugin/
 │   ├── iceye_stac.py       # ICEYE SAR Open Data
 │   ├── umbra_stac.py       # Umbra SAR Open Data
 │   ├── capella_stac.py     # Capella SAR Open Data
-│   ├── vantor.py           # Maxar/Vantor Open Data
+│   ├── vantor.py           # Vantor Open Data
 │   ├── oneatlas.py         # OneAtlas (stub)
 │   ├── planet.py           # Planet (stub)
 │   └── nasa_earthdata.py   # NASA EarthData (stub)
@@ -468,7 +468,7 @@ python test/test_umbra_structure.py
 ```bash
 python test/test_vantor_search.py
 ```
-- Tests Maxar Open Data STAC search
+- Tests Vantor Open Data STAC search
 - Validates event collection navigation
 - Verifies subcollection hierarchy
 

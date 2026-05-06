@@ -249,7 +249,7 @@ class SettingsDockWidget(QDockWidget):
         
         # Info label
         info_label = QLabel(
-            "Vantor STAC provides direct access to Maxar Open Data via STAC API endpoint. "
+            "Vantor STAC provides direct access to Vantor Open Data via STAC API endpoint. "
             "This is an alternative to the AWS STAC connector."
         )
         info_label.setWordWrap(True)

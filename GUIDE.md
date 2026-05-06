@@ -46,7 +46,7 @@ cp -r kadas_altair_plugin ~/.local/share/Kadas/KadasZivil/profiles/default/pytho
 
 Choose from dropdown:
 - **ICEYE SAR Open Data** (fastest test - 196 items)
-- **Maxar Open Data** (55+ disaster events)
+- **Vantor Open Data** (55+ disaster events)
 - **Umbra SAR Open Data** (high-res radar)
 - **Capella SAR Open Data** (~1000 images)
 - **Copernicus STAC (Dataspace)** (Sentinel constellation)
@@ -54,7 +54,7 @@ Choose from dropdown:
 ### 3. Authenticate
 
 Click **Authenticate** button:
-- **ICEYE, Maxar, Umbra, Capella**: No credentials needed
+- **ICEYE, Vantor, Umbra, Capella**: No credentials needed
 - **Copernicus STAC**: Requires client_id/client_secret (see [Authentication](#authentication))
 
 ### 4. Select Collection
@@ -136,7 +136,7 @@ Click **Search** button → Results appear in table
 
 **Use Cases:** Defense, disaster response, commercial analytics
 
-### Maxar Open Data (Vantor STAC)
+### Vantor Open Data
 
 **Type:** Optical Imagery  
 **Collections:** 55+ disaster events  
@@ -275,7 +275,7 @@ The prediction engine was inspired by [eo-predictor](https://github.com/developm
 
 ### Other Connectors
 
-**ICEYE, Umbra, Capella, Maxar:** No authentication needed (open data)
+**ICEYE, Umbra, Capella, Vantor:** No authentication needed (open data)
 
 ---
 
@@ -400,7 +400,7 @@ The plugin includes 6 production-ready connectors:
 | **ICEYE SAR Open Data** | 3 | SAR Imagery | Global | ✅ Ready |
 | **Umbra SAR Open Data** | — | SAR Imagery | Global | ✅ Ready |
 | **Capella SAR Open Data** | — | SAR Imagery | Global | ✅ Ready |
-| **Maxar Open Data** | 55 | Optical | Disaster Events | ✅ Ready |
+| **Vantor Open Data** | 55 | Optical | Disaster Events | ✅ Ready |
 | **swisstopo RapidMapping** | 3+ | Emergency Mapping | Switzerland | ✅ Ready |
 | **Copernicus Data Space** | 5+ | Multi-spectral | Global | ✅ Ready |
 
@@ -413,7 +413,7 @@ The plugin includes 6 production-ready connectors:
 - **Use Cases**: All-weather imaging, change detection
 - **Features**: Cloud-independent, day/night acquisition
 
-### Maxar Open Data (Vantor STAC)
+### Vantor Open Data
 
 - **Type**: High-resolution optical imagery
 - **Collections**: 55 disaster/emergency events
@@ -497,7 +497,7 @@ Click **"Carica Catalogo"** button
 Choose from dropdown (e.g.):
 - Sentinel-2 Cloud-Optimized GeoTIFFs
 - Landsat Collection 2 Level-2
-- Maxar Open Data
+- Vantor Open Data
 - CBERS-4 AWS
 
 #### 4. Collection Auto-Population
@@ -668,7 +668,7 @@ kadas-altair/
     ├── logger.py                  # Logging system
     ├── connectors/                # Data source connectors
     │   ├── iceye_stac.py         # ICEYE SAR connector
-    │   ├── vantor.py             # Maxar Open Data connector
+    │   ├── vantor.py             # Vantor Open Data connector
     │   ├── umbra_stac.py         # Umbra SAR connector
     │   ├── capella_stac.py       # Capella SAR connector
     │   ├── copernicus.py         # Copernicus Dataspace
@@ -785,7 +785,7 @@ results, next_link = connector.search(
 - **Landsat**: Collection 2 Level-1, Level-2
 - **CBERS-4**: MUX, AWFI, PAN5M, PAN10M
 - **NAIP**: National Agriculture Imagery Program
-- **Maxar Open Data**: Disaster response imagery
+- **Vantor Open Data**: Disaster response imagery
 
 ### SAR Imagery
 
@@ -825,8 +825,8 @@ results, next_link = connector.search(
 |----------|---------|------------|
 | **Multispectral Analysis** | Sentinel-2 | sentinel-2-l2a |
 | **Large Area Mapping** | Landsat | landsat-c2-l2 |
-| **High-Res Basemaps** | Maxar | maxar-open-data |
-| **Disaster Response** | Maxar Open Data | Event-specific |
+| **High-Res Basemaps** | Vantor | maxar-open-data |
+| **Disaster Response** | Vantor Open Data | Event-specific |
 | **Change Detection** | Sentinel-2 + Landsat | Both |
 | **Forest Monitoring** | ALOS PALSAR | palsar-global |
 

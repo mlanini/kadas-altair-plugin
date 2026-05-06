@@ -97,7 +97,7 @@ kadas_altair_plugin/
 │   ├── __init__.py
 │   ├── base.py              # Abstract base connector
 │   ├── connector_manager.py # Middleware (registry + routing)
-│   ├── vantor.py            # Maxar Open Data (CSV + GeoJSON)
+│   ├── vantor.py            # Vantor Open Data (CSV + GeoJSON)
 │   ├── iceye_stac.py        # ICEYE SAR (STAC catalog)
 │   ├── umbra_stac.py        # Umbra SAR (recursive STAC)
 │   ├── capella_stac.py      # Capella SAR (STAC)

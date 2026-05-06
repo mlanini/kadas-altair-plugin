@@ -818,7 +818,7 @@ class AltairDockWidget(QDockWidget):
         
         # OneAtlas and Planet connectors intentionally excluded from main dock
         
-        # Register Vantor connector (Maxar Open Data via GitHub)
+        # Register Vantor connector (Vantor Open Data via GitHub)
         try:
             from ..connectors import VantorConnector
             vantor_connector = VantorConnector()
@@ -834,7 +834,7 @@ class AltairDockWidget(QDockWidget):
                     ConnectorCapability.COLLECTIONS,
                     ConnectorCapability.COG_SUPPORT
                 ],
-                description='Vantor/Maxar Open Data via GitHub dataset'
+                description='Vantor Open Data via GitHub dataset'
             )
             
             logger.info("Registered Vantor connector")
@@ -3312,7 +3312,7 @@ class AltairDockWidget(QDockWidget):
                     logger.info(f"  🔗 {cog_url[:100]}...")
                 
                 # Load COG using GDAL vsicurl (streaming HTTP access to public S3)
-                # This is the qgis-maxar-plugin pattern: /vsicurl/{https-url}
+                # This follows the Vantor connector pattern: /vsicurl/{https-url}
                 cog_url_gdal = f"/vsicurl/{cog_url}"
                 logger.debug(f"  GDAL path: {cog_url_gdal[:100]}")
                 
@@ -3666,7 +3666,7 @@ class AltairDockWidget(QDockWidget):
                             import urllib.request
                             urllib.request.urlretrieve(cog_url, filepath)
                     else:
-                        # Standard download (works for Vantor/Maxar S3 public buckets)
+                        # Standard download (works for Vantor S3 public buckets)
                         import urllib.request
                         urllib.request.urlretrieve(cog_url, filepath)
                     

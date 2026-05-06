@@ -144,7 +144,7 @@ v0.4.1 focuses on NASA EarthData authentication compatibility and release packag
 
 ## 🚀 UI, COG Loading & Connector Improvements
 
-v0.4.0 delivers a significant round of UI enhancements, bug fixes and connector reliability improvements focused on four areas: interactive map-based search, COG (Cloud-Optimized GeoTIFF) multi-provider loading, Copernicus authenticated raster access, and Vantor (Maxar Open Data) broad searches.
+v0.4.0 delivers a significant round of UI enhancements, bug fixes and connector reliability improvements focused on four areas: interactive map-based search, COG (Cloud-Optimized GeoTIFF) multi-provider loading, Copernicus authenticated raster access, and Vantor broad searches.
 
 ---
 
@@ -170,7 +170,7 @@ v0.4.0 delivers a significant round of UI enhancements, bug fixes and connector 
 ### 🔍 Vantor Broad Search
 - `search()` now iterates all available disaster events (cached first, then up to 10 via network)
 - Removed the `if not collection: return []` early-exit that blocked all results when no specific event was selected
-- Updated `_extract_assets()` to resolve `href` from both `properties` and feature-level `assets` dict (newer Maxar GeoJSON schema)
+- Updated `_extract_assets()` to resolve `href` from both `properties` and feature-level `assets` dict (newer Vantor GeoJSON schema)
 
 ### 🖼️ Quicklook Preview Fixes
 - **Import fix**: `QNetworkRequest` was missing, causing silent download failures inside a broad `except` block
@@ -221,7 +221,7 @@ v0.4.0 delivers a significant round of UI enhancements, bug fixes and connector 
 ## 🔗 Resources
 
 - **Copernicus Dataspace**: https://dataspace.copernicus.eu/
-- **Maxar Open Data**: https://github.com/opengeos/maxar-open-data
+- **Vantor Open Data**: https://github.com/opengeos/maxar-open-data
 - **Repository**: https://github.com/mlanini/kadas-altair-plugin
 
 ---
@@ -260,7 +260,7 @@ Single authentication method for Copernicus:
 ### Connector Count
 - **Total connectors**: 11 (reduced from 12)
 - **Copernicus**: Single STAC connector only
-- **Other connectors**: ICEYE, Maxar, Umbra, Capella, and stubs unchanged
+- **Other connectors**: ICEYE, Vantor, Umbra, Capella, and stubs unchanged
 
 ### Package Details
 - **Lite package**: ~200 KB (plugin code only)
@@ -774,7 +774,7 @@ Consolidated technical documentation including:
 1. **ICEYE SAR Open Data** - 3 collections, 196 items, global coverage
 2. **Umbra SAR Open Data** - 16cm resolution, recursive STAC catalog
 3. **Capella SAR Open Data** - ~1000 images, X-band radar
-4. **Maxar Open Data (Vantor STAC)** - 55+ disaster collections, sub-meter optical
+4. **Vantor Open Data** - 55+ disaster collections, sub-meter optical
 5. **Copernicus Dataspace** - Sentinel-1/2/3/5P via OAuth2
 
 ### Architecture
@@ -822,7 +822,7 @@ Consolidated technical documentation including:
 ## 🙏 Acknowledgments
 
 - **KADAS Albireo 2** team for the excellent geospatial platform
-- All satellite data providers: ICEYE, Umbra, Capella, Maxar, Copernicus
+- All satellite data providers: ICEYE, Umbra, Capella, Vantor, Copernicus
 - Contributors and testers from the KADAS community
 
 ---

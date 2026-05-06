@@ -48,7 +48,7 @@ class TaskingDockWidget(QDockWidget):
     TARGET_EMAIL = 'test_recipient@example.com'
 
     PROVIDERS = [
-        'Maxar',
+        'Vantor',
         'Planet Labs',
         'Airbus',
         'ICEYE',

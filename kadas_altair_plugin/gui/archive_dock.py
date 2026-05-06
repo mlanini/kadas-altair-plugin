@@ -7,7 +7,7 @@ Provides unified search across commercial satellite image archives:
     - Jilin-1 Gaofen constellation
   - ICEYE SAR constellation
   - Capella Space SAR
-  - Maxar (via Vantor STAC)
+    - Vantor (via Vantor STAC)
   - Copernicus Dataspace (Sentinel-1/2/3/5P) [optional]
 
 Search runs in a background QgsTask; footprints are displayed on the map
@@ -302,7 +302,7 @@ class ArchiveDockWidget(QDockWidget):
         layout.addWidget(header)
 
         subtitle = QLabel(
-            'Search commercial satellite archives (Planet, Airbus, Jilin-1, Umbra, ICEYE, Capella, Maxar, '
+            'Search commercial satellite archives (Planet, Airbus, Jilin-1, Umbra, ICEYE, Capella, Vantor, '
             'Copernicus). Credentials are configured in Settings.'
         )
         subtitle.setWordWrap(True)
@@ -607,19 +607,19 @@ class ArchiveDockWidget(QDockWidget):
             except Exception as exc:
                 logger.warning(f'Capella connector unavailable: {exc}')
 
-            # Maxar / Vantor
+            # Vantor
             try:
                 from ..connectors.vantor import VantorConnector
                 vantor = VantorConnector()
                 self._connector_manager.register_connector(
-                    'vantor', vantor, 'Maxar (Vantor)',
+                    'vantor', vantor, 'Vantor',
                     capabilities=[
                         ConnectorCapability.BBOX_SEARCH,
                         ConnectorCapability.DATE_RANGE,
                         ConnectorCapability.CLOUD_COVER,
                     ]
                 )
-                logger.debug('Vantor/Maxar connector registered')
+                logger.debug('Vantor connector registered')
             except Exception as exc:
                 logger.warning(f'Vantor connector unavailable: {exc}')
 

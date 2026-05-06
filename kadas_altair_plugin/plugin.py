@@ -747,11 +747,11 @@ class KadasAltair(QObject):
     <li><b>COG Support:</b> Cloud-Optimized GeoTIFF loading via GDAL vsicurl</li>
     <li><b>Advanced Filters:</b> BBox, date range, cloud cover, collections</li>
     <li><b>Native Integration:</b> Inherits QGIS proxy and SSL settings</li>
-    <li><b>Single Connector:</b> Unified access to Sentinel-2, Landsat, Maxar, CBERS</li>
+    <li><b>Single Connector:</b> Unified access to Sentinel-2, Landsat, Vantor, CBERS</li>
 </ul>
 
 <h3>Supported Datasets</h3>
-<p>Sentinel-2, Landsat Collection 2, Maxar Open Data, CBERS-4, NAIP, and many more through AWS Open Data STAC catalog.</p>
+<p>Sentinel-2, Landsat Collection 2, Vantor Open Data, CBERS-4, NAIP, and many more through AWS Open Data STAC catalog.</p>
 
 <hr>
 

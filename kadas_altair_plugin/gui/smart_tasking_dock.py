@@ -102,7 +102,7 @@ except ImportError:
     _3D_AVAILABLE = False
 
 # ---------------------------------------------------------------------------
-# Satellite catalogue — the big phone book of space robots 🛰️
+# Satellite catalogue
 # ---------------------------------------------------------------------------
 # Extended fields (vs. v1):
 #   norad_id          → NORAD catalogue number (for TLE fetch)
@@ -119,7 +119,7 @@ except ImportError:
 SATELLITE_CATALOGUE: List[Dict] = [
     # --- Optical / Paid ------------------------------------------------
     {
-        'id': 'maxar_wv3', 'operator': 'Maxar',
+        'id': 'vantor_wv3', 'operator': 'Vantor',
         'constellation': 'WorldView-3', 'sensor': 'Optical',
         'gsd_m': 0.31, 'access': 'Paid', 'daylight': 'Day',
         'fun_fact': 'Can see your BBQ from space. Literally.',
@@ -130,7 +130,7 @@ SATELLITE_CATALOGUE: List[Dict] = [
         'sensor_model': 'off_nadir', 'max_off_nadir_deg': 45.0,
     },
     {
-        'id': 'maxar_wv2', 'operator': 'Maxar',
+        'id': 'vantor_wv2', 'operator': 'Vantor',
         'constellation': 'WorldView-2', 'sensor': 'Optical',
         'gsd_m': 0.46, 'access': 'Paid', 'daylight': 'Day',
         'fun_fact': 'Old but gold — still rocking 8 bands since 2009.',
@@ -141,7 +141,7 @@ SATELLITE_CATALOGUE: List[Dict] = [
         'sensor_model': 'off_nadir', 'max_off_nadir_deg': 45.0,
     },
     {
-        'id': 'maxar_legion', 'operator': 'Maxar',
+        'id': 'vantor_legion', 'operator': 'Vantor',
         'constellation': 'WorldView Legion', 'sensor': 'Optical',
         'gsd_m': 0.30, 'access': 'Paid', 'daylight': 'Day',
         'fun_fact': 'The new kids on the block. Fast revisit, sharp eyes.',
@@ -221,7 +221,7 @@ SATELLITE_CATALOGUE: List[Dict] = [
         'id': 'esi_wv', 'operator': 'European Space Imaging',
         'constellation': 'WorldView (reseller)', 'sensor': 'Optical',
         'gsd_m': 0.31, 'access': 'Paid', 'daylight': 'Day',
-        'fun_fact': 'Maxar images, but with a European accent.',
+        'fun_fact': 'Vantor images, but with a European accent.',
         'norad_id': 40115, 'connector_ids': ['vantor'],
         'orbit_alt_km': 617, 'orbit_inc_deg': 97.7,
         'orbit_period_min': 97.0, 'swath_km': 13.1,
@@ -251,17 +251,17 @@ SATELLITE_CATALOGUE: List[Dict] = [
         'revisit_days': 16.0, 'ltan_hour': 10.0,
         'sensor_model': 'pushbroom', 'max_off_nadir_deg': 0.0,
     },
-    {
-        'id': 'maxar_opendata', 'operator': 'Maxar Open Data',
-        'constellation': 'WorldView (open events)', 'sensor': 'Optical',
-        'gsd_m': 0.50, 'access': 'Free', 'daylight': 'Day',
-        'fun_fact': 'After disasters Maxar opens the vault. Heroes in orbit.',
-        'norad_id': 40115, 'connector_ids': ['vantor'],
-        'orbit_alt_km': 617, 'orbit_inc_deg': 97.7,
-        'orbit_period_min': 97.0, 'swath_km': 13.1,
-        'revisit_days': 1.0, 'ltan_hour': 10.5,
-        'sensor_model': 'off_nadir', 'max_off_nadir_deg': 45.0,
-    },
+    #{
+    #    'id': 'vantor_opendata', 'operator': 'Vantor Open Data',
+    #    'constellation': 'WorldView (open events)', 'sensor': 'Optical',
+    #    'gsd_m': 0.50, 'access': 'Free', 'daylight': 'Day',
+    #    'fun_fact': 'After disasters Vantor opens the vault. Heroes in orbit.',
+    #    'norad_id': 40115, 'connector_ids': ['vantor'],
+    #    'orbit_alt_km': 617, 'orbit_inc_deg': 97.7,
+    #    'orbit_period_min': 97.0, 'swath_km': 13.1,
+    #    'revisit_days': 1.0, 'ltan_hour': 10.5,
+    #    'sensor_model': 'off_nadir', 'max_off_nadir_deg': 45.0,
+    #},
     {
         'id': 'nasa_modis', 'operator': 'NASA',
         'constellation': 'MODIS (Terra/Aqua)', 'sensor': 'Optical',
@@ -1124,7 +1124,7 @@ class SmartTaskingDockWidget(QDockWidget):
                 ('capella_stac',    '..connectors.capella_stac',    'CapellaSTACConnector',     'Capella',
                  [ConnectorCapability.BBOX_SEARCH, ConnectorCapability.DATE_RANGE,
                   ConnectorCapability.COG_SUPPORT]),
-                ('vantor',          '..connectors.vantor',          'VantorConnector',          'Maxar (Vantor)',
+                ('vantor',          '..connectors.vantor',          'VantorConnector',          'Vantor',
                  [ConnectorCapability.BBOX_SEARCH, ConnectorCapability.DATE_RANGE,
                   ConnectorCapability.CLOUD_COVER]),
                 ('copernicus_stac', '..connectors.copernicus_stac', 'CopernicusStacConnector',  'Copernicus',
@@ -2399,7 +2399,7 @@ class SmartTaskingDockWidget(QDockWidget):
 
     # Operator name (catalogue) → Tasking dock PROVIDERS list label
     _OPERATOR_TO_PROVIDER = {
-        'Maxar': 'Maxar',
+        'vantor': 'Vantor',
         'Planet': 'Planet Labs',
         'Airbus': 'Airbus',
         'ICEYE': 'ICEYE',

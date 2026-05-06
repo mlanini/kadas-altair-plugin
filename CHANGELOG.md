@@ -98,7 +98,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **STAC Item Validation (R3)**: Added `ConnectorManager._validate_stac_item()` — lightweight pre-result validation ensuring `type=="Feature"`, non-empty `id`, `properties` dict, `assets` dict
 - **Vantor connector** (`vantor.py`):
   - `search()` rewritten — iterates events from cache first, then up to `MAX_EVENTS_TO_FETCH=10` via network; removed `if not collection: return []` early-exit
-  - `_extract_assets(props, feature=None)` — optional `feature` param resolves from top-level `assets` dict when `href` not found in `properties` (newer Maxar GeoJSON schema)
+  - `_extract_assets(props, feature=None)` — optional `feature` param resolves from top-level `assets` dict when `href` not found in `properties` (newer Vantor GeoJSON schema)
 - **metadata.txt**: Updated version to 0.4.0, updated description and tags
 
 ### Fixed
@@ -213,7 +213,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **ICEYE SAR Open Data**: 3 collections, 196 SAR imagery items, global coverage
   - **Umbra SAR Open Data**: High-resolution SAR up to 16cm, recursive STAC catalog
   - **Capella SAR Open Data**: ~1000 SAR images, X-band radar, multiple product formats
-  - **Maxar Open Data (Vantor STAC)**: 55+ disaster event collections, sub-meter optical
+  - **Vantor Open Data**: 55+ disaster event collections, sub-meter optical
   - **Copernicus Dataspace**: Sentinel-1/2/3/5P via OAuth2 and STAC API
 - 3 additional experimental connectors: Planet, NASA EarthData, OneAtlas
 - Interactive map-based footprint selection with bidirectional table sync
