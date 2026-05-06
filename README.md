@@ -32,7 +32,7 @@
 
 ### Installation
 
-Download `kadas_altair_plugin_full_vX.Y.Z.zip` and copy manually:
+Download [kadas_altair_plugin_full_vX.Y.Z.zip](releases/download/v0.4.3/kadas_altair_plugin_full_v0.4.3.zip) and copy manually:
 
 ```powershell
 # Windows
@@ -45,15 +45,14 @@ cp -r kadas_altair_plugin ~/.local/share/Kadas/KadasZivil/profiles/default/pytho
 
 ### First Use
 
-1. Activate **KADAS Albireo** → `Settings` → `Plugins` → `KADAS Altair vx.x.x` 
+1. Activate **KADAS Albireo** → `Settings` → `Plugins Manager` → `KADAS Altair v0.4.3` 
 2. Go to "EO" menu tab
 3. Choose **Altair Open Data Panel** from Altair menu button
 4. Select a connector (e.g. *Maxar Open Data*)
-5. Click **Authenticate** (no credentials needed for open-data sources)
-6. Pick a collection from the dropdown
-7. Draw a search area or use the map extent
-8. Click **Search** — results appear in the table
-9. Select a scene → **Load Layer** → done
+5. Pick a collection from the dropdown
+6. Draw a search area or use the map extent
+7. Click **Search** — results appear in the table
+8. Select a scene → **Load COG** → done
 
 ---
 
@@ -61,7 +60,7 @@ cp -r kadas_altair_plugin ~/.local/share/Kadas/KadasZivil/profiles/default/pytho
 
 ### Connectors
 
-7 production-ready connectors, 1 experimental, 2 stubs:
+6 production-ready connectors, 1 experimental, 2 stubs:
 
 | # | Connector | Type | Highlights | Status |
 |---|-----------|------|------------|--------|
@@ -71,10 +70,9 @@ cp -r kadas_altair_plugin ~/.local/share/Kadas/KadasZivil/profiles/default/pytho
 | 4 | **Maxar Open Data** | Optical | 55+ disaster events · 0.3–0.5 m (Vantor STAC) | Production |
 | 5 | **swisstopo RapidMapping** | Optical | Swiss emergency events · sub-meter | Production |
 | 6 | **Copernicus Data Space** | Multi | Sentinel-1/2/3/5P · OAuth2 · 10 m–7 km | Production |
-| 7 | **Jilin-1 Gaofen** | Optical | CGSTL constellation · 0.72 m · STAC API | Production |
-| 8 | **NASA EarthData** | Multi | CMR granule search · STAC catalog | Experimental |
-| 9 | **Planet** | Optical | PSScene, SkySatScene · 0.5–3 m | Stub |
-| 10 | **OneAtlas** | Optical | Airbus imagery · 0.5 m | Stub |
+| 7 | **NASA EarthData** | Multi | CMR granule search · STAC catalog | Experimental |
+| 8 | **Planet** | Optical | PSScene, SkySatScene · 0.5–3 m | Stub |
+| 9 | **OneAtlas** | Optical | Airbus imagery · 0.5 m | Stub |
 
 ### Search & Visualization
 
@@ -139,7 +137,6 @@ kadas-altair-plugin/
     │   ├── swisstopo_stac.py
     │   ├── copernicus_stac.py      # OAuth2 STAC 1.1
     │   ├── nasa_earthdata.py
-    │   ├── jilin_gaofen_stac.py    # Jilin-1 Gaofen (CGSTL)
     │   ├── planet.py               # Stub
     │   └── oneatlas.py             # Stub
     ├── gui/
@@ -225,7 +222,7 @@ Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines 
 [eo-predictor](https://github.com/developmentseed/eo-predictor) · [sat-predict](https://sat-predict.davidhsu.cc/) · [kadas-vantor-plugin](https://github.com/mlanini/kadas-vantor-plugin) · [qgis-maxar-plugin](https://github.com/opengeos/qgis-maxar-plugin)
 
 **Open-data providers:**
-ICEYE · Umbra · Capella · Maxar · swisstopo · Copernicus · NASA · CGSTL (Jilin-1)
+ICEYE · Umbra · Capella · Maxar · swisstopo · Copernicus · NASA
 
 ---
 

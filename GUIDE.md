@@ -17,23 +17,15 @@
 
 ## 🔧 Installation
 
-### Option 1: ZIP Package (Recommended)
+Download [kadas_altair_plugin_full_vX.Y.Z.zip](releases/download/v0.4.3/kadas_altair_plugin_full_v0.4.3.zip) and copy manually:
 
-1. Download `kadas_altair_plugin_full.zip`
-2. KADAS Albireo → **Plugins** → **Manage and Install Plugins**
-3. **Install from ZIP** tab → Select ZIP file
-4. **Activate** plugin from Installed Plugins tab
-
-### Option 2: Manual Copy
-
-**Windows:**
 ```powershell
-Copy-Item -Recurse kadas_altair_plugin "$env:APPDATA\Kadas\Kadas\profiles\default\python\plugins\"
-```
+# Windows
+# Check you KADAS flavour first: Mil, Zivil or Light
+Copy-Item -Recurse kadas_altair_plugin "$env:APPDATA\Kadas\KadasZivil\profiles\default\python\plugins\"
 
-**Linux/macOS:**
-```bash
-cp -r kadas_altair_plugin ~/.local/share/Kadas/Kadas/profiles/default/python/plugins/
+# Linux / macOS
+cp -r kadas_altair_plugin ~/.local/share/Kadas/KadasZivil/profiles/default/python/plugins/
 ```
 
 ### Requirements
@@ -258,7 +250,7 @@ The prediction engine was inspired by [eo-predictor](https://github.com/developm
 
 ---
 
-## �🔐 Authentication
+## 🔐 Authentication
 
 ### Copernicus STAC (Dataspace)
 
@@ -401,13 +393,16 @@ Logs show:
 
 ## Available Data Sources
 
-The plugin includes 3 production-ready connectors:
+The plugin includes 6 production-ready connectors:
 
 | Connector | Collections | Type | Coverage | Status |
 |-----------|-------------|------|----------|--------|
 | **ICEYE SAR Open Data** | 3 | SAR Imagery | Global | ✅ Ready |
+| **Umbra SAR Open Data** | — | SAR Imagery | Global | ✅ Ready |
+| **Capella SAR Open Data** | — | SAR Imagery | Global | ✅ Ready |
 | **Maxar Open Data** | 55 | Optical | Disaster Events | ✅ Ready |
 | **swisstopo RapidMapping** | 3+ | Emergency Mapping | Switzerland | ✅ Ready |
+| **Copernicus Data Space** | 5+ | Multi-spectral | Global | ✅ Ready |
 
 ### ICEYE SAR Open Data
 

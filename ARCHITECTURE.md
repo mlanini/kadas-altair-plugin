@@ -32,16 +32,16 @@ KADAS Altair follows a **middleware architecture** that decouples the UI from da
                           │
 ┌─────────────────────────▼───────────────────────────────┐
 │              KADAS Altair Plugin (GUI)                  │
-│  ┌────────────┐  ┌────────────┐  ┌──────────────────┐  │
-│  │  dock.py   │  │ settings   │  │  log_viewer.py   │  │
-│  │ (Main UI)  │  │  _dock.py  │  │   (Debugging)    │  │
-│  └─────┬──────┘  └────────────┘  └──────────────────┘  │
-│  ┌──────────────────────────────────────────────┐  │
-│  │ smart_tasking_dock.py (Smart Tasking)            │  │
-│  │ SGP4 bearing-convergence overpass prediction      │  │
-│  │ + 3D orbit/ground track/swath visualisation       │  │
-│  └──────────────────────────────────────────────┘  │
-└────────┼─────────────────────────────────────────────────┘
+│  ┌────────────┐  ┌────────────┐  ┌──────────────────┐   │
+│  │  dock.py   │  │ settings   │  │  log_viewer.py   │   │
+│  │ (Main UI)  │  │  _dock.py  │  │   (Debugging)    │   │
+│  └─────┬──────┘  └────────────┘  └──────────────────┘   │
+│  ┌──────────────────────────────────────────────┐       │
+│  │ smart_tasking_dock.py (Smart Tasking)        │       │
+│  │ SGP4 bearing-convergence overpass prediction │       │
+│  │ + 3D orbit/ground track/swath visualisation  │       │
+│  └──────────────────────────────────────────────┘       │
+└────────┼────────────────────────────────────────────────┘
          │
 ┌────────▼─────────────────────────────────────────────────┐
 │           Connector Manager (Middleware)                 │
@@ -53,15 +53,15 @@ KADAS Altair follows a **middleware architecture** that decouples the UI from da
 └────────┬─────────────────────────────────────────────────┘
          │
 ┌────────▼─────────────────────────────────────────────────┐
-│                    Connectors (11)                       │
-│  ┌──────────┐  ┌──────────┐  ┌───────────┐             │
-│  │  Vantor  │  │  ICEYE   │  │   Umbra   │             │
-│  │  (CSV)   │  │  (STAC)  │  │   (STAC)  │             │
-│  └────┬─────┘  └────┬─────┘  └─────┬─────┘             │
-│  ┌────┴─────┐  ┌────┴─────┐  ┌─────┴─────┐             │
-│  │ Capella  │  │Copernicus│  │  Planet   │             │
-│  │  (STAC)  │  │  (STAC)  │  │   (API)   │             │
-│  └──────────┘  └────┬─────┘  └───────────┘             │
+│                    Connectors (10)                       │
+│  ┌──────────┐  ┌──────────┐  ┌───────────┐               │
+│  │  Vantor  │  │  ICEYE   │  │   Umbra   │               │
+│  │  (CSV)   │  │  (STAC)  │  │   (STAC)  │               │
+│  └────┬─────┘  └────┬─────┘  └─────┬─────┘               │
+│  ┌────┴─────┐  ┌────┴─────┐  ┌─────┴─────┐               │
+│  │ Capella  │  │Copernicus│  │  Planet   │               │
+│  │  (STAC)  │  │  (STAC)  │  │   (API)   │               │
+│  └──────────┘  └────┬─────┘  └───────────┘               │
 │                     │                                    │
 │              (OAuth2 Token)                              │
 └────────┬─────────────────────────────────────────────────┘
@@ -77,7 +77,7 @@ KADAS Altair follows a **middleware architecture** that decouples the UI from da
 ┌────────▼─────────────────────────────────────────────────┐
 │                  Data Sources                            │
 │  • GitHub (CSV, GeoJSON)                                 │
-│  • STAC APIs (Umbra, ICEYE, Capella, Copernicus)        │
+│  • STAC APIs (Umbra, ICEYE, Capella, Copernicus)         │
 │  • REST APIs (Copernicus STAC, Planet)                   │
 │  • OGC Web Services (WMS/WMTS)                           │
 │  • AWS S3 (COG imagery)                                  │
@@ -102,6 +102,7 @@ kadas_altair_plugin/
 │   ├── umbra_stac.py        # Umbra SAR (recursive STAC)
 │   ├── capella_stac.py      # Capella SAR (STAC)
 │   ├── copernicus_stac.py   # Copernicus STAC (OAuth2 + REST)
+│   ├── jilin_gaofen_stac.py # Jilin-1 Gaofen (commercial, tasking only)
 │   ├── oneatlas.py          # OneAtlas (stub)
 │   ├── planet.py            # Planet (stub)
 │   └── nasa_earthdata.py    # NASA EarthData (stub)
