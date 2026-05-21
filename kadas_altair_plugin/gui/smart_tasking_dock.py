@@ -63,15 +63,13 @@ try:
         QgsTask,
         QgsVectorLayer,
     )
-    from qgis.gui import QgsExtentWidget
-
     QGIS_AVAILABLE = True
 except ImportError:
-    QgsExtentWidget = None
     QgsTask = object  # type: ignore
     QGIS_AVAILABLE = False
 
 from ..logger import get_logger
+from .aoi_draw_tool import AoiWidget
 
 logger = get_logger('gui.smart_tasking')
 
@@ -1273,25 +1271,16 @@ class SmartTaskingDockWidget(QDockWidget):
         aoi_group = QGroupBox('Where on Earth?')
         aoi_form = QFormLayout(aoi_group)
 
-        self.extent_widget = None
-        if QgsExtentWidget and self.iface:
-            self.extent_widget = QgsExtentWidget(parent=aoi_group)
-            # NOTE: Do NOT call setMapCanvas() here. KADAS uses KadasMapCanvas
-            # which is incompatible with QgsMapToolExtent (used internally by
-            # QgsExtentWidget's draw-on-canvas button), causing a hard crash.
-            # The widget still works for manual coordinate input.
+        self.extent_widget = AoiWidget(parent=aoi_group)
+        if self.iface:
             canvas = self.iface.mapCanvas()
             canvas_extent = canvas.extent()
             canvas_crs = canvas.mapSettings().destinationCrs()
+            self.extent_widget.setMapCanvas(canvas)
             self.extent_widget.setCurrentExtent(canvas_extent, canvas_crs)
             self.extent_widget.setOriginalExtent(canvas_extent, canvas_crs)
             self.extent_widget.setOutputCrs(canvas_crs)
-            aoi_form.addRow('AOI:', self.extent_widget)
-        else:
-            fallback = QLabel('QgsExtentWidget unavailable. Draw an AOI in your dreams instead.')
-            fallback.setWordWrap(True)
-            fallback.setStyleSheet(f'color: {self._LABEL_COLOR}; font-size: 10px;')
-            aoi_form.addRow('', fallback)
+        aoi_form.addRow('AOI:', self.extent_widget)
 
         layout.addWidget(aoi_group)
 
@@ -1519,8 +1508,6 @@ class SmartTaskingDockWidget(QDockWidget):
     # ------------------------------------------------------------------
 
     def _get_aoi_bbox_wgs84(self) -> Optional[Tuple[float, float, float, float]]:
-        if not self.extent_widget:
-            return None
         try:
             extent = self.extent_widget.outputExtent()
             crs = self.extent_widget.outputCrs()
@@ -2736,13 +2723,12 @@ class SmartTaskingDockWidget(QDockWidget):
         self.resolution_combo.setCurrentIndex(0)
         self.access_combo.setCurrentIndex(0)
         self.daylight_combo.setCurrentIndex(0)
-        if self.extent_widget and self.iface:
+        if self.iface:
             canvas = self.iface.mapCanvas()
-            ext = canvas.extent()
-            crs = canvas.mapSettings().destinationCrs()
-            self.extent_widget.setCurrentExtent(ext, crs)
-            self.extent_widget.setOriginalExtent(ext, crs)
-            self.extent_widget.setOutputCrs(crs)
+            self.extent_widget.setExtent(
+                canvas.extent(),
+                canvas.mapSettings().destinationCrs(),
+            )
         self.archive_table.setRowCount(0)
         self.overpass_table.setRowCount(0)
         self.summary_text.clear()

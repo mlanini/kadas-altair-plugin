@@ -32,10 +32,7 @@ from qgis.core import (
     QgsCoordinateTransform,
     QgsProject,
 )
-try:
-    from qgis.gui import QgsExtentWidget
-except ImportError:
-    QgsExtentWidget = None
+from .aoi_draw_tool import AoiWidget
 
 from ..logger import get_logger
 
@@ -166,24 +163,16 @@ class TaskingDockWidget(QDockWidget):
         self.aoi_name.setPlaceholderText('AOI name / operation name')
         aoi_form.addRow('AOI Name:', self.aoi_name)
 
-        self.extent_widget = None
-        if QgsExtentWidget and self.iface:
-            self.extent_widget = QgsExtentWidget(parent=aoi_group)
-            # NOTE: Do NOT call setMapCanvas() here. KADAS uses KadasMapCanvas
-            # which is incompatible with QgsMapToolExtent (used internally by
-            # QgsExtentWidget's draw-on-canvas button), causing a hard crash.
-            # The widget still works for manual coordinate input.
+        self.extent_widget = AoiWidget(parent=aoi_group)
+        if self.iface:
             canvas = self.iface.mapCanvas()
             canvas_extent = canvas.extent()
             canvas_crs = canvas.mapSettings().destinationCrs()
+            self.extent_widget.setMapCanvas(canvas)
             self.extent_widget.setCurrentExtent(canvas_extent, canvas_crs)
             self.extent_widget.setOriginalExtent(canvas_extent, canvas_crs)
             self.extent_widget.setOutputCrs(canvas_crs)
-            aoi_form.addRow('AOI Extent:', self.extent_widget)
-        else:
-            fallback = QLabel('QgsExtentWidget not available in this environment.')
-            fallback.setWordWrap(True)
-            aoi_form.addRow('AOI Extent:', fallback)
+        aoi_form.addRow('AOI Extent:', self.extent_widget)
 
         self.aoi_wkt = QTextEdit()
         self.aoi_wkt.setMaximumHeight(70)
@@ -287,8 +276,6 @@ class TaskingDockWidget(QDockWidget):
     # ------------------------------------------------------------------
 
     def _get_aoi_bbox_wgs84(self):
-        if not self.extent_widget:
-            return None
         try:
             extent = self.extent_widget.outputExtent()
             crs = self.extent_widget.outputCrs()
@@ -444,13 +431,12 @@ class TaskingDockWidget(QDockWidget):
 
         self.aoi_name.clear()
         self.aoi_wkt.clear()
-        if self.extent_widget and self.iface:
+        if self.iface:
             canvas = self.iface.mapCanvas()
-            canvas_extent = canvas.extent()
-            canvas_crs = canvas.mapSettings().destinationCrs()
-            self.extent_widget.setCurrentExtent(canvas_extent, canvas_crs)
-            self.extent_widget.setOriginalExtent(canvas_extent, canvas_crs)
-            self.extent_widget.setOutputCrs(canvas_crs)
+            self.extent_widget.setExtent(
+                canvas.extent(),
+                canvas.mapSettings().destinationCrs(),
+            )
 
         self.start_date.setDate(QDate.currentDate())
         self.end_date.setDate(QDate.currentDate().addDays(14))
@@ -520,7 +506,7 @@ class TaskingDockWidget(QDockWidget):
 
         # AOI bbox
         bbox = data.get('bbox')
-        if bbox and len(bbox) >= 4 and self.extent_widget:
+        if bbox and len(bbox) >= 4:
             try:
                 from qgis.core import QgsRectangle, QgsCoordinateReferenceSystem
                 rect = QgsRectangle(
@@ -528,9 +514,9 @@ class TaskingDockWidget(QDockWidget):
                     float(bbox[2]), float(bbox[3]),
                 )
                 wgs84 = QgsCoordinateReferenceSystem('EPSG:4326')
-                self.extent_widget.setCurrentExtent(rect, wgs84)
-                self.extent_widget.setOriginalExtent(rect, wgs84)
-                self.extent_widget.setOutputCrs(wgs84)
+                # setExtent() always overrides and preserves the source CRS,
+                # ensuring _get_aoi_bbox_wgs84() can reproject correctly.
+                self.extent_widget.setExtent(rect, wgs84)
             except Exception:
                 pass
 

@@ -115,6 +115,10 @@ class SettingsDockWidget(QDockWidget):
         capella_tab = self._create_capella_tab()
         tab_widget.addTab(capella_tab, "Capella Space")
 
+        # JAXA Earth tab
+        jaxa_tab = self._create_jaxa_tab()
+        tab_widget.addTab(jaxa_tab, "JAXA Earth")
+
         # Display settings tab
         display_tab = self._create_display_tab()
         tab_widget.addTab(display_tab, "Display")
@@ -698,6 +702,75 @@ class SettingsDockWidget(QDockWidget):
         layout.addStretch()
         
         return widget
+
+    # ------------------------------------------------------------------
+    # JAXA Earth tab
+    # ------------------------------------------------------------------
+
+    def _create_jaxa_tab(self):
+        """Create JAXA Earth settings tab (public data, no credentials required)."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setSpacing(8)
+        layout.setContentsMargins(8, 8, 8, 8)
+
+        # Info group
+        info_group = QGroupBox("JAXA Earth — Open EO Data")
+        info_layout = QVBoxLayout(info_group)
+
+        info_text = (
+            "JAXA Earth provides free access to multi-sensor earth observation data "
+            "via a public STAC/COG catalogue.\n\n"
+            "No registration or API key is required.\n\n"
+            "Available datasets include:\n"
+            "  • ALOS/PRISM AW3D30 – 30 m global DSM (elevation)\n"
+            "  • ALOS-2 / PALSAR-2 – SAR backscatter & forest/wetland mosaics\n"
+            "  • GCOM-C / SGLI – Land surface temperature, NDVI, ocean products\n"
+            "  • GPM IMERG – Global precipitation\n"
+            "  • Himawari-8/9 – Near-real-time meteorological imagery\n\n"
+            "Catalog root:\n"
+            "  https://data.earth.jaxa.jp/stac/cog/v1/catalog.json"
+        )
+        info_label = QLabel(info_text)
+        info_label.setWordWrap(True)
+        info_label.setStyleSheet("color: #303030; font-size: 9px;")
+        info_layout.addWidget(info_label)
+
+        # Test connection button
+        test_btn = QPushButton("Test JAXA Catalog Connection")
+        test_btn.clicked.connect(self._test_jaxa_connection)
+        info_layout.addWidget(test_btn)
+
+        self.jaxa_status_label = QLabel("")
+        self.jaxa_status_label.setStyleSheet("font-size: 9px;")
+        info_layout.addWidget(self.jaxa_status_label)
+
+        layout.addWidget(info_group)
+        layout.addStretch()
+        return widget
+
+    def _test_jaxa_connection(self):
+        """Verify access to the JAXA Earth STAC catalog."""
+        self.jaxa_status_label.setText("Testing…")
+        self.jaxa_status_label.setStyleSheet("color: #88ccff; font-size: 9px;")
+        try:
+            from ..connectors.jaxa_earth_stac import JaxaEarthStacConnector
+            connector = JaxaEarthStacConnector()
+            if connector.authenticate():
+                collections = connector.get_collections()
+                n = len(collections)
+                self.jaxa_status_label.setText(
+                    f"✅  Catalog reachable — {n} collection(s) found"
+                )
+                self.jaxa_status_label.setStyleSheet("color: #00cc66; font-size: 9px;")
+                logger.info(f"JAXA Earth catalog test OK: {n} collections")
+            else:
+                self.jaxa_status_label.setText("❌  Could not reach JAXA catalog")
+                self.jaxa_status_label.setStyleSheet("color: #ff6666; font-size: 9px;")
+        except Exception as exc:
+            self.jaxa_status_label.setText(f"❌  Error: {exc}")
+            self.jaxa_status_label.setStyleSheet("color: #ff6666; font-size: 9px;")
+            logger.warning(f"JAXA catalog test failed: {exc}")
 
     def _create_display_tab(self):
         """Create display settings tab"""

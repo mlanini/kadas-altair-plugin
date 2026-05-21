@@ -5,7 +5,41 @@ All notable changes to KADAS Altair Plugin will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.4.3] - 2026-05-06
+## [0.4.5] - 2025-06-05
+
+### Added
+- **JAXA Earth STAC connector** (`connectors/jaxa_earth_stac.py`) — free/public access to JAXA's COG-STAC catalogue (`https://data.earth.jaxa.jp/stac/cog/v1/`), **no credentials required**:
+  - Dual-strategy search: first attempts a standard STAC POST `/search` (server-side filtering); automatically falls back to catalog-walk (client-side bbox + datetime filtering) if the endpoint is not supported
+  - Datasets covered: ALOS/PRISM AW3D30 global 30 m DSM, ALOS-2/PALSAR-2 SAR mosaics (forest, wetland, global), GCOM-C/SGLI optical products (LST, NDVI, ocean colour), GPM IMERG precipitation, Himawari-8/9 meteorological imagery
+  - STAC items normalised to Altair standard (`_provider`, `_connector`, `_satellite`, `_asset_href`, `_thumbnail`, `bbox`)
+  - Best COG asset selection: prefers `data` role assets, skips PNG/JPEG thumbnails
+  - `get_collections()` method returns collection list from catalog for UI dropdowns
+  - Registered in `ConnectorManager` with capabilities: `BBOX_SEARCH`, `DATE_RANGE`, `COLLECTIONS`, `COG_SUPPORT`
+- **JAXA Earth settings tab** (`gui/settings_dock.py`) — informational tab listing available datasets, catalog URL, and a "Test Connection" button that verifies catalog reachability and reports the number of available collections
+- **`ConnectorType.JAXA_EARTH_STAC`** added to the `ConnectorType` enum in `connector_manager.py`
+
+### Changed
+- **`archive_dock.py`**: `ARCHIVE_PROVIDERS` dict updated with `'JAXA Earth': 'jaxa_earth_stac'`; JAXA connector registered in `_setup_connectors()`; `_get_credentials_for_connector()` returns `{}` for `jaxa_earth_stac` (public, no auth)
+- **`metadata.txt`**: version bumped to 0.4.5; changelog and description updated
+
+## [0.4.4] - 2026-05-21
+
+### Added
+- **AoiWidget** (`gui/aoi_draw_tool.py`) — custom AOI definition widget with interactive map-canvas rectangle drawing, replacing `QgsExtentWidget` across all panels:
+  - **Draw on Map** button activates a rubber-band `QgsMapTool`; drag to define the search rectangle
+  - **Current View** button snaps AOI to the current map extent
+  - **Clear** button removes the AOI
+  - Coordinate display label shows W/E/S/N bounds and CRS after each interaction
+  - Drop-in compatible API (`setMapCanvas`, `setCurrentExtent`, `setOriginalExtent`, `setOutputCrs`, `outputExtent`, `outputCrs`, `extentChanged` signal)
+
+### Changed
+- **All four panels** (Archive, Open Data, Tasking, Smart Tasking) now use `AoiWidget` instead of `QgsExtentWidget`
+- **Tasking and Smart Tasking docks**: `setMapCanvas()` is now called safely — no longer omitted due to KADAS crash risk (the new tool uses `QgsMapTool` directly, not `QgsMapToolExtent`)
+- **metadata.txt**: version bumped to 0.4.4
+
+### Fixed
+- **KADAS canvas crash** — `QgsExtentWidget` draw button caused a hard segfault on `KadasMapCanvas` via `QgsMapToolExtent`; fully resolved by the new `AoiWidget`/`RectangleDrawTool` implementation
+
 
 ### Added
 - **Jilin-1 Gaofen STAC connector** (`jilin_gaofen_stac.py`) — connector file for CGSTL's Jilin-1 high-resolution optical constellation (commercial, 0.72 m GSD):

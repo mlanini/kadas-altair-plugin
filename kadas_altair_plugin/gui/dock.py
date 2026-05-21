@@ -16,6 +16,7 @@ from qgis.PyQt.QtCore import Qt, QDate, QSettings, QTimer, QModelIndex, QVariant
 from qgis.PyQt.QtGui import QFont, QColor
 from ..logger import get_logger
 from .footprint_tool import FootprintSelectionTool
+from .aoi_draw_tool import AoiWidget
 
 logger = get_logger('gui.dock')
 
@@ -46,7 +47,6 @@ try:
         QgsTask,
         QgsApplication
     )
-    from qgis.gui import QgsExtentWidget
     from qgis.PyQt.QtCore import QVariant
     QGIS_AVAILABLE = True
 except ImportError:
@@ -66,7 +66,6 @@ except ImportError:
     QgsField = None
     QgsFillSymbol = None
     QVariant = None
-    QgsExtentWidget = None
     QgsJsonUtils = None
     QgsTask = None
     QgsApplication = None
@@ -379,67 +378,32 @@ class AltairDockWidget(QDockWidget):
         collection_label.setStyleSheet("color: #303030;")
         filters_layout.addRow(collection_label, self.collections_combo)
 
-        # Search Area - QgsExtentWidget for area selection
-        if QGIS_AVAILABLE and QgsExtentWidget and self.iface:
-            self.extent_widget = QgsExtentWidget(parent=filters_group)
-            
-            # Connect to map canvas for current extent
-            self.extent_widget.setMapCanvas(self.iface.mapCanvas())
-            
-            # Set initial extent to current map extent
-            self.extent_widget.setCurrentExtent(
-                self.iface.mapCanvas().extent(),
-                self.iface.mapCanvas().mapSettings().destinationCrs()
-            )
-            
-            # Set original extent for reset button
-            self.extent_widget.setOriginalExtent(
-                self.iface.mapCanvas().extent(),
-                self.iface.mapCanvas().mapSettings().destinationCrs()
-            )
-            
-            # Output CRS will be the current map CRS
-            self.extent_widget.setOutputCrs(
-                self.iface.mapCanvas().mapSettings().destinationCrs()
-            )
-            
-            # Area checkbox
-            area_checkbox_layout = QHBoxLayout()
-            self.use_area_check = QCheckBox("Use Search Area")
-            self.use_area_check.setChecked(True)
-            self.use_area_check.setStyleSheet("color: #303030;")
-            self.use_area_check.stateChanged.connect(self._on_use_area_changed)
-            area_checkbox_layout.addWidget(self.use_area_check)
-            area_checkbox_layout.addStretch()
-            filters_layout.addRow("", area_checkbox_layout)
-            
-            area_label = QLabel("Search Area:")
-            area_label.setStyleSheet("color: #303030;")
-            filters_layout.addRow(area_label, self.extent_widget)
-            
-            logger.info("QgsExtentWidget initialized successfully")
-        else:
-            # Fallback: simple manual bbox input
-            logger.warning("QgsExtentWidget not available, using manual input fallback")
-            self.extent_widget = None
-            
-            fallback_label = QLabel(
-                "QgsExtentWidget not available. Enter coordinates manually:"
-            )
-            fallback_label.setWordWrap(True)
-            fallback_label.setStyleSheet("color: #303030;")
-            filters_layout.addRow(fallback_label)
-            
-            # Manual bbox input fields
-            self.bbox_minx = QLineEdit("-180.0")
-            self.bbox_miny = QLineEdit("-90.0")
-            self.bbox_maxx = QLineEdit("180.0")
-            self.bbox_maxy = QLineEdit("90.0")
-            
-            filters_layout.addRow("Min X (Lon):", self.bbox_minx)
-            filters_layout.addRow("Min Y (Lat):", self.bbox_miny)
-            filters_layout.addRow("Max X (Lon):", self.bbox_maxx)
-            filters_layout.addRow("Max Y (Lat):", self.bbox_maxy)
+        # Search Area - AoiWidget for interactive map drawing
+        self.extent_widget = AoiWidget(parent=filters_group)
+        if QGIS_AVAILABLE and self.iface:
+            canvas = self.iface.mapCanvas()
+            self.extent_widget.setMapCanvas(canvas)
+            canvas_extent = canvas.extent()
+            canvas_crs = canvas.mapSettings().destinationCrs()
+            self.extent_widget.setCurrentExtent(canvas_extent, canvas_crs)
+            self.extent_widget.setOriginalExtent(canvas_extent, canvas_crs)
+            self.extent_widget.setOutputCrs(canvas_crs)
+
+        # Area checkbox
+        area_checkbox_layout = QHBoxLayout()
+        self.use_area_check = QCheckBox("Use Search Area")
+        self.use_area_check.setChecked(True)
+        self.use_area_check.setStyleSheet("color: #303030;")
+        self.use_area_check.stateChanged.connect(self._on_use_area_changed)
+        area_checkbox_layout.addWidget(self.use_area_check)
+        area_checkbox_layout.addStretch()
+        filters_layout.addRow("", area_checkbox_layout)
+
+        area_label = QLabel("Search Area:")
+        area_label.setStyleSheet("color: #303030;")
+        filters_layout.addRow(area_label, self.extent_widget)
+
+        logger.info("AoiWidget initialized successfully")
 
         # Date range checkbox and fields
         date_checkbox_layout = QHBoxLayout()
@@ -1646,15 +1610,7 @@ class AltairDockWidget(QDockWidget):
     def _on_use_area_changed(self, state):
         """Enable/disable search area widget based on checkbox state"""
         enabled = state == Qt.Checked
-        if self.extent_widget:
-            self.extent_widget.setEnabled(enabled)
-        else:
-            # Manual bbox inputs
-            self.bbox_minx.setEnabled(enabled)
-            self.bbox_miny.setEnabled(enabled)
-            self.bbox_maxx.setEnabled(enabled)
-            self.bbox_maxy.setEnabled(enabled)
-        
+        self.extent_widget.setEnabled(enabled)
         logger.debug(f"Use area filter: {enabled}")
     
     def _on_use_date_changed(self, state):
@@ -1767,27 +1723,27 @@ class AltairDockWidget(QDockWidget):
 
     def get_search_area(self):
         """
-        Get the current search area from QgsExtentWidget or manual input.
+        Get the current search area from AoiWidget.
 
         Returns:
-            dict: {'bbox': [min_x, min_y, max_x, max_y], 'crs': 'EPSG:XXXX', 'wkt': 'POLYGON(...)' or None}
+            dict: {'bbox': [min_x, min_y, max_x, max_y], 'crs': 'EPSG:XXXX', 'wkt': None}
+                  or None on error.
         """
         if self.extent_widget:
             try:
-                # Update extent widget CRS to match current map canvas
-                # This ensures CRS changes are reflected
+                # Keep widget CRS in sync with the current map canvas CRS
                 current_map_crs = self.iface.mapCanvas().mapSettings().destinationCrs()
                 widget_crs = self.extent_widget.outputCrs()
-                
+
                 if not widget_crs.isValid() or widget_crs.authid() != current_map_crs.authid():
-                    logger.info(f"Updating extent widget CRS from {widget_crs.authid()} to {current_map_crs.authid()}")
+                    logger.info(f"Updating AoiWidget CRS from {widget_crs.authid()} to {current_map_crs.authid()}")
                     self.extent_widget.setOutputCrs(current_map_crs)
                 
                 extent = self.extent_widget.outputExtent()
                 crs = self.extent_widget.outputCrs()
 
                 if not extent or extent.isEmpty():
-                    logger.warning("QgsExtentWidget returned empty extent, using map extent")
+                    logger.warning('AoiWidget has no AOI — falling back to map extent')
                     extent = self.iface.mapCanvas().extent()
                     crs = self.iface.mapCanvas().mapSettings().destinationCrs()
 
@@ -1797,48 +1753,12 @@ class AltairDockWidget(QDockWidget):
                     extent.xMaximum(),
                     extent.yMaximum()
                 ]
-
-                # Validate CRS
                 crs_string = crs.authid() if crs and crs.isValid() else 'EPSG:4326'
-                
-                if not crs or not crs.isValid():
-                    logger.warning(f"Invalid CRS from extent widget, defaulting to EPSG:4326")
-                    crs_string = 'EPSG:4326'
-
-                wkt = None
-                if hasattr(self.extent_widget, 'extentLayerName') and self.extent_widget.extentLayerName():
-                    layer_name = self.extent_widget.extentLayerName()
-                    logger.info(f"Search area from layer: {layer_name}")
-
-                    if QgsProject:
-                        for layer in QgsProject.instance().mapLayers().values():
-                            if layer.name() == layer_name and hasattr(layer, 'getFeatures'):
-                                features = list(layer.getFeatures())
-                                if features and QGIS_AVAILABLE:
-                                    combined_geom = None
-                                    for feature in features:
-                                        geom = feature.geometry()
-                                        if geom and not geom.isNull():
-                                            if combined_geom is None:
-                                                combined_geom = QgsGeometry(geom)
-                                            else:
-                                                combined_geom = combined_geom.combine(geom)
-
-                                    if combined_geom and not combined_geom.isEmpty():
-                                        wkt = combined_geom.asWkt()
-                                        logger.info(f"Extracted WKT from layer: {len(wkt)} chars")
-                                break
-
-                logger.info(f"Search area: bbox={bbox}, crs={crs_string}, has_wkt={wkt is not None}")
-
-                return {
-                    'bbox': bbox,
-                    'crs': crs_string,
-                    'wkt': wkt
-                }
+                logger.info(f'Search area: bbox={bbox}, crs={crs_string}')
+                return {'bbox': bbox, 'crs': crs_string, 'wkt': None}
 
             except Exception as e:
-                logger.error(f"Error getting extent from QgsExtentWidget: {str(e)}", exc_info=True)
+                logger.error(f'Error reading AOI from AoiWidget: {e}', exc_info=True)
                 try:
                     extent = self.iface.mapCanvas().extent()
                     crs = self.iface.mapCanvas().mapSettings().destinationCrs()
@@ -1848,34 +1768,8 @@ class AltairDockWidget(QDockWidget):
                         'wkt': None
                     }
                 except Exception:
-                    return {
-                        'bbox': [-180, -90, 180, 90],
-                        'crs': 'EPSG:4326',
-                        'wkt': None
-                    }
-        else:
-            try:
-                bbox = [
-                    float(self.bbox_minx.text()),
-                    float(self.bbox_miny.text()),
-                    float(self.bbox_maxx.text()),
-                    float(self.bbox_maxy.text())
-                ]
-                logger.info(f"Manual bbox input: {bbox}")
-                return {
-                    'bbox': bbox,
-                    'crs': 'EPSG:4326',
-                    'wkt': None
-                }
-            except ValueError as e:
-                logger.error(f"Invalid manual bbox input: {str(e)}")
-                QMessageBox.warning(
-                    self,
-                    "Invalid Coordinates",
-                    "The entered coordinates are not valid.\n"
-                    "Use valid decimal numbers (e.g., -180.0, 90.0)"
-                )
-                return None
+                    return {'bbox': [-180, -90, 180, 90], 'crs': 'EPSG:4326', 'wkt': None}
+        return None
 
     def _on_selection_changed(self):
         """Enable/disable buttons based on selection (LEGACY - use _on_footprint_selection_changed)"""
@@ -3940,9 +3834,10 @@ class AltairDockWidget(QDockWidget):
         self._feature_id_to_result_index.clear()
         self._result_index_to_feature_id.clear()
         
-        # Cleanup QgsExtentWidget (handled automatically by Qt)
+        # Cleanup AoiWidget draw tool if active
         if self.extent_widget:
-            logger.debug("QgsExtentWidget will be cleaned up by Qt parent")
+            self.extent_widget._cancel_drawing()
+            logger.debug("AoiWidget draw tool cancelled on cleanup")
     
     def closeEvent(self, event):
         """Handle dock widget close event"""

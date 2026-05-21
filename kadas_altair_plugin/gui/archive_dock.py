@@ -50,6 +50,7 @@ from qgis.PyQt.QtWidgets import (
 
 from ..logger import get_logger
 from .footprint_tool import FootprintSelectionTool
+from .aoi_draw_tool import AoiWidget
 
 logger = get_logger('gui.archive')
 
@@ -90,12 +91,7 @@ except ImportError:
     QGIS_AVAILABLE = False
     QgsTask = object  # type: ignore
 
-try:
-    from qgis.gui import QgsExtentWidget
-    QGIS_GUI_AVAILABLE = True
-except ImportError:
-    QgsExtentWidget = None
-    QGIS_GUI_AVAILABLE = False
+# AoiWidget (map-canvas rectangle drawing) is used instead of QgsExtentWidget
 
 # ---------------------------------------------------------------------------
 # KADAS-specific modules
@@ -123,6 +119,7 @@ ARCHIVE_PROVIDERS: Dict[str, str] = {
     'NASA EarthData':     'nasa_earthdata',
     'Copernicus':         'copernicus_stac',
     'swisstopo S2-SR':    'swisstopo_stac',
+    'JAXA Earth':         'jaxa_earth_stac',
 }
 
 
@@ -387,23 +384,16 @@ class ArchiveDockWidget(QDockWidget):
         aoi_group = QGroupBox('Area Of Interest')
         aoi_form = QFormLayout(aoi_group)
 
-        self.extent_widget = None
-        if QGIS_AVAILABLE and QGIS_GUI_AVAILABLE and QgsExtentWidget and self.iface:
-            self.extent_widget = QgsExtentWidget(parent=aoi_group)
-            self.extent_widget.setMapCanvas(self.iface.mapCanvas())
-
-            canvas_extent = self.iface.mapCanvas().extent()
-            canvas_crs = self.iface.mapCanvas().mapSettings().destinationCrs()
+        self.extent_widget = AoiWidget(parent=aoi_group)
+        if QGIS_AVAILABLE and self.iface:
+            canvas = self.iface.mapCanvas()
+            self.extent_widget.setMapCanvas(canvas)
+            canvas_extent = canvas.extent()
+            canvas_crs = canvas.mapSettings().destinationCrs()
             self.extent_widget.setCurrentExtent(canvas_extent, canvas_crs)
             self.extent_widget.setOriginalExtent(canvas_extent, canvas_crs)
             self.extent_widget.setOutputCrs(canvas_crs)
-
-            aoi_form.addRow('Search Area:', self.extent_widget)
-        else:
-            fallback = QLabel('QgsExtentWidget unavailable. AOI controls are disabled in this environment.')
-            fallback.setWordWrap(True)
-            fallback.setStyleSheet(f'color: {self._LABEL_COLOR}; font-size: 10px;')
-            aoi_form.addRow('', fallback)
+        aoi_form.addRow('Search Area:', self.extent_widget)
         layout.addWidget(aoi_group)
 
         # --- Search actions ---
@@ -694,6 +684,23 @@ class ArchiveDockWidget(QDockWidget):
             except Exception as exc:
                 logger.warning(f'Jilin-1 Gaofen connector unavailable: {exc}')
 
+            # JAXA Earth COG-STAC (open-data, no auth)
+            try:
+                from ..connectors.jaxa_earth_stac import JaxaEarthStacConnector
+                jaxa = JaxaEarthStacConnector()
+                self._connector_manager.register_connector(
+                    'jaxa_earth_stac', jaxa, 'JAXA Earth',
+                    capabilities=[
+                        ConnectorCapability.BBOX_SEARCH,
+                        ConnectorCapability.DATE_RANGE,
+                        ConnectorCapability.COLLECTIONS,
+                        ConnectorCapability.COG_SUPPORT,
+                    ]
+                )
+                logger.debug('JAXA Earth connector registered')
+            except Exception as exc:
+                logger.warning(f'JAXA Earth connector unavailable: {exc}')
+
             logger.info('ArchiveDockWidget: connector manager ready')
 
         except Exception as exc:
@@ -735,8 +742,8 @@ class ArchiveDockWidget(QDockWidget):
             )
             return
 
-        if not self.extent_widget:
-            QMessageBox.warning(self, 'AOI Error', 'QgsExtentWidget is not available in this environment.')
+        if self.extent_widget.outputExtent() is None:
+            QMessageBox.warning(self, 'Missing AOI', 'Please define an Area of Interest before searching (use Draw on Map or Current View).')
             return
 
         try:
@@ -954,6 +961,10 @@ class ArchiveDockWidget(QDockWidget):
                 'password': password or None,
                 'access_token': access_token or None,
             }
+
+        # swisstopo and JAXA Earth are public — no credentials required
+        if connector_id in ('swisstopo_stac', 'jaxa_earth_stac'):
+            return {}
 
         return {}
 
