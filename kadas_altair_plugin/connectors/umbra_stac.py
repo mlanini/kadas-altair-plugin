@@ -5,7 +5,7 @@ Umbra STAC Connector (dual mode)
 - Commercial mode: Umbra Canopy STAC API v2 (Bearer token)
 
 References:
-- Open data catalog: https://umbra-open-data-catalog.s3.us-west-2.amazonaws.com/stac/catalog.json
+- Open data catalog: https://s3.us-west-2.amazonaws.com/umbra-open-data-catalog/stac/catalog.json?.language=en
 - Commercial STAC v2 overview: https://docs.canopy.umbra.space/reference/v2-stac-overview
 """
 
@@ -38,7 +38,7 @@ class UmbraSTACConnector(ConnectorBase):
     SAR can capture images at night, through clouds, smoke, and rain.
     
     Architecture:
-    - Root catalog: https://umbra-open-data-catalog.s3.us-west-2.amazonaws.com/stac/catalog.json
+    - Root catalog: https://s3.us-west-2.amazonaws.com/umbra-open-data-catalog/stac/catalog.json?.language=en
     - Hierarchy: catalog.json → year/catalog.json → year-month/catalog.json → collection.json → items
     - No authentication required (public open data)
     - STAC 1.1.0 compliant
@@ -50,8 +50,8 @@ class UmbraSTACConnector(ConnectorBase):
     timeout_item: float = 15.0     # Individual item fetch
     
     # Umbra STAC endpoints
-    CATALOG_URL = 'https://umbra-open-data-catalog.s3.us-west-2.amazonaws.com/stac/catalog.json'
-    CATALOG_BASE = 'https://umbra-open-data-catalog.s3.us-west-2.amazonaws.com/stac'
+    CATALOG_URL = 'https://s3.us-west-2.amazonaws.com/umbra-open-data-catalog/stac/catalog.json?.language=en'
+    CATALOG_BASE = 'https://s3.us-west-2.amazonaws.com/umbra-open-data-catalog/stac'
 
     # Umbra Canopy STAC v2 endpoints (commercial/archive)
     DEFAULT_API_BASE = 'https://api.canopy.umbra.space'

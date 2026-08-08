@@ -13,16 +13,19 @@ References:
 """
 import csv
 import json
+import os
 from typing import List, Dict, Any, Optional, Tuple
 from io import StringIO
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlencode
+from urllib.parse import urlparse, parse_qs
 
 try:
-    from qgis.PyQt.QtCore import QUrl, QEventLoop, QTimer
+    from qgis.PyQt.QtCore import QUrl, QEventLoop, QTimer, QSettings
     from qgis.PyQt.QtNetwork import QNetworkRequest
     from qgis.core import QgsNetworkAccessManager
     QGIS_AVAILABLE = True
 except ImportError:
+    QSettings = None
     QGIS_AVAILABLE = False
 
 from .base import ConnectorBase
@@ -49,6 +52,18 @@ STAC_CATALOG_URLS = [
 TIMEOUT_EVENTS = 120  # seconds for datasets.csv
 TIMEOUT_FOOTPRINTS = 180  # seconds for large GeoJSON files
 
+# Vantor Discovery API (Maxar) - used for archive searches
+DISCOVERY_BASE_URL = "https://api.maxar.com/discovery/v1"
+DISCOVERY_IMAGERY_SEARCH_PATH = "/catalogs/imagery/search"
+DISCOVERY_ROOT_SEARCH_PATH = "/search"
+DISCOVERY_TIMEOUT_DEFAULT = 30  # seconds
+TASKING_TIMEOUT_DEFAULT = 30  # seconds
+
+# Common imagery collections recommended by Discovery docs for satellite imagery.
+DISCOVERY_IMAGERY_COLLECTIONS = [
+    "ge01", "wv01", "wv02", "wv03-vnir", "wv04", "lg01", "lg02", "lg03", "lg04",
+]
+
 
 class VantorConnector(ConnectorBase):
     """Vantor Open Data connector using GitHub dataset
@@ -71,7 +86,21 @@ class VantorConnector(ConnectorBase):
         self.current_event = None
         self.footprints_cache = {}  # Cache for loaded GeoJSON
         self.event_sources = {}  # event_name -> {'mode': 'github'|'stac', 'ref': event_or_href}
+        self.discovery_enabled = True
+        self.discovery_base_url = DISCOVERY_BASE_URL
+        self.discovery_timeout = DISCOVERY_TIMEOUT_DEFAULT
+        self.discovery_search_path = DISCOVERY_IMAGERY_SEARCH_PATH
+        self.discovery_api_key = ""
+        self.discovery_access_token = ""
+        self.tasking_base_url = ""
+        self.tasking_create_path = "/tasking/v2/requests"
+        self.tasking_list_path = "/tasking/v2/requests"
+        self.tasking_timeout = TASKING_TIMEOUT_DEFAULT
+        self.tasking_api_key = ""
+        self.tasking_access_token = ""
+        self._last_search_next_token: Optional[str] = None
         self.authenticated = True  # No authentication required
+        self._load_discovery_config()
         
     def authenticate(self, **kwargs) -> bool:
         """No authentication required for Vantor Open Data
@@ -81,6 +110,8 @@ class VantorConnector(ConnectorBase):
         Returns:
             bool: Always True (public data)
         """
+        # Optional Discovery API credentials/config can be passed via kwargs.
+        self._apply_discovery_kwargs(kwargs)
         self.authenticated = True
         logger.info("Vantor: No authentication required (public data)")
         
@@ -94,8 +125,313 @@ class VantorConnector(ConnectorBase):
             # Events can be loaded later when needed
         
         return True
+
+    def _load_discovery_config(self) -> None:
+        """Load Discovery API configuration from settings/env.
+
+        Priority:
+        1) QSettings (if available)
+        2) Environment variables
+        """
+        # QSettings
+        if QSettings is not None:
+            try:
+                settings = QSettings()
+                self.discovery_enabled = settings.value(
+                    "AltairEOData/vantor_discovery_enabled", True, type=bool
+                )
+                self.discovery_base_url = str(
+                    settings.value(
+                        "AltairEOData/vantor_discovery_base_url",
+                        DISCOVERY_BASE_URL,
+                    )
+                ).strip() or DISCOVERY_BASE_URL
+                self.discovery_timeout = int(
+                    settings.value(
+                        "AltairEOData/vantor_discovery_timeout",
+                        DISCOVERY_TIMEOUT_DEFAULT,
+                    )
+                )
+                self.discovery_search_path = str(
+                    settings.value(
+                        "AltairEOData/vantor_discovery_search_path",
+                        DISCOVERY_IMAGERY_SEARCH_PATH,
+                    )
+                ).strip() or DISCOVERY_IMAGERY_SEARCH_PATH
+                self.tasking_base_url = str(
+                    settings.value(
+                        "AltairEOData/vantor_tasking_base_url",
+                        "",
+                    )
+                ).strip().rstrip('/')
+                self.tasking_create_path = str(
+                    settings.value(
+                        "AltairEOData/vantor_tasking_create_path",
+                        '/tasking/v2/requests',
+                    )
+                ).strip() or '/tasking/v2/requests'
+                self.tasking_list_path = str(
+                    settings.value(
+                        "AltairEOData/vantor_tasking_list_path",
+                        '/tasking/v2/requests',
+                    )
+                ).strip() or '/tasking/v2/requests'
+                self.tasking_timeout = int(
+                    settings.value(
+                        "AltairEOData/vantor_tasking_timeout",
+                        TASKING_TIMEOUT_DEFAULT,
+                    )
+                )
+            except Exception as e:
+                logger.debug(f"Vantor: failed to read Discovery settings: {e}")
+
+        # Environment overrides / credentials
+        self.discovery_api_key = (
+            os.environ.get("VANTOR_DISCOVERY_API_KEY", "").strip()
+            or os.environ.get("MAXAR_API_KEY", "").strip()
+        )
+        self.discovery_access_token = (
+            os.environ.get("VANTOR_DISCOVERY_ACCESS_TOKEN", "").strip()
+            or os.environ.get("MAXAR_ACCESS_TOKEN", "").strip()
+        )
+        self.discovery_search_path = (
+            os.environ.get("VANTOR_DISCOVERY_SEARCH_PATH", "").strip()
+            or self.discovery_search_path
+        )
+        self.tasking_base_url = (
+            os.environ.get("VANTOR_TASKING_BASE_URL", "").strip().rstrip('/')
+            or self.tasking_base_url
+        )
+        self.tasking_create_path = (
+            os.environ.get("VANTOR_TASKING_CREATE_PATH", "").strip()
+            or self.tasking_create_path
+        )
+        self.tasking_list_path = (
+            os.environ.get("VANTOR_TASKING_LIST_PATH", "").strip()
+            or self.tasking_list_path
+        )
+        tasking_timeout_env = os.environ.get("VANTOR_TASKING_TIMEOUT", "").strip()
+        if tasking_timeout_env:
+            try:
+                self.tasking_timeout = max(5, int(tasking_timeout_env))
+            except Exception:
+                pass
+        self.tasking_api_key = (
+            os.environ.get("VANTOR_TASKING_API_KEY", "").strip()
+            or self.discovery_api_key
+        )
+        self.tasking_access_token = (
+            os.environ.get("VANTOR_TASKING_ACCESS_TOKEN", "").strip()
+            or self.discovery_access_token
+        )
+
+    def _apply_discovery_kwargs(self, kwargs: Optional[Dict[str, Any]]) -> None:
+        """Apply runtime Discovery options passed through authenticate()."""
+        if not kwargs:
+            return
+
+        # ConnectorManager passes provider settings under the `credentials` key.
+        nested_credentials = kwargs.get('credentials')
+        if isinstance(nested_credentials, dict):
+            merged_kwargs = dict(nested_credentials)
+            merged_kwargs.update({
+                key: value for key, value in kwargs.items() if key != 'credentials'
+            })
+            kwargs = merged_kwargs
+
+        if 'discovery_enabled' in kwargs:
+            self.discovery_enabled = bool(kwargs.get('discovery_enabled'))
+
+        base_url = str(kwargs.get('discovery_base_url', '') or '').strip()
+        if base_url:
+            self.discovery_base_url = base_url
+
+        timeout_val = kwargs.get('discovery_timeout')
+        if timeout_val is not None:
+            try:
+                self.discovery_timeout = max(5, int(timeout_val))
+            except Exception:
+                pass
+
+        search_path = str(
+            kwargs.get('discovery_search_path', '')
+            or kwargs.get('vantor_discovery_search_path', '')
+        ).strip()
+        if search_path:
+            self.discovery_search_path = search_path
+
+        api_key = str(kwargs.get('api_key', '') or kwargs.get('discovery_api_key', '')).strip()
+        if api_key:
+            self.discovery_api_key = api_key
+
+        access_token = str(
+            kwargs.get('access_token', '') or kwargs.get('discovery_access_token', '')
+        ).strip()
+        if access_token:
+            self.discovery_access_token = access_token
+
+        tasking_base_url = str(kwargs.get('tasking_base_url', '')).strip().rstrip('/')
+        if tasking_base_url:
+            self.tasking_base_url = tasking_base_url
+
+        tasking_create_path = str(kwargs.get('tasking_create_path', '')).strip()
+        if tasking_create_path:
+            self.tasking_create_path = tasking_create_path
+
+        tasking_list_path = str(kwargs.get('tasking_list_path', '')).strip()
+        if tasking_list_path:
+            self.tasking_list_path = tasking_list_path
+
+        tasking_timeout = kwargs.get('tasking_timeout')
+        if tasking_timeout is not None:
+            try:
+                self.tasking_timeout = max(5, int(tasking_timeout))
+            except Exception:
+                pass
+
+        tasking_api_key = str(
+            kwargs.get('tasking_api_key', '') or kwargs.get('api_key', '')
+        ).strip()
+        if tasking_api_key:
+            self.tasking_api_key = tasking_api_key
+
+        tasking_access_token = str(
+            kwargs.get('tasking_access_token', '') or kwargs.get('access_token', '')
+        ).strip()
+        if tasking_access_token:
+            self.tasking_access_token = tasking_access_token
+
+    def _discovery_headers(self) -> Dict[str, str]:
+        """Build optional auth headers for Discovery API requests."""
+        headers = {
+            'Accept': 'application/geo+json, application/json',
+            'User-Agent': 'KADAS-Altair-Plugin/1.0',
+        }
+
+        if self.discovery_api_key:
+            # Discovery docs use `maxar-api-key`; keep `x-api-key` for compatibility.
+            headers['maxar-api-key'] = self.discovery_api_key
+            headers['x-api-key'] = self.discovery_api_key
+        if self.discovery_access_token:
+            headers['Authorization'] = f'Bearer {self.discovery_access_token}'
+
+        return headers
+
+    def _tasking_headers(self) -> Dict[str, str]:
+        """Build auth headers for Vantor tasking requests."""
+        headers = {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+            'User-Agent': 'KADAS-Altair-Plugin/1.0',
+        }
+
+        api_key = self.tasking_api_key or self.discovery_api_key
+        access_token = self.tasking_access_token or self.discovery_access_token
+        if api_key:
+            headers['maxar-api-key'] = api_key
+            headers['x-api-key'] = api_key
+        if access_token:
+            headers['Authorization'] = f'Bearer {access_token}'
+
+        return headers
+
+    @staticmethod
+    def _normalize_path(path: str, default: str) -> str:
+        text = str(path or '').strip()
+        if not text:
+            text = default
+        if not text.startswith('/'):
+            text = '/' + text
+        return text
+
+    def tasking_url(self) -> str:
+        """Return configured Vantor tasking endpoint URL."""
+        if not self.tasking_base_url:
+            return ''
+        create_path = self._normalize_path(self.tasking_create_path, '/tasking/v2/requests')
+        return f"{self.tasking_base_url.rstrip('/')}{create_path}"
+
+    def create_tasking_request(
+        self,
+        request: Dict[str, Any],
+        timeout: Optional[int] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Submit a Vantor tasking request to a configured tasking endpoint."""
+        if not self.tasking_base_url:
+            logger.warning('Vantor tasking base URL not configured')
+            return None
+
+        create_path = self._normalize_path(self.tasking_create_path, '/tasking/v2/requests')
+        url = f"{self.tasking_base_url.rstrip('/')}{create_path}"
+        req_timeout = int(timeout or self.tasking_timeout or TASKING_TIMEOUT_DEFAULT)
+        payload = request if isinstance(request, dict) else {}
+
+        headers = self._tasking_headers()
+        body = json.dumps(payload, separators=(',', ':'))
+        if not QGIS_AVAILABLE:
+            return None
+        try:
+            nam = QgsNetworkAccessManager.instance()
+            req = QNetworkRequest(QUrl(url))
+            for key, value in headers.items():
+                req.setRawHeader(str(key).encode('utf-8'), str(value).encode('utf-8'))
+            reply = nam.post(req, body.encode('utf-8'))
+            loop = QEventLoop()
+            reply.finished.connect(loop.quit)
+            timer = QTimer()
+            timer.setSingleShot(True)
+            timer.timeout.connect(loop.quit)
+            timer.start(req_timeout * 1000)
+            loop.exec_()
+            if not reply.isFinished():
+                reply.abort()
+                logger.error('Vantor tasking request timeout')
+                return None
+            if reply.error():
+                logger.error(f'Vantor tasking request failed: {reply.errorString()}')
+                return None
+            status_code = reply.attribute(QNetworkRequest.HttpStatusCodeAttribute)
+            if status_code and int(status_code) >= 400:
+                logger.error(f'Vantor tasking request HTTP {status_code}')
+                return None
+            response_text = reply.readAll().data().decode('utf-8', errors='ignore')
+            if response_text.strip():
+                return json.loads(response_text)
+            return {'status': 'submitted'}
+        except Exception as exc:
+            logger.error(f'Vantor tasking request failed: {exc}')
+            return None
+
+    def list_tasking_requests(
+        self,
+        params: Optional[Dict[str, Any]] = None,
+        timeout: Optional[int] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """List tasking requests from configured Vantor tasking endpoint."""
+        if not self.tasking_base_url:
+            logger.warning('Vantor tasking base URL not configured')
+            return None
+
+        list_path = self._normalize_path(self.tasking_list_path, '/tasking/v2/requests')
+        base = f"{self.tasking_base_url.rstrip('/')}{list_path}"
+        query = urlencode(params or {}) if params else ''
+        url = f"{base}?{query}" if query else base
+        req_timeout = int(timeout or self.tasking_timeout or TASKING_TIMEOUT_DEFAULT)
+        headers = self._tasking_headers()
+
+        try:
+            raw = self._fetch_url(url, timeout=req_timeout, headers=headers)
+            return json.loads(raw) if raw.strip() else {}
+        except Exception as exc:
+            logger.error(f'Vantor list tasking requests failed: {exc}')
+            return None
     
-    def _fetch_url(self, url: str, timeout: int = 120) -> str:
+    def _fetch_url(
+        self,
+        url: str,
+        timeout: int = 120,
+        headers: Optional[Dict[str, str]] = None,
+    ) -> str:
         """Fetch URL using QGIS network manager (proxy-aware)
         
         Based on kadas-vantor-plugin DataFetchWorker pattern.
@@ -129,6 +465,11 @@ class VantorConnector(ConnectorBase):
         
         # Headers for compatibility
         req.setRawHeader(b"User-Agent", b"KADAS-Altair-Plugin/1.0")
+        if headers:
+            for key, value in headers.items():
+                if value is None:
+                    continue
+                req.setRawHeader(str(key).encode('utf-8'), str(value).encode('utf-8'))
         req.setAttribute(QNetworkRequest.CacheLoadControlAttribute, QNetworkRequest.AlwaysNetwork)
         
         # Send request
@@ -161,8 +502,14 @@ class VantorConnector(ConnectorBase):
             detailed_error = f"Network error ({error_code}): {error_msg}"
             if status_code:
                 detailed_error += f" - HTTP {status_code}"
-            
-            logger.error(f"{detailed_error} for URL: {url}")
+
+            if status_code in (401, 403):
+                logger.info(
+                    "Vantor discovery endpoint requires authentication or is blocked: %s",
+                    detailed_error,
+                )
+            else:
+                logger.error(f"{detailed_error} for URL: {url}")
             raise Exception(detailed_error)
         
         # Check HTTP status code
@@ -171,7 +518,10 @@ class VantorConnector(ConnectorBase):
         
         if status_code and status_code >= 400:
             error_msg = f"HTTP error {status_code} from {url}"
-            logger.error(error_msg)
+            if status_code in (401, 403):
+                logger.info("Vantor endpoint requires authentication or is blocked: %s", error_msg)
+            else:
+                logger.error(error_msg)
             raise Exception(error_msg)
         
         # Read data
@@ -179,6 +529,196 @@ class VantorConnector(ConnectorBase):
         logger.info(f"Successfully fetched {len(data)} bytes from {url} (HTTP {status_code})")
         
         return data
+
+    @staticmethod
+    def _normalize_iso_datetime(value: str, end_of_day: bool = False) -> str:
+        """Normalize YYYY-MM-DD to RFC3339 datetime used by Discovery API."""
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        if 'T' in text:
+            return text
+        return f"{text}T23:59:59Z" if end_of_day else f"{text}T00:00:00Z"
+
+    @staticmethod
+    def _extract_discovery_next_token(payload: Dict[str, Any]) -> Optional[str]:
+        """Extract next-page token from Discovery links as `page=<n>`."""
+        links = payload.get('links', []) if isinstance(payload, dict) else []
+        if not isinstance(links, list):
+            return None
+        for link in links:
+            if not isinstance(link, dict):
+                continue
+            if str(link.get('rel', '')).lower() != 'next':
+                continue
+            href = str(link.get('href', '')).strip()
+            if not href:
+                continue
+            parsed = urlparse(href)
+            query = parse_qs(parsed.query)
+            page_vals = query.get('page') or query.get('next')
+            if page_vals:
+                page_val = str(page_vals[0]).strip()
+                if page_val:
+                    return f"page={page_val}"
+        return None
+
+    def _search_discovery_api(
+        self,
+        bbox: Optional[List[float]] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        max_cloud_cover: Optional[float] = None,
+        collection: Optional[str] = None,
+        text_query: Optional[str] = None,
+        limit: int = 100,
+        timeout: Optional[int] = None,
+        page: Optional[int] = None,
+        sortby: Optional[str] = None,
+        intersects: Optional[Dict[str, Any]] = None,
+        filter_expr: Optional[str] = None,
+        area_based_calc: Optional[bool] = None,
+        discovery_collections: Optional[List[str]] = None,
+        discovery_search_path: Optional[str] = None,
+    ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+        """Search Vantor archive through Discovery API.
+
+        Uses the imagery sub-catalog endpoint described in Maxar Discovery docs.
+        """
+        base_url = (self.discovery_base_url or DISCOVERY_BASE_URL).rstrip('/')
+        path = (
+            discovery_search_path
+            or self.discovery_search_path
+            or DISCOVERY_IMAGERY_SEARCH_PATH
+        )
+        path = str(path).strip()
+        if not path.startswith('/'):
+            path = '/' + path
+        endpoint = f"{base_url}{path}"
+
+        params: Dict[str, str] = {}
+        if bbox and len(bbox) == 4:
+            params['bbox'] = ','.join(str(v) for v in bbox)
+
+        if start_date or end_date:
+            start = self._normalize_iso_datetime(start_date or "") or ".."
+            end = self._normalize_iso_datetime(end_date or "", end_of_day=True) or ".."
+            params['datetime'] = f"{start}/{end}"
+
+        collection_values: List[str] = []
+        if discovery_collections:
+            collection_values.extend(
+                str(v).strip() for v in discovery_collections if str(v).strip()
+            )
+        if collection:
+            collection_values.extend(
+                [part.strip() for part in str(collection).split(',') if part.strip()]
+            )
+        if not collection_values and path == DISCOVERY_ROOT_SEARCH_PATH:
+            collection_values = DISCOVERY_IMAGERY_COLLECTIONS.copy()
+        if collection_values:
+            params['collections'] = ','.join(collection_values)
+
+        try:
+            safe_limit = max(1, int(limit))
+        except Exception:
+            safe_limit = 100
+        params['limit'] = str(safe_limit)
+
+        if page is not None:
+            try:
+                params['page'] = str(max(1, int(page)))
+            except Exception:
+                pass
+
+        if sortby:
+            params['sortby'] = str(sortby)
+
+        if area_based_calc is not None:
+            params['area-based-calc'] = 'true' if bool(area_based_calc) else 'false'
+
+        filter_terms: List[str] = []
+        if filter_expr:
+            filter_terms.append(str(filter_expr).strip())
+
+        if max_cloud_cover is not None:
+            try:
+                cloud_limit = float(max_cloud_cover)
+                # Archive UI often passes 0..1, while metadata is commonly 0..100.
+                if 0.0 <= cloud_limit <= 1.0:
+                    cloud_limit *= 100.0
+                filter_terms.append(f"eo:cloud_cover <= {cloud_limit:g}")
+            except Exception:
+                pass
+
+        if text_query:
+            q_escaped = text_query.replace("'", "''")
+            filter_terms.append(
+                "(id ILIKE '%{q}%' OR title ILIKE '%{q}%' OR description ILIKE '%{q}%')".format(
+                    q=q_escaped
+                )
+            )
+
+        if filter_terms:
+            params['filter'] = ' AND '.join(filter_terms)
+
+        if intersects and isinstance(intersects, dict):
+            # Discovery supports intersects in GET as JSON-encoded geometry.
+            params['intersects'] = json.dumps(intersects, separators=(',', ':'))
+
+        query = urlencode(params)
+        url = f"{endpoint}?{query}" if query else endpoint
+        req_timeout = int(timeout or self.discovery_timeout or DISCOVERY_TIMEOUT_DEFAULT)
+        headers = self._discovery_headers()
+
+        logger.info(f"Vantor Discovery search: {url}")
+        raw = self._fetch_url(url, timeout=req_timeout, headers=headers)
+        payload = json.loads(raw)
+
+        if not isinstance(payload, dict):
+            raise Exception("Discovery API response is not a JSON object")
+
+        features = payload.get('features', [])
+        if not isinstance(features, list):
+            raise Exception("Discovery API response missing 'features' array")
+
+        next_token = self._extract_discovery_next_token(payload)
+
+        results: List[Dict[str, Any]] = []
+        for idx, feature in enumerate(features):
+            if not isinstance(feature, dict):
+                continue
+
+            props = feature.get('properties', {}) or {}
+            raw_id = feature.get('id') or props.get('id') or props.get('catalog_id')
+            item_id = str(raw_id).strip() if raw_id is not None else ''
+            if not item_id:
+                item_id = f"discovery-item-{idx}"
+
+            collection_id = str(
+                feature.get('collection')
+                or props.get('collection')
+                or collection
+                or 'imagery'
+            )
+
+            item = {
+                'id': item_id,
+                'type': feature.get('type', 'Feature'),
+                'geometry': feature.get('geometry'),
+                'bbox': feature.get('bbox'),
+                'properties': props,
+                'assets': self._extract_assets(props, feature),
+                'collection': collection_id,
+                'event_id': collection_id,
+            }
+            results.append(item)
+
+        logger.info(
+            f"Vantor Discovery search returned {len(results)} item(s), "
+            f"next_token={next_token}"
+        )
+        return results, next_token
     
     def load_events(self) -> List[Tuple[str, int]]:
         """Load available events from GitHub datasets.csv
@@ -477,6 +1017,16 @@ class VantorConnector(ConnectorBase):
         end_date: Optional[str] = None,
         max_cloud_cover: Optional[float] = None,
         collection: Optional[str] = None,
+        text_query: Optional[str] = None,
+        use_discovery_api: Optional[bool] = None,
+        discovery_page: Optional[int] = None,
+        discovery_sortby: Optional[str] = None,
+        discovery_filter: Optional[str] = None,
+        discovery_intersects: Optional[Dict[str, Any]] = None,
+        discovery_area_based_calc: Optional[bool] = None,
+        discovery_collections: Optional[List[str]] = None,
+        discovery_search_path: Optional[str] = None,
+        timeout: Optional[int] = None,
         limit: int = 100
     ) -> List[Dict[str, Any]]:
         """Search for imagery
@@ -489,16 +1039,61 @@ class VantorConnector(ConnectorBase):
             collection: Collection/event name to search; if None, searches all
                         events (cached first, then up to MAX_EVENTS_TO_FETCH
                         additional ones fetched from GitHub/STAC).
+            text_query: Optional free text query (Discovery API only)
+            use_discovery_api: Force Discovery API usage on/off; if None, uses
+                connector setting (enabled by default)
+            timeout: Optional request timeout in seconds
             limit: Maximum number of results
             
         Returns:
             List[Dict[str, Any]]: List of STAC-like items
         """
+        discovery_active = (
+            self.discovery_enabled if use_discovery_api is None else bool(use_discovery_api)
+        )
+
+        # First try Discovery API for archive-style searches.
+        if discovery_active:
+            try:
+                discovery_items, discovery_next = self._search_discovery_api(
+                    bbox=bbox,
+                    start_date=start_date,
+                    end_date=end_date,
+                    max_cloud_cover=max_cloud_cover,
+                    collection=collection,
+                    text_query=text_query,
+                    limit=limit,
+                    timeout=timeout,
+                    page=discovery_page,
+                    sortby=discovery_sortby,
+                    intersects=discovery_intersects,
+                    filter_expr=discovery_filter,
+                    area_based_calc=discovery_area_based_calc,
+                    discovery_collections=discovery_collections,
+                    discovery_search_path=discovery_search_path,
+                )
+                self._last_search_next_token = discovery_next
+                return self._filter_search_results(
+                    discovery_items,
+                    bbox=bbox,
+                    start_date=start_date,
+                    end_date=end_date,
+                    max_cloud_cover=max_cloud_cover,
+                    text_query=text_query,
+                    limit=limit,
+                )
+            except Exception as e:
+                logger.info(
+                    "Vantor Discovery search unavailable, falling back to open-data "
+                    f"catalog search: {e}"
+                )
+
         # Maximum events to download when collection is not specified
         MAX_EVENTS_TO_FETCH = 10
 
         logger.info(f"Vantor.search() called: collection={collection}, bbox={bbox}, "
-                   f"dates={start_date} to {end_date}, cloud<={max_cloud_cover}, limit={limit}")
+                   f"dates={start_date} to {end_date}, cloud<={max_cloud_cover}, limit={limit}, "
+                   f"discovery={discovery_active}")
 
         # Ensure event list is available
         if not self.events:
@@ -548,36 +1143,6 @@ class VantorConnector(ConnectorBase):
 
                 props = feature.get('properties', {})
 
-                # Cloud cover filter
-                if max_cloud_cover is not None:
-                    cloud_cover = props.get('cloud_cover', props.get('eo:cloud_cover', 0))
-                    try:
-                        if float(cloud_cover) > max_cloud_cover:
-                            continue
-                    except (ValueError, TypeError):
-                        pass
-
-                # Date range filter
-                datetime_str = props.get('datetime', '')
-                if (start_date or end_date) and datetime_str:
-                    date_part = datetime_str[:10]
-                    if start_date and date_part < start_date:
-                        continue
-                    if end_date and date_part > end_date:
-                        continue
-
-                # Bbox intersection filter
-                if bbox:
-                    geom = feature.get('geometry', {})
-                    if geom and geom.get('type') == 'Polygon':
-                        coords = geom.get('coordinates', [])
-                        if coords:
-                            lons = [pt[0] for pt in coords[0]]
-                            lats = [pt[1] for pt in coords[0]]
-                            feature_bbox = [min(lons), min(lats), max(lons), max(lats)]
-                            if not self._bbox_intersects(bbox, feature_bbox):
-                                continue
-
                 raw_id = feature.get('id')
                 if raw_id is None or str(raw_id).strip() == '':
                     raw_id = props.get('id') or props.get('catalog_id') or props.get('datetime')
@@ -595,6 +1160,15 @@ class VantorConnector(ConnectorBase):
                     'collection': event_name,
                     'event_id': event_name,
                 }
+                if not self._item_matches_filters(
+                    item,
+                    bbox=bbox,
+                    start_date=start_date,
+                    end_date=end_date,
+                    max_cloud_cover=max_cloud_cover,
+                    text_query=text_query,
+                ):
+                    continue
                 results.append(item)
 
         logger.info(
@@ -602,8 +1176,201 @@ class VantorConnector(ConnectorBase):
             f"(events searched: {len(events_to_search)}, "
             f"fetched from network: {events_fetched})"
         )
+        self._last_search_next_token = None
         return results
+
+    def search_unified(
+        self,
+        bbox=None,
+        start_date=None,
+        end_date=None,
+        max_cloud_cover=None,
+        collection=None,
+        text_query=None,
+        limit: int = 100,
+        timeout: Optional[float] = None,
+        use_discovery_api: Optional[bool] = None,
+        vantor_use_discovery_api: Optional[bool] = None,
+        discovery_page: Optional[int] = None,
+        discovery_sortby: Optional[str] = None,
+        discovery_filter: Optional[str] = None,
+        discovery_area_based_calc: Optional[bool] = None,
+        discovery_collections: Optional[List[str]] = None,
+        discovery_search_path: Optional[str] = None,
+        page: Optional[int] = None,
+        sortby: Optional[str] = None,
+        filter: Optional[str] = None,
+        area_based_calc: Optional[bool] = None,
+        intersects: Optional[Dict[str, Any]] = None,
+        discovery_intersects: Optional[Dict[str, Any]] = None,
+        **kwargs,
+    ) -> tuple:
+        """Unified search entrypoint with Discovery API support.
+
+        Optional extra filters accepted from ConnectorManager:
+        - use_discovery_api
+        - vantor_use_discovery_api
+        """
+        if use_discovery_api is None:
+            use_discovery_api = vantor_use_discovery_api
+
+        result = self.search(
+            bbox=bbox,
+            start_date=start_date or "",
+            end_date=end_date or "",
+            max_cloud_cover=max_cloud_cover,
+            collection=collection,
+            text_query=text_query,
+            use_discovery_api=use_discovery_api,
+            discovery_page=discovery_page if discovery_page is not None else page,
+            discovery_sortby=discovery_sortby or sortby,
+            discovery_filter=discovery_filter or filter,
+            discovery_intersects=discovery_intersects or intersects,
+            discovery_area_based_calc=(
+                discovery_area_based_calc
+                if discovery_area_based_calc is not None
+                else area_based_calc
+            ),
+            discovery_collections=discovery_collections,
+            discovery_search_path=discovery_search_path,
+            timeout=int(timeout) if timeout else None,
+            limit=limit,
+        )
+        if isinstance(result, tuple):
+            return result
+        return result, self._last_search_next_token
     
+    def _get_item_bbox(self, item: Dict[str, Any]) -> Optional[List[float]]:
+        """Return an item bbox from the item itself or from its geometry."""
+        if not isinstance(item, dict):
+            return None
+
+        bbox = item.get('bbox')
+        if isinstance(bbox, (list, tuple)) and len(bbox) >= 4:
+            try:
+                return [float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])]
+            except (TypeError, ValueError):
+                pass
+
+        geometry = item.get('geometry')
+        if not isinstance(geometry, dict):
+            return None
+
+        geom_type = str(geometry.get('type') or '').lower()
+        coordinates = geometry.get('coordinates')
+        if geom_type == 'point' and isinstance(coordinates, (list, tuple)) and len(coordinates) >= 2:
+            lon = float(coordinates[0])
+            lat = float(coordinates[1])
+            return [lon, lat, lon, lat]
+
+        if geom_type == 'polygon' and isinstance(coordinates, (list, tuple)) and coordinates:
+            rings = coordinates
+            if isinstance(rings[0], (list, tuple)):
+                coords = [point for ring in rings for point in ring if isinstance(point, (list, tuple)) and len(point) >= 2]
+                if coords:
+                    lons = [float(point[0]) for point in coords]
+                    lats = [float(point[1]) for point in coords]
+                    return [min(lons), min(lats), max(lons), max(lats)]
+
+        if geom_type == 'multipolygon' and isinstance(coordinates, (list, tuple)) and coordinates:
+            all_coords = []
+            for polygon in coordinates:
+                if isinstance(polygon, (list, tuple)):
+                    for ring in polygon:
+                        if isinstance(ring, (list, tuple)):
+                            all_coords.extend(
+                                point for point in ring if isinstance(point, (list, tuple)) and len(point) >= 2
+                            )
+            if all_coords:
+                lons = [float(point[0]) for point in all_coords]
+                lats = [float(point[1]) for point in all_coords]
+                return [min(lons), min(lats), max(lons), max(lats)]
+
+        return None
+
+    def _item_matches_filters(
+        self,
+        item: Dict[str, Any],
+        bbox: Optional[List[float]] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        max_cloud_cover: Optional[float] = None,
+        text_query: Optional[str] = None,
+    ) -> bool:
+        """Return True when an item matches the active search filters."""
+        props = item.get('properties') if isinstance(item.get('properties'), dict) else {}
+
+        if bbox is not None:
+            item_bbox = self._get_item_bbox(item)
+            if not item_bbox or not self._bbox_intersects(bbox, item_bbox):
+                return False
+
+        if max_cloud_cover is not None:
+            cloud_cover = props.get('cloud_cover', props.get('eo:cloud_cover', 0))
+            try:
+                if float(cloud_cover) > float(max_cloud_cover):
+                    return False
+            except (TypeError, ValueError):
+                pass
+
+        if start_date or end_date:
+            datetime_str = str(props.get('datetime', '') or '').strip()
+            if not datetime_str:
+                return False
+            date_part = datetime_str[:10]
+            if start_date and date_part < str(start_date):
+                return False
+            if end_date and date_part > str(end_date):
+                return False
+
+        if text_query:
+            query = str(text_query).strip().lower()
+            if query:
+                haystack = ' '.join(
+                    str(value).lower()
+                    for value in [
+                        item.get('id', ''),
+                        props.get('id', ''),
+                        props.get('title', ''),
+                        props.get('description', ''),
+                        props.get('platform', ''),
+                        props.get('satellite', ''),
+                    ]
+                    if value is not None
+                )
+                if query not in haystack:
+                    return False
+
+        return True
+
+    def _filter_search_results(
+        self,
+        items: List[Dict[str, Any]],
+        bbox: Optional[List[float]] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        max_cloud_cover: Optional[float] = None,
+        text_query: Optional[str] = None,
+        limit: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """Filter a list of Vantor results to the active search constraints."""
+        filtered: List[Dict[str, Any]] = []
+        for item in items or []:
+            if not isinstance(item, dict):
+                continue
+            if self._item_matches_filters(
+                item,
+                bbox=bbox,
+                start_date=start_date,
+                end_date=end_date,
+                max_cloud_cover=max_cloud_cover,
+                text_query=text_query,
+            ):
+                filtered.append(item)
+                if limit is not None and len(filtered) >= int(limit):
+                    break
+        return filtered
+
     def _bbox_intersects(self, bbox1: List[float], bbox2: List[float]) -> bool:
         """Check if two bboxes intersect
         
@@ -686,6 +1453,19 @@ class VantorConnector(ConnectorBase):
                 'type': 'image/tiff; application=geotiff; profile=cloud-optimized',
                 'roles': ['data']
             }
+
+        # Thumbnail / quicklook (non-raster preview image)
+        for thumb_key in ('thumbnail', 'overview', 'quicklook', 'preview'):
+            thumb_val = feature_assets.get(thumb_key) or props.get(thumb_key) or props.get(f'{thumb_key}_url') or props.get(f'{thumb_key}_href')
+            if thumb_val:
+                href = thumb_val.get('href') if isinstance(thumb_val, dict) else str(thumb_val)
+                if href and thumb_key not in assets:
+                    assets[thumb_key] = {
+                        'href': href,
+                        'type': (thumb_val.get('type', 'image/jpeg') if isinstance(thumb_val, dict) else 'image/jpeg'),
+                        'roles': ['thumbnail'],
+                    }
+                    break  # first match wins
 
         # Passthrough: include any additional raster assets from native STAC items
         # (e.g. 'pan', 'ms', 'rgb', 'data' — names used by vantor-opendata catalog)

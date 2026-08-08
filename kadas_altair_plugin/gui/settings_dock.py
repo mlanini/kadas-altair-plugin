@@ -1,6 +1,8 @@
 """
 Altair EO Data Settings Dock Widget
 """
+import importlib
+
 from qgis.PyQt.QtWidgets import (
     QDockWidget, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLabel, QLineEdit, QPushButton, QCheckBox, QSpinBox, QComboBox,
@@ -83,41 +85,39 @@ class SettingsDockWidget(QDockWidget):
             security_label.setStyleSheet("color: #00ff00; font-size: 9px; font-style: italic;")
             layout.addWidget(security_label)
         
-        # OneAtlas tab
-        oneatlas_tab = self._create_oneatlas_tab()
-        tab_widget.addTab(oneatlas_tab, "OneAtlas")
-        
-        # Planet tab
-        planet_tab = self._create_planet_tab()
-        tab_widget.addTab(planet_tab, "Planet")
-        
-        # Vantor STAC tab
-        vantor_tab = self._create_vantor_tab()
-        tab_widget.addTab(vantor_tab, "Vantor STAC")
-        
-        # ICEYE tab
-        iceye_tab = self._create_iceye_tab()
-        tab_widget.addTab(iceye_tab, "ICEYE SAR")
+        # Build connector panels and add only those backed by available connectors.
+        provider_panels = [
+            ("oneatlas", "OneAtlas", self._create_oneatlas_tab),
+            ("planet", "Planet", self._create_planet_tab),
+            ("vantor", "Vantor", self._create_vantor_tab),
+            ("iceye", "ICEYE", self._create_iceye_tab),
+            ("umbra", "Umbra", self._create_umbra_tab),
+            (
+                "element84_stac",
+                "Earth Search",
+                self._create_element84_stac_tab,
+            ),
+            (
+                "planetary_computer_stac",
+                "Planetary Computer",
+                self._create_planetary_computer_stac_tab,
+            ),
+            ("cdse_sentinel", "CDSE Sentinel", self._create_cdse_sentinel_tab),
+            ("nasa_earthdata", "NASA EarthData", self._create_nasa_tab),
+            ("capella", "Capella Space", self._create_capella_tab),
+            ("jilin_gaofen_stac", "Jilin-1 Gaofen", self._create_jilin_tab),
+            ("jaxa_earth_stac", "JAXA Earth", self._create_jaxa_tab),
+        ]
 
-        # Umbra tab
-        umbra_tab = self._create_umbra_tab()
-        tab_widget.addTab(umbra_tab, "Umbra SAR")
-        
-        # Copernicus tab
-        copernicus_tab = self._create_copernicus_tab()
-        tab_widget.addTab(copernicus_tab, "Copernicus")
-        
-        # NASA EarthData tab
-        nasa_tab = self._create_nasa_tab()
-        tab_widget.addTab(nasa_tab, "NASA EarthData")
-
-        # Capella Space tab
-        capella_tab = self._create_capella_tab()
-        tab_widget.addTab(capella_tab, "Capella Space")
-
-        # JAXA Earth tab
-        jaxa_tab = self._create_jaxa_tab()
-        tab_widget.addTab(jaxa_tab, "JAXA Earth")
+        for connector_id, tab_title, builder in provider_panels:
+            panel_widget = builder()
+            if self._is_connector_available(connector_id):
+                tab_widget.addTab(panel_widget, tab_title)
+            else:
+                logger.info(
+                    "Settings panel skipped (connector unavailable): %s",
+                    connector_id,
+                )
 
         # Display settings tab
         display_tab = self._create_display_tab()
@@ -138,11 +138,43 @@ class SettingsDockWidget(QDockWidget):
         
         # Status label
         self.status_label = QLabel("Settings loaded")
-        self.status_label.setStyleSheet("color: #505050; font-size: 10px;")
+        self.status_label.setStyleSheet("color: #404040; font-size: 10px;")
         layout.addWidget(self.status_label)
         
         # Load current settings
         self._load_settings()
+
+    def _is_connector_available(self, connector_id: str) -> bool:
+        """Return True when the connector module/class can be imported."""
+        connector_imports = {
+            "oneatlas": ("..connectors.oneatlas", "OneAtlasConnector"),
+            "planet": ("..connectors.planet", "PlanetConnector"),
+            "vantor": ("..connectors.vantor", "VantorConnector"),
+            "iceye": ("..connectors.iceye", "IceyeConnector"),
+            "umbra": ("..connectors.umbra", "UmbraConnector"),
+            "element84_stac": (
+                "..connectors.element84_stac",
+                "Element84StacConnector",
+            ),
+            "planetary_computer_stac": (
+                "..connectors.planetary_computer_stac",
+                "PlanetaryComputerStacConnector",
+            ),
+            "cdse_sentinel": ("..connectors.cdse_sentinel", "CdseSentinelConnector"),
+            "nasa_earthdata": ("..connectors.nasa_earthdata", "NasaEarthdataConnector"),
+            "capella": ("..connectors.capella", "CapellaConnector"),
+            "jilin_gaofen_stac": ("..connectors.jilin_gaofen_stac", "JilinGaofenStacConnector"),
+            "jaxa_earth_stac": ("..connectors.jaxa_earth_stac", "JaxaEarthStacConnector"),
+        }
+        module_name, class_name = connector_imports.get(connector_id, (None, None))
+        if not module_name:
+            return False
+        try:
+            module = importlib.import_module(module_name, __package__)
+            return hasattr(module, class_name)
+        except Exception as exc:
+            logger.debug(f"Connector availability check failed for {connector_id}: {exc}")
+            return False
 
     def _create_oneatlas_tab(self):
         """Create OneAtlas authentication settings tab"""
@@ -160,7 +192,7 @@ class SettingsDockWidget(QDockWidget):
         )
         info_label.setOpenExternalLinks(True)
         info_label.setWordWrap(True)
-        info_label.setStyleSheet("color: #cccccc; font-size: 9px;")
+        info_label.setStyleSheet("color: #404040; font-size: 9px;")
         oneatlas_layout.addRow("", info_label)
         
         # Client ID (NOT secret - should be visible)
@@ -194,7 +226,7 @@ class SettingsDockWidget(QDockWidget):
         return widget
 
     def _create_planet_tab(self):
-        """Create Planet Catalog API settings tab"""
+        """Create Planet API settings tab"""
         widget = QWidget()
         layout = QVBoxLayout(widget)
         
@@ -204,36 +236,61 @@ class SettingsDockWidget(QDockWidget):
         
         # Info label
         info_label = QLabel(
-            "Planet Catalog API uses OAuth2 Bearer token. "
-            "See <a href='https://docs.planet.com/develop/apis/catalog/reference/'>Catalog API Reference</a>."
+            "Planet uses an API key with Basic authentication for imagery, "
+            "basemap, order, and tasking workflows. "
+            "See <a href='https://docs.planet.com/platform/integrations/qgis/"
+            "planet-qgis-plugin/'>QGIS plugin docs</a>."
         )
         info_label.setOpenExternalLinks(True)
         info_label.setWordWrap(True)
-        info_label.setStyleSheet("color: #cccccc; font-size: 9px;")
+        info_label.setStyleSheet("color: #404040; font-size: 9px;")
         planet_layout.addRow("", info_label)
 
         # API base URL
         self.planet_api_base_url = QLineEdit()
-        self.planet_api_base_url.setPlaceholderText("https://services.sentinel-hub.com")
-        self.planet_api_base_url.setText("https://services.sentinel-hub.com")
+        self.planet_api_base_url.setPlaceholderText("https://api.planet.com")
+        self.planet_api_base_url.setText("https://api.planet.com")
         planet_layout.addRow("API Base URL:", self.planet_api_base_url)
         
-        # Access token
-        self.planet_access_token = QLineEdit()
-        self.planet_access_token.setPlaceholderText("Enter OAuth2 Access Token")
-        self.planet_access_token.setEchoMode(QLineEdit.Password)
-        planet_layout.addRow("Access Token:", self.planet_access_token)
-        
+        # API key
+        self.planet_api_key = QLineEdit()
+        self.planet_api_key.setPlaceholderText("Enter Planet API Key")
+        self.planet_api_key.setEchoMode(QLineEdit.Password)
+        planet_layout.addRow("API Key:", self.planet_api_key)
+
+        tasking_label = QLabel(
+            "Tasking API (per docs.planet.com): /tasking/v2/orders and /tasking/v2/pricing. "
+            "Override only if your tenant uses custom routing."
+        )
+        tasking_label.setWordWrap(True)
+        tasking_label.setStyleSheet("color: #404040; font-size: 9px;")
+        planet_layout.addRow("", tasking_label)
+
+        self.planet_tasking_base_url = QLineEdit()
+        self.planet_tasking_base_url.setPlaceholderText("https://api.planet.com")
+        planet_layout.addRow("Tasking Base URL:", self.planet_tasking_base_url)
+
+        self.planet_tasking_orders_path = QLineEdit()
+        self.planet_tasking_orders_path.setPlaceholderText("/tasking/v2/orders/")
+        planet_layout.addRow("Orders Path:", self.planet_tasking_orders_path)
+
+        self.planet_tasking_pricing_path = QLineEdit()
+        self.planet_tasking_pricing_path.setPlaceholderText("/tasking/v2/pricing/")
+        planet_layout.addRow("Pricing Path:", self.planet_tasking_pricing_path)
+
         # Test connection button
-        test_planet_btn = QPushButton("Verify Token")
+        test_planet_btn = QPushButton("Verify API Key")
         test_planet_btn.clicked.connect(self._test_planet_connection)
         planet_layout.addRow("", test_planet_btn)
         
         # Commercial notice
         commercial_label = QLabel(
-            "⚠️ Planet is a commercial service. Valid subscription or trial required."
+            "⚠️ Planet is a commercial service. Valid subscription or "
+            "trial required."
         )
-        commercial_label.setStyleSheet("color: #ff9900; font-size: 10px; font-weight: bold;")
+        commercial_label.setStyleSheet(
+            "color: #ff9900; font-size: 10px; font-weight: bold;"
+        )
         commercial_label.setWordWrap(True)
         planet_layout.addRow("", commercial_label)
         
@@ -243,40 +300,100 @@ class SettingsDockWidget(QDockWidget):
         return widget
 
     def _create_vantor_tab(self):
-        """Create Vantor STAC endpoint settings tab"""
+        """Create Vantor Discovery API settings tab"""
         widget = QWidget()
         layout = QVBoxLayout(widget)
         
-        # Vantor STAC group
-        vantor_group = QGroupBox("Vantor STAC Configuration")
+        # Vantor Discovery group
+        vantor_group = QGroupBox("Vantor Hub Discovery API")
         vantor_layout = QFormLayout(vantor_group)
         
         # Info label
         info_label = QLabel(
-            "Vantor STAC provides direct access to Vantor Open Data via STAC API endpoint. "
-            "This is an alternative to the AWS STAC connector."
+            "Archive search uses the Vantor Discovery API, not the legacy open-data STAC URL. "
+            "Configure the Discovery endpoint, credentials, and optional imagery filters here."
         )
         info_label.setWordWrap(True)
-        info_label.setStyleSheet("color: #cccccc; font-size: 9px;")
+        info_label.setStyleSheet("color: #404040; font-size: 9px;")
         vantor_layout.addRow("", info_label)
+
+        self.vantor_discovery_enabled = QCheckBox("Enable Discovery API for archive search")
+        self.vantor_discovery_enabled.setChecked(True)
+        vantor_layout.addRow("Discovery:", self.vantor_discovery_enabled)
         
-        # Open Data STAC URL
-        self.vantor_endpoint = QLineEdit()
-        self.vantor_endpoint.setPlaceholderText("https://maxar-opendata.s3.amazonaws.com/events/catalog.json")
-        vantor_layout.addRow("Open Data STAC URL:", self.vantor_endpoint)
+        self.vantor_discovery_base_url = QLineEdit()
+        self.vantor_discovery_base_url.setPlaceholderText("https://api.maxar.com/discovery/v1")
+        vantor_layout.addRow("Base URL:", self.vantor_discovery_base_url)
+
+        self.vantor_discovery_search_path = QLineEdit()
+        self.vantor_discovery_search_path.setPlaceholderText("/catalogs/imagery/search")
+        vantor_layout.addRow("Search Path:", self.vantor_discovery_search_path)
+
+        self.vantor_discovery_api_key = QLineEdit()
+        self.vantor_discovery_api_key.setEchoMode(QLineEdit.Password)
+        self.vantor_discovery_api_key.setPlaceholderText("Optional maxar-api-key")
+        vantor_layout.addRow("API Key:", self.vantor_discovery_api_key)
+
+        self.vantor_discovery_access_token = QLineEdit()
+        self.vantor_discovery_access_token.setEchoMode(QLineEdit.Password)
+        self.vantor_discovery_access_token.setPlaceholderText("Optional Bearer access token")
+        vantor_layout.addRow("Access Token:", self.vantor_discovery_access_token)
+
+        self.vantor_discovery_collections = QLineEdit()
+        self.vantor_discovery_collections.setPlaceholderText("ge01,wv01,wv02,wv03-vnir,lg01")
+        vantor_layout.addRow("Collections:", self.vantor_discovery_collections)
+
+        self.vantor_discovery_sortby = QLineEdit()
+        self.vantor_discovery_sortby.setPlaceholderText("Optional sort expression")
+        vantor_layout.addRow("Sort By:", self.vantor_discovery_sortby)
+
+        self.vantor_discovery_area_based_calc = QCheckBox("Enable area-based-calc")
+        vantor_layout.addRow("Advanced:", self.vantor_discovery_area_based_calc)
         
         # Timeout settings
-        self.vantor_catalog_timeout = QSpinBox()
-        self.vantor_catalog_timeout.setRange(5, 60)
-        self.vantor_catalog_timeout.setValue(12)
-        self.vantor_catalog_timeout.setSuffix(" sec")
-        vantor_layout.addRow("Catalog Timeout:", self.vantor_catalog_timeout)
-        
-        self.vantor_search_timeout = QSpinBox()
-        self.vantor_search_timeout.setRange(5, 60)
-        self.vantor_search_timeout.setValue(15)
-        self.vantor_search_timeout.setSuffix(" sec")
-        vantor_layout.addRow("Search Timeout:", self.vantor_search_timeout)
+        self.vantor_discovery_timeout = QSpinBox()
+        self.vantor_discovery_timeout.setRange(5, 120)
+        self.vantor_discovery_timeout.setValue(30)
+        self.vantor_discovery_timeout.setSuffix(" sec")
+        vantor_layout.addRow("Request Timeout:", self.vantor_discovery_timeout)
+
+        tasking_info = QLabel(
+            "Tasking API (Maxar/Vantor Tasking v2) is optional and used for order submission workflows."
+        )
+        tasking_info.setWordWrap(True)
+        tasking_info.setStyleSheet("color: #404040; font-size: 9px;")
+        vantor_layout.addRow("", tasking_info)
+
+        self.vantor_tasking_base_url = QLineEdit()
+        self.vantor_tasking_base_url.setPlaceholderText("https://api.maxar.com")
+        vantor_layout.addRow("Tasking Base URL:", self.vantor_tasking_base_url)
+
+        self.vantor_tasking_create_path = QLineEdit()
+        self.vantor_tasking_create_path.setPlaceholderText("/tasking/v2/requests")
+        vantor_layout.addRow("Create Path:", self.vantor_tasking_create_path)
+
+        self.vantor_tasking_list_path = QLineEdit()
+        self.vantor_tasking_list_path.setPlaceholderText("/tasking/v2/requests")
+        vantor_layout.addRow("List Path:", self.vantor_tasking_list_path)
+
+        self.vantor_tasking_timeout = QSpinBox()
+        self.vantor_tasking_timeout.setRange(5, 120)
+        self.vantor_tasking_timeout.setValue(30)
+        self.vantor_tasking_timeout.setSuffix(" sec")
+        vantor_layout.addRow("Tasking Timeout:", self.vantor_tasking_timeout)
+
+        self.vantor_tasking_access_token = QLineEdit()
+        self.vantor_tasking_access_token.setEchoMode(QLineEdit.Password)
+        self.vantor_tasking_access_token.setPlaceholderText("Optional Bearer token for tasking")
+        vantor_layout.addRow("Tasking Token:", self.vantor_tasking_access_token)
+
+        legacy_label = QLabel(
+            "Note: the old open-data STAC URL setting is not used by archive search. "
+            "Open-data fallback remains internal to the connector and is not configured here."
+        )
+        legacy_label.setWordWrap(True)
+        legacy_label.setStyleSheet("color: #805d00; font-size: 9px; font-style: italic;")
+        vantor_layout.addRow("", legacy_label)
         
         # Default button
         default_btn = QPushButton("Restore Defaults")
@@ -284,14 +401,14 @@ class SettingsDockWidget(QDockWidget):
         vantor_layout.addRow("", default_btn)
         
         # Test connection button
-        test_btn = QPushButton("Test STAC Connection")
+        test_btn = QPushButton("Test Discovery Connection")
         test_btn.clicked.connect(self._test_vantor_connection)
         vantor_layout.addRow("", test_btn)
         
         # Results display
         self.vantor_results = QLabel("")
         self.vantor_results.setWordWrap(True)
-        self.vantor_results.setStyleSheet("color: #cccccc; font-size: 9px; font-family: monospace;")
+        self.vantor_results.setStyleSheet("color: #404040; font-size: 9px; font-family: monospace;")
         vantor_layout.addRow("", self.vantor_results)
         
         layout.addWidget(vantor_group)
@@ -314,13 +431,13 @@ class SettingsDockWidget(QDockWidget):
             "Requires a valid API access token (Bearer) and optional contract/collection scope."
         )
         info_label.setWordWrap(True)
-        info_label.setStyleSheet("color: #cccccc; font-size: 9px;")
+        info_label.setStyleSheet("color: #404040; font-size: 9px;")
         iceye_layout.addRow("", info_label)
         
         # API base URL
         self.iceye_endpoint = QLineEdit()
         self.iceye_endpoint.setPlaceholderText("https://api.iceye.com")
-        iceye_layout.addRow("Open Data STAC URL:", self.iceye_endpoint)
+        iceye_layout.addRow("API Base URL:", self.iceye_endpoint)
 
         # Access token (secure)
         self.iceye_access_token = QLineEdit()
@@ -364,7 +481,7 @@ class SettingsDockWidget(QDockWidget):
         # Results display
         self.iceye_results = QLabel("")
         self.iceye_results.setWordWrap(True)
-        self.iceye_results.setStyleSheet("color: #cccccc; font-size: 9px; font-family: monospace;")
+        self.iceye_results.setStyleSheet("color: #404040; font-size: 9px; font-family: monospace;")
         iceye_layout.addRow("", self.iceye_results)
         
         layout.addWidget(iceye_group)
@@ -373,11 +490,11 @@ class SettingsDockWidget(QDockWidget):
         return widget
 
     def _create_umbra_tab(self):
-        """Create Umbra Canopy STAC v2 settings tab"""
+        """Create Umbra Canopy API settings tab."""
         widget = QWidget()
         layout = QVBoxLayout(widget)
 
-        umbra_group = QGroupBox("Umbra Canopy STAC v2 Configuration")
+        umbra_group = QGroupBox("Umbra Canopy API Configuration")
         umbra_layout = QFormLayout(umbra_group)
 
         info_label = QLabel(
@@ -386,7 +503,7 @@ class SettingsDockWidget(QDockWidget):
         )
         info_label.setOpenExternalLinks(True)
         info_label.setWordWrap(True)
-        info_label.setStyleSheet("color: #cccccc; font-size: 9px;")
+        info_label.setStyleSheet("color: #404040; font-size: 9px;")
         umbra_layout.addRow("", info_label)
 
         self.umbra_api_base_url = QLineEdit()
@@ -424,129 +541,279 @@ class SettingsDockWidget(QDockWidget):
         default_btn.clicked.connect(self._restore_default_umbra)
         umbra_layout.addRow("", default_btn)
 
-        test_btn = QPushButton("Test STAC v2 Connection")
+        test_btn = QPushButton("Test API Connection")
         test_btn.clicked.connect(self._test_umbra_connection)
         umbra_layout.addRow("", test_btn)
 
         self.umbra_results = QLabel("")
         self.umbra_results.setWordWrap(True)
-        self.umbra_results.setStyleSheet("color: #cccccc; font-size: 9px; font-family: monospace;")
+        self.umbra_results.setStyleSheet("color: #404040; font-size: 9px; font-family: monospace;")
         umbra_layout.addRow("", self.umbra_results)
 
         layout.addWidget(umbra_group)
         layout.addStretch()
 
         return widget
-    
-    def _create_copernicus_tab(self):
-        """Create Copernicus Dataspace settings tab"""
+
+    def _create_element84_stac_tab(self):
+        """Create Earth Search (Element84) STAC settings tab."""
         widget = QWidget()
         layout = QVBoxLayout(widget)
-        
-        # === COPERNICUS (Data Space Ecosystem) ===
-        copernicus_stac_group = QGroupBox("Copernicus (Data Space Ecosystem)")
-        copernicus_stac_layout = QFormLayout(copernicus_stac_group)
-        
-        # Info label
-        stac_info_label = QLabel(
-            "Copernicus Dataspace provides Sentinel-1/2/3/5P data via STAC API. "
-            "Requires free account registration at dataspace.copernicus.eu. "
-            "Create OAuth2 credentials (client_id/client_secret) in your account settings."
-        )
-        stac_info_label.setWordWrap(True)
-        stac_info_label.setStyleSheet("color: #cccccc; font-size: 9px;")
-        copernicus_stac_layout.addRow("", stac_info_label)
-        
-        # Client ID (NOT secret - should be visible)
-        self.copernicus_client_id = QLineEdit()
-        self.copernicus_client_id.setPlaceholderText("Enter OAuth2 client ID (e.g., sh-1234abcd-...)")
-        # Client ID is NOT secret - do not mask it
-        copernicus_stac_layout.addRow("Client ID:", self.copernicus_client_id)
-        
-        # Client Secret (this IS secret - mask it)
-        self.copernicus_client_secret = QLineEdit()
-        self.copernicus_client_secret.setPlaceholderText("Enter OAuth2 client secret")
-        self.copernicus_client_secret.setEchoMode(QLineEdit.Password)
-        copernicus_stac_layout.addRow("Client Secret:", self.copernicus_client_secret)
 
-        # Timeout settings for STAC
-        self.copernicus_stac_timeout = QSpinBox()
-        self.copernicus_stac_timeout.setRange(5, 60)
-        self.copernicus_stac_timeout.setValue(15)
-        self.copernicus_stac_timeout.setSuffix(" sec")
-        copernicus_stac_layout.addRow("Request Timeout:", self.copernicus_stac_timeout)
-        
-        # Default button for STAC
-        stac_default_btn = QPushButton("Restore Defaults")
-        stac_default_btn.clicked.connect(self._restore_default_copernicus_stac)
-        copernicus_stac_layout.addRow("", stac_default_btn)
-        
-        # Test connection button for STAC
-        stac_test_btn = QPushButton("Test STAC Connection")
-        stac_test_btn.clicked.connect(self._test_copernicus_stac_connection)
-        copernicus_stac_layout.addRow("", stac_test_btn)
-        
-        # Results display for STAC
-        self.copernicus_stac_results = QLabel("")
-        self.copernicus_stac_results.setWordWrap(True)
-        self.copernicus_stac_results.setStyleSheet("color: #cccccc; font-size: 9px; font-family: monospace;")
-        copernicus_stac_layout.addRow("", self.copernicus_stac_results)
-        
-        layout.addWidget(copernicus_stac_group)
+        group = QGroupBox("Earth Search (Element84) STAC")
+        form = QFormLayout(group)
+
+        info = QLabel(
+            "Open-data STAC search endpoint used for archive search only. "
+            "Collections are restricted to Sentinel and Landsat; "
+            "results expose direct COG assets for map loading."
+        )
+        info.setWordWrap(True)
+        info.setStyleSheet("color: #404040; font-size: 9px;")
+        form.addRow("", info)
+
+        self.element84_stac_api_url = QLineEdit()
+        self.element84_stac_api_url.setPlaceholderText(
+            "https://earth-search.aws.element84.com/v1"
+        )
+        form.addRow("API Root:", self.element84_stac_api_url)
+
+        collections_label = QLabel(
+            "Allowed collections: Sentinel + Landsat only "
+            "(for example sentinel-2-l2a, sentinel-1-grd, landsat-c2-l2)."
+        )
+        collections_label.setWordWrap(True)
+        collections_label.setStyleSheet("color: #404040; font-size: 9px;")
+        form.addRow("Scope:", collections_label)
+
+        self.element84_stac_timeout = QSpinBox()
+        self.element84_stac_timeout.setRange(5, 120)
+        self.element84_stac_timeout.setValue(30)
+        self.element84_stac_timeout.setSuffix(" sec")
+        form.addRow("Request Timeout:", self.element84_stac_timeout)
+
+        default_btn = QPushButton("Restore Defaults")
+        default_btn.clicked.connect(self._restore_default_element84_stac)
+        form.addRow("", default_btn)
+
+        test_btn = QPushButton("Test STAC Access")
+        test_btn.clicked.connect(self._test_element84_stac_connection)
+        form.addRow("", test_btn)
+
+        self.element84_stac_results = QLabel("")
+        self.element84_stac_results.setWordWrap(True)
+        self.element84_stac_results.setStyleSheet(
+            "color: #404040; font-size: 9px; font-family: monospace;"
+        )
+        form.addRow("", self.element84_stac_results)
+
+        layout.addWidget(group)
         layout.addStretch()
-        
         return widget
 
-    def _create_capella_tab(self):
-        """Create Capella Space API credentials settings tab"""
+    def _create_planetary_computer_stac_tab(self):
+        """Create Microsoft Planetary Computer STAC settings tab."""
         widget = QWidget()
         layout = QVBoxLayout(widget)
 
-        capella_group = QGroupBox("Capella Space STAC / API Credentials")
+        group = QGroupBox("Microsoft Planetary Computer STAC")
+        form = QFormLayout(group)
+
+        info = QLabel(
+            "Open-data STAC endpoint used for archive search only. "
+            "The connector prioritizes optical RGB assets "
+            "(visual > render > preview > first COG)."
+        )
+        info.setWordWrap(True)
+        info.setStyleSheet("color: #404040; font-size: 9px;")
+        form.addRow("", info)
+
+        self.planetary_computer_stac_api_url = QLineEdit()
+        self.planetary_computer_stac_api_url.setPlaceholderText(
+            "https://planetarycomputer.microsoft.com/api/stac/v1"
+        )
+        form.addRow("API Root:", self.planetary_computer_stac_api_url)
+
+        collections_label = QLabel(
+            "Default scope: optical satellite collections with RGB-ready assets."
+        )
+        collections_label.setWordWrap(True)
+        collections_label.setStyleSheet("color: #404040; font-size: 9px;")
+        form.addRow("Scope:", collections_label)
+
+        self.planetary_computer_stac_timeout = QSpinBox()
+        self.planetary_computer_stac_timeout.setRange(5, 120)
+        self.planetary_computer_stac_timeout.setValue(30)
+        self.planetary_computer_stac_timeout.setSuffix(" sec")
+        form.addRow("Request Timeout:", self.planetary_computer_stac_timeout)
+
+        default_btn = QPushButton("Restore Defaults")
+        default_btn.clicked.connect(self._restore_default_planetary_computer_stac)
+        form.addRow("", default_btn)
+
+        test_btn = QPushButton("Test STAC Access")
+        test_btn.clicked.connect(self._test_planetary_computer_stac_connection)
+        form.addRow("", test_btn)
+
+        self.planetary_computer_stac_results = QLabel("")
+        self.planetary_computer_stac_results.setWordWrap(True)
+        self.planetary_computer_stac_results.setStyleSheet(
+            "color: #404040; font-size: 9px; font-family: monospace;"
+        )
+        form.addRow("", self.planetary_computer_stac_results)
+
+        layout.addWidget(group)
+        layout.addStretch()
+        return widget
+    
+    def _create_cdse_sentinel_tab(self):
+        """Create CDSE Sentinel settings tab"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+
+        # === CDSE Sentinel CATALOG API (OAuth2 Authentication) ===
+        cdse_sentinel_group = QGroupBox("Copernicus CDSE Sentinel Catalog API")
+        cdse_sentinel_layout = QFormLayout(cdse_sentinel_group)
+
+        # Info label
+        info_label = QLabel(
+            "Use OAuth2 client credentials for Copernicus CDSE Sentinel Catalog API "
+            "access and Sentinel service workflows.\n\n"
+            "In this plugin, archive search is now handled by Earth Search (Element84). "
+            "Keep CDSE credentials here for CDSE-specific service and overpass features."
+        )
+        info_label.setWordWrap(True)
+        info_label.setStyleSheet("color: #404040; font-size: 9px;")
+        cdse_sentinel_layout.addRow("", info_label)
+
+        # Client ID (NOT secret - should be visible)
+        self.copernicus_client_id = QLineEdit()
+        self.copernicus_client_id.setPlaceholderText(
+            "Enter OAuth2 client ID"
+        )
+        # Client ID is NOT secret - do not mask it
+        cdse_sentinel_layout.addRow("Client ID:", self.copernicus_client_id)
+
+        # Client Secret (this IS secret - mask it)
+        self.copernicus_client_secret = QLineEdit()
+        self.copernicus_client_secret.setPlaceholderText(
+            "Enter OAuth2 client secret"
+        )
+        self.copernicus_client_secret.setEchoMode(QLineEdit.Password)
+        cdse_sentinel_layout.addRow("Client Secret:", self.copernicus_client_secret)
+
+        catalog_endpoint = QLabel(
+            "Token endpoint: https://identity.dataspace.copernicus.eu/.../token\n"
+            "Catalog endpoint: https://sh.dataspace.copernicus.eu/catalog/v1/search"
+        )
+        catalog_endpoint.setStyleSheet("color: #404040; font-size: 9px;")
+        catalog_endpoint.setWordWrap(True)
+        cdse_sentinel_layout.addRow("Endpoints:", catalog_endpoint)
+
+        # Timeout settings
+        self.cdse_sentinel_timeout = QSpinBox()
+        self.cdse_sentinel_timeout.setRange(5, 60)
+        self.cdse_sentinel_timeout.setValue(15)
+        self.cdse_sentinel_timeout.setSuffix(" sec")
+        cdse_sentinel_layout.addRow("Request Timeout:", self.cdse_sentinel_timeout)
+
+        # Default button
+        default_btn = QPushButton("Restore Defaults")
+        default_btn.clicked.connect(self._restore_default_cdse_sentinel)
+        cdse_sentinel_layout.addRow("", default_btn)
+
+        # Test connection button
+        test_btn = QPushButton("Test OAuth2 + Catalog Access")
+        test_btn.clicked.connect(self._test_cdse_sentinel_connection)
+        cdse_sentinel_layout.addRow("", test_btn)
+
+        # Results display
+        self.cdse_sentinel_results = QLabel("")
+        self.cdse_sentinel_results.setWordWrap(True)
+        self.cdse_sentinel_results.setStyleSheet(
+            "color: #404040; font-size: 9px; font-family: monospace;"
+        )
+        cdse_sentinel_layout.addRow("", self.cdse_sentinel_results)
+
+        layout.addWidget(cdse_sentinel_group)
+
+        # === AVAILABLE SENTINEL DATA ===
+        sentinel_data_group = QGroupBox("Available Sentinel Data")
+        sentinel_data_layout = QVBoxLayout(sentinel_data_group)
+
+        sentinel_info = QLabel(
+            "Sentinel-1 GRD\n"
+            "  Synthetic Aperture Radar (SAR) ground range detected imagery\n"
+            "  Resolution: 10m | Coverage: Global | No cloud cover impact\n\n"
+            "Sentinel-2 L1C\n"
+            "  Multispectral optical imagery - Top of Atmosphere reflectance\n"
+            "  Resolution: 10m | Coverage: Global | Cloud dependent\n\n"
+            "Sentinel-2 L2A\n"
+            "  Multispectral optical imagery - Surface reflectance\n"
+            "  Resolution: 10m | Coverage: Global | Cloud dependent\n\n"
+            "Sentinel-5P\n"
+            "  Atmospheric data (O₃, NO₂, SO₂, CO, CH₄, HCHO)\n"
+            "  Resolution: 5.5km | Global atmospheric monitoring"
+        )
+        sentinel_info.setStyleSheet("color: #404040; font-size: 9px;")
+        sentinel_data_layout.addWidget(sentinel_info)
+
+        layout.addWidget(sentinel_data_group)
+
+        layout.addStretch()
+
+        return widget
+
+    def _restore_default_cdse_sentinel(self):
+        """Restore default CDSE Sentinel settings"""
+        # Catalog API endpoints are fixed by connector defaults.
+        self.cdse_sentinel_timeout.setValue(15)
+
+    def _create_capella_tab(self):
+        """Create Capella API settings tab."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+
+        capella_group = QGroupBox("Capella Catalog API")
         capella_layout = QFormLayout(capella_group)
 
         info_label = QLabel(
-            "Capella Space provides SAR satellite imagery via STAC API. "
-            "Obtain credentials from "
-            "<a href='https://console.capellaspace.com/'>Capella Console</a>."
+            "Capella commercial archive search uses an authenticated STAC-compatible API. "
+            "Provide your API base URL and Bearer token to enable archive search."
         )
-        info_label.setOpenExternalLinks(True)
         info_label.setWordWrap(True)
-        info_label.setStyleSheet("color: #cccccc; font-size: 9px;")
+        info_label.setStyleSheet("color: #404040; font-size: 9px;")
         capella_layout.addRow("", info_label)
 
-        self.capella_username = QLineEdit()
-        self.capella_username.setPlaceholderText("Capella account email")
-        capella_layout.addRow("Username:", self.capella_username)
+        self.capella_api_base_url = QLineEdit()
+        self.capella_api_base_url.setPlaceholderText("https://api.capellaspace.com")
+        capella_layout.addRow("API Base URL:", self.capella_api_base_url)
 
-        self.capella_password = QLineEdit()
-        self.capella_password.setPlaceholderText("Capella account password")
-        self.capella_password.setEchoMode(QLineEdit.Password)
-        capella_layout.addRow("Password:", self.capella_password)
+        self.capella_access_token = QLineEdit()
+        self.capella_access_token.setEchoMode(QLineEdit.Password)
+        self.capella_access_token.setPlaceholderText("Paste Capella Bearer access token")
+        capella_layout.addRow("Access Token:", self.capella_access_token)
 
-        self.capella_stac_url = QLineEdit()
-        self.capella_stac_url.setPlaceholderText(
-            "https://api.capellaspace.com/catalog/stac/v1"
-        )
-        capella_layout.addRow("Open Data STAC URL:", self.capella_stac_url)
+        self.capella_collections_path = QLineEdit()
+        self.capella_collections_path.setPlaceholderText("/stac/collections")
+        capella_layout.addRow("Collections Path:", self.capella_collections_path)
+
+        self.capella_search_path = QLineEdit()
+        self.capella_search_path.setPlaceholderText("/stac/search")
+        capella_layout.addRow("Search Path:", self.capella_search_path)
 
         test_capella_btn = QPushButton("Test Connection")
         test_capella_btn.clicked.connect(self._test_capella_connection)
         capella_layout.addRow("", test_capella_btn)
 
-        commercial_label = QLabel(
-            "\u26a0\ufe0f Capella Space is a commercial service. Valid subscription required."
-        )
-        commercial_label.setStyleSheet(
-            "color: #ff9900; font-size: 10px; font-weight: bold;"
-        )
-        commercial_label.setWordWrap(True)
-        capella_layout.addRow("", commercial_label)
+        default_btn = QPushButton("Restore Defaults")
+        default_btn.clicked.connect(self._restore_default_capella)
+        capella_layout.addRow("", default_btn)
 
         self.capella_results = QLabel("")
         self.capella_results.setWordWrap(True)
         self.capella_results.setStyleSheet(
-            "color: #cccccc; font-size: 9px; font-family: monospace;"
+            "color: #404040; font-size: 9px; font-family: monospace;"
         )
         capella_layout.addRow("", self.capella_results)
 
@@ -555,22 +822,41 @@ class SettingsDockWidget(QDockWidget):
         return widget
 
     def _test_capella_connection(self):
-        """Quick connectivity test for the Capella STAC endpoint."""
-        import requests
-        url = self.capella_stac_url.text().strip() or \
-            "https://api.capellaspace.com/catalog/stac/v1"
+        """Verify Capella API credentials and collections endpoint."""
+        api_base_url = self.capella_api_base_url.text().strip() or "https://api.capellaspace.com"
+        access_token = self.capella_access_token.text().strip()
+        collections_path = self.capella_collections_path.text().strip() or "/stac/collections"
+        search_path = self.capella_search_path.text().strip() or "/stac/search"
+
+        if not access_token:
+            QMessageBox.warning(self, "Missing Token", "Please enter Capella access token.")
+            return
+
+        self.capella_results.setText("Testing connection...")
+        QApplication.processEvents()
+
         try:
-            resp = requests.get(url, timeout=10)
-            if resp.status_code < 400:
-                self.capella_results.setText(f"\u2705 Reachable (HTTP {resp.status_code})")
-                self.capella_results.setStyleSheet(
-                    "color: #00ff00; font-size: 9px; font-family: monospace;"
-                )
-            else:
-                self.capella_results.setText(f"\u26a0\ufe0f HTTP {resp.status_code}")
-                self.capella_results.setStyleSheet(
-                    "color: #ffaa00; font-size: 9px; font-family: monospace;"
-                )
+            from ..connectors.capella import CapellaConnector
+
+            connector = CapellaConnector()
+            auth_ok = connector.authenticate(
+                {
+                    "api_base_url": api_base_url,
+                    "access_token": access_token,
+                    "collections_path": collections_path,
+                    "search_path": search_path,
+                }
+            )
+            if not auth_ok:
+                raise RuntimeError("Authentication failed")
+
+            collections = connector.get_collections()
+            self.capella_results.setText(
+                f"\u2705 Connected\nCollections discovered: {len(collections)}"
+            )
+            self.capella_results.setStyleSheet(
+                "color: #00ff00; font-size: 9px; font-family: monospace;"
+            )
         except Exception as exc:
             self.capella_results.setText(f"\u274c {exc}")
             self.capella_results.setStyleSheet(
@@ -592,7 +878,7 @@ class SettingsDockWidget(QDockWidget):
             "GEDI, MODIS, Landsat, Sentinel, VIIRS, and more. Requires free account."
         )
         info_label.setWordWrap(True)
-        info_label.setStyleSheet("color: #cccccc; font-size: 9px;")
+        info_label.setStyleSheet("color: #404040; font-size: 9px;")
         nasa_layout.addRow("", info_label)
         
         # Registration link
@@ -645,7 +931,7 @@ class SettingsDockWidget(QDockWidget):
         # Authentication status
         self.nasa_auth_status = QLabel("")
         self.nasa_auth_status.setWordWrap(True)
-        self.nasa_auth_status.setStyleSheet("color: #cccccc; font-size: 9px;")
+        self.nasa_auth_status.setStyleSheet("color: #404040; font-size: 9px;")
         nasa_layout.addRow("Auth Status:", self.nasa_auth_status)
         
         # Test credentials button
@@ -657,29 +943,10 @@ class SettingsDockWidget(QDockWidget):
         # Results display
         self.nasa_results = QLabel("")
         self.nasa_results.setWordWrap(True)
-        self.nasa_results.setStyleSheet("color: #cccccc; font-size: 9px; font-family: monospace;")
+        self.nasa_results.setStyleSheet("color: #404040; font-size: 9px; font-family: monospace;")
         nasa_layout.addRow("", self.nasa_results)
         
         layout.addWidget(nasa_group)
-        
-        # Installation instructions group
-        install_group = QGroupBox("Installation")
-        install_layout = QVBoxLayout(install_group)
-        
-        install_info = QLabel(
-            "The NASA EarthData connector requires 'earthaccess' and 'pandas' Python packages.\n\n"
-            "Authentication supports either:\n"
-            "• Username + Password, or\n"
-            "• EARTHDATA_TOKEN (Bearer token).\n\n"
-            "To install in QGIS Python Console:\n"
-            ">>> import subprocess, sys\n"
-            ">>> subprocess.check_call([sys.executable, '-m', 'pip', 'install', 'earthaccess', 'pandas'])"
-        )
-        install_info.setWordWrap(True)
-        install_info.setStyleSheet("color: #cccccc; font-size: 9px; font-family: monospace;")
-        install_layout.addWidget(install_info)
-        
-        layout.addWidget(install_group)
         
         # Dataset info group
         info_group = QGroupBox("Available Datasets")
@@ -695,7 +962,7 @@ class SettingsDockWidget(QDockWidget):
             "• HLS: Harmonized Landsat Sentinel-2\n"
             "• And 9,000+ more Earth science datasets"
         )
-        datasets_info.setStyleSheet("color: #cccccc; font-size: 9px;")
+        datasets_info.setStyleSheet("color: #404040; font-size: 9px;")
         info_layout.addWidget(datasets_info)
         
         layout.addWidget(info_group)
@@ -704,71 +971,193 @@ class SettingsDockWidget(QDockWidget):
         return widget
 
     # ------------------------------------------------------------------
+    # Jilin-1 Gaofen tab
+    # ------------------------------------------------------------------
+
+    def _create_jilin_tab(self):
+        """Create Jilin-1 Gaofen catalog + tasking settings tab."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+
+        group = QGroupBox("Jilin-1 Gaofen API")
+        form = QFormLayout(group)
+
+        info = QLabel(
+            "Configure STAC-compatible Catalog API and optional Tasking API endpoints "
+            "for your Jilin tenant."
+        )
+        info.setWordWrap(True)
+        info.setStyleSheet("color: #404040; font-size: 9px;")
+        form.addRow("", info)
+
+        self.jilin_catalog_base_url = QLineEdit()
+        self.jilin_catalog_base_url.setPlaceholderText("https://<tenant>/stac")
+        form.addRow("Catalog Base URL:", self.jilin_catalog_base_url)
+
+        self.jilin_default_collection = QLineEdit()
+        self.jilin_default_collection.setPlaceholderText("Optional default collection ID")
+        form.addRow("Default Collection:", self.jilin_default_collection)
+
+        self.jilin_access_token = QLineEdit()
+        self.jilin_access_token.setEchoMode(QLineEdit.Password)
+        self.jilin_access_token.setPlaceholderText("Optional token / API key")
+        form.addRow("Catalog Token:", self.jilin_access_token)
+
+        tasking_label = QLabel("Optional Tasking API configuration")
+        tasking_label.setWordWrap(True)
+        tasking_label.setStyleSheet("color: #404040; font-size: 9px;")
+        form.addRow("", tasking_label)
+
+        self.jilin_tasking_base_url = QLineEdit()
+        self.jilin_tasking_base_url.setPlaceholderText("https://<tenant>")
+        form.addRow("Tasking Base URL:", self.jilin_tasking_base_url)
+
+        self.jilin_tasking_create_path = QLineEdit()
+        self.jilin_tasking_create_path.setPlaceholderText("/tasking/v2/requests")
+        form.addRow("Create Path:", self.jilin_tasking_create_path)
+
+        self.jilin_tasking_list_path = QLineEdit()
+        self.jilin_tasking_list_path.setPlaceholderText("/tasking/v2/requests")
+        form.addRow("List Path:", self.jilin_tasking_list_path)
+
+        self.jilin_tasking_access_token = QLineEdit()
+        self.jilin_tasking_access_token.setEchoMode(QLineEdit.Password)
+        self.jilin_tasking_access_token.setPlaceholderText("Optional tasking token")
+        form.addRow("Tasking Token:", self.jilin_tasking_access_token)
+
+        test_btn = QPushButton("Test Jilin Catalog Connection")
+        test_btn.clicked.connect(self._test_jilin_connection)
+        form.addRow("", test_btn)
+
+        self.jilin_results = QLabel("")
+        self.jilin_results.setWordWrap(True)
+        self.jilin_results.setStyleSheet("color: #404040; font-size: 9px; font-family: monospace;")
+        form.addRow("", self.jilin_results)
+
+        layout.addWidget(group)
+        layout.addStretch()
+        return widget
+
+    # ------------------------------------------------------------------
     # JAXA Earth tab
     # ------------------------------------------------------------------
 
     def _create_jaxa_tab(self):
-        """Create JAXA Earth settings tab (public data, no credentials required)."""
+        """Create JAXA Earth catalog + optional tasking settings tab."""
         widget = QWidget()
         layout = QVBoxLayout(widget)
         layout.setSpacing(8)
         layout.setContentsMargins(8, 8, 8, 8)
 
-        # Info group
-        info_group = QGroupBox("JAXA Earth — Open EO Data")
-        info_layout = QVBoxLayout(info_group)
+        group = QGroupBox("JAXA Earth API")
+        form = QFormLayout(group)
 
-        info_text = (
-            "JAXA Earth provides free access to multi-sensor earth observation data "
-            "via a public STAC/COG catalogue.\n\n"
-            "No registration or API key is required.\n\n"
-            "Available datasets include:\n"
-            "  • ALOS/PRISM AW3D30 – 30 m global DSM (elevation)\n"
-            "  • ALOS-2 / PALSAR-2 – SAR backscatter & forest/wetland mosaics\n"
-            "  • GCOM-C / SGLI – Land surface temperature, NDVI, ocean products\n"
-            "  • GPM IMERG – Global precipitation\n"
-            "  • Himawari-8/9 – Near-real-time meteorological imagery\n\n"
-            "Catalog root:\n"
-            "  https://data.earth.jaxa.jp/stac/cog/v1/catalog.json"
+        info = QLabel(
+            "JAXA catalog is public STAC/COG. Optional Tasking API fields are available "
+            "for broker/partner workflows."
         )
-        info_label = QLabel(info_text)
-        info_label.setWordWrap(True)
-        info_label.setStyleSheet("color: #303030; font-size: 9px;")
-        info_layout.addWidget(info_label)
+        info.setWordWrap(True)
+        info.setStyleSheet("color: #303030; font-size: 9px;")
+        form.addRow("", info)
 
-        # Test connection button
+        self.jaxa_catalog_url = QLineEdit()
+        self.jaxa_catalog_url.setPlaceholderText("https://data.earth.jaxa.jp/stac/cog/v1/catalog.json")
+        form.addRow("Catalog URL:", self.jaxa_catalog_url)
+
+        self.jaxa_search_url = QLineEdit()
+        self.jaxa_search_url.setPlaceholderText("https://data.earth.jaxa.jp/stac/cog/v1/search")
+        form.addRow("Search URL:", self.jaxa_search_url)
+
+        self.jaxa_tasking_base_url = QLineEdit()
+        self.jaxa_tasking_base_url.setPlaceholderText("Optional tasking base URL")
+        form.addRow("Tasking Base URL:", self.jaxa_tasking_base_url)
+
+        self.jaxa_tasking_create_path = QLineEdit()
+        self.jaxa_tasking_create_path.setPlaceholderText("/tasking/v2/requests")
+        form.addRow("Create Path:", self.jaxa_tasking_create_path)
+
+        self.jaxa_tasking_list_path = QLineEdit()
+        self.jaxa_tasking_list_path.setPlaceholderText("/tasking/v2/requests")
+        form.addRow("List Path:", self.jaxa_tasking_list_path)
+
+        self.jaxa_tasking_access_token = QLineEdit()
+        self.jaxa_tasking_access_token.setEchoMode(QLineEdit.Password)
+        self.jaxa_tasking_access_token.setPlaceholderText("Optional tasking token")
+        form.addRow("Tasking Token:", self.jaxa_tasking_access_token)
+
         test_btn = QPushButton("Test JAXA Catalog Connection")
         test_btn.clicked.connect(self._test_jaxa_connection)
-        info_layout.addWidget(test_btn)
+        form.addRow("", test_btn)
 
         self.jaxa_status_label = QLabel("")
         self.jaxa_status_label.setStyleSheet("font-size: 9px;")
-        info_layout.addWidget(self.jaxa_status_label)
+        form.addRow("", self.jaxa_status_label)
 
-        layout.addWidget(info_group)
+        layout.addWidget(group)
         layout.addStretch()
         return widget
 
+    def _test_jilin_connection(self):
+        """Verify Jilin endpoint and basic search/collections access."""
+        self.jilin_results.setText("Testing Jilin catalog endpoint...")
+        QApplication.processEvents()
+
+        try:
+            from ..connectors.jilin_gaofen_stac import JilinGaofenStacConnector
+
+            connector = JilinGaofenStacConnector()
+            ok = connector.authenticate({
+                'base_url': self.jilin_catalog_base_url.text().strip(),
+                'collection': self.jilin_default_collection.text().strip(),
+                'access_token': self.jilin_access_token.text().strip(),
+                'tasking_base_url': self.jilin_tasking_base_url.text().strip(),
+                'tasking_create_path': self.jilin_tasking_create_path.text().strip(),
+                'tasking_list_path': self.jilin_tasking_list_path.text().strip(),
+                'tasking_access_token': self.jilin_tasking_access_token.text().strip(),
+            })
+            if not ok:
+                raise RuntimeError('Authentication/configuration failed')
+
+            results, _ = connector.search(limit=3)
+            self.jilin_results.setText(
+                f"✅ Jilin endpoint reachable\n"
+                f"Sample items: {len(results)}\n"
+                f"Tasking endpoint: {connector.tasking_url() or '(not configured)'}"
+            )
+            self.jilin_results.setStyleSheet("color: #226633; font-size: 9px; font-family: monospace;")
+        except Exception as exc:
+            self.jilin_results.setText(f"❌ Jilin test failed\nError: {exc}")
+            self.jilin_results.setStyleSheet("color: #ff6666; font-size: 9px; font-family: monospace;")
+            logger.warning(f"Jilin catalog test failed: {exc}")
+
     def _test_jaxa_connection(self):
         """Verify access to the JAXA Earth STAC catalog."""
-        self.jaxa_status_label.setText("Testing…")
+        self.jaxa_status_label.setText("Testing...")
         self.jaxa_status_label.setStyleSheet("color: #88ccff; font-size: 9px;")
         try:
             from ..connectors.jaxa_earth_stac import JaxaEarthStacConnector
             connector = JaxaEarthStacConnector()
-            if connector.authenticate():
+            if connector.authenticate({
+                'catalog_url': self.jaxa_catalog_url.text().strip(),
+                'search_url': self.jaxa_search_url.text().strip(),
+                'tasking_base_url': self.jaxa_tasking_base_url.text().strip(),
+                'tasking_create_path': self.jaxa_tasking_create_path.text().strip(),
+                'tasking_list_path': self.jaxa_tasking_list_path.text().strip(),
+                'tasking_access_token': self.jaxa_tasking_access_token.text().strip(),
+            }):
                 collections = connector.get_collections()
                 n = len(collections)
                 self.jaxa_status_label.setText(
-                    f"✅  Catalog reachable — {n} collection(s) found"
+                    f"✅ Catalog reachable - {n} collection(s) found\n"
+                    f"Tasking endpoint: {connector.tasking_url() or '(not configured)'}"
                 )
                 self.jaxa_status_label.setStyleSheet("color: #00cc66; font-size: 9px;")
                 logger.info(f"JAXA Earth catalog test OK: {n} collections")
             else:
-                self.jaxa_status_label.setText("❌  Could not reach JAXA catalog")
+                self.jaxa_status_label.setText("❌ Could not reach JAXA catalog")
                 self.jaxa_status_label.setStyleSheet("color: #ff6666; font-size: 9px;")
         except Exception as exc:
-            self.jaxa_status_label.setText(f"❌  Error: {exc}")
+            self.jaxa_status_label.setText(f"❌ Error: {exc}")
             self.jaxa_status_label.setStyleSheet("color: #ff6666; font-size: 9px;")
             logger.warning(f"JAXA catalog test failed: {exc}")
 
@@ -912,26 +1301,80 @@ class SettingsDockWidget(QDockWidget):
         if self.secure_storage:
             planet_creds = self.secure_storage.get_credentials('planet')
             if planet_creds:
-                token = planet_creds.get('access_token', '') or planet_creds.get('api_key', '')
-                self.planet_access_token.setText(token)
+                token = planet_creds.get('api_key', '') or planet_creds.get('access_token', '')
+                self.planet_api_key.setText(token)
 
-        default_planet_api_base_url = 'https://services.sentinel-hub.com'
+        default_planet_api_base_url = 'https://api.planet.com'
         self.planet_api_base_url.setText(
             self.settings.value(f"{self.SETTINGS_PREFIX}planet_api_base_url", default_planet_api_base_url)
         )
-        
-        # Vantor STAC
-        default_vantor_endpoint = 'https://maxar-opendata.s3.amazonaws.com/events/catalog.json'
-        self.vantor_endpoint.setText(
-            self.settings.value(f"{self.SETTINGS_PREFIX}vantor_endpoint", default_vantor_endpoint)
+        self.planet_tasking_base_url.setText(
+            self.settings.value(f"{self.SETTINGS_PREFIX}planet_tasking_base_url", 'https://api.planet.com')
         )
-        self.vantor_catalog_timeout.setValue(
-            self.settings.value(f"{self.SETTINGS_PREFIX}vantor_catalog_timeout", 12, type=int)
+        self.planet_tasking_orders_path.setText(
+            self.settings.value(f"{self.SETTINGS_PREFIX}planet_tasking_orders_path", '/tasking/v2/orders/')
         )
-        self.vantor_search_timeout.setValue(
-            self.settings.value(f"{self.SETTINGS_PREFIX}vantor_search_timeout", 15, type=int)
+        self.planet_tasking_pricing_path.setText(
+            self.settings.value(f"{self.SETTINGS_PREFIX}planet_tasking_pricing_path", '/tasking/v2/pricing/')
         )
         
+        # Vantor Discovery API
+        self.vantor_discovery_enabled.setChecked(
+            self.settings.value(f"{self.SETTINGS_PREFIX}vantor_discovery_enabled", True, type=bool)
+        )
+        self.vantor_discovery_base_url.setText(
+            self.settings.value(
+                f"{self.SETTINGS_PREFIX}vantor_discovery_base_url",
+                'https://api.maxar.com/discovery/v1'
+            )
+        )
+        self.vantor_discovery_search_path.setText(
+            self.settings.value(
+                f"{self.SETTINGS_PREFIX}vantor_discovery_search_path",
+                '/catalogs/imagery/search'
+            )
+        )
+        self.vantor_discovery_timeout.setValue(
+            self.settings.value(f"{self.SETTINGS_PREFIX}vantor_discovery_timeout", 30, type=int)
+        )
+        self.vantor_discovery_collections.setText(
+            self.settings.value(f"{self.SETTINGS_PREFIX}vantor_discovery_collections", '')
+        )
+        self.vantor_discovery_sortby.setText(
+            self.settings.value(f"{self.SETTINGS_PREFIX}vantor_discovery_sortby", '')
+        )
+        self.vantor_discovery_area_based_calc.setChecked(
+            self.settings.value(
+                f"{self.SETTINGS_PREFIX}vantor_discovery_area_based_calc", False, type=bool
+            )
+        )
+        if self.secure_storage:
+            vantor_creds = self.secure_storage.get_credentials('vantor') or {}
+            self.vantor_discovery_api_key.setText(
+                vantor_creds.get('discovery_api_key', vantor_creds.get('api_key', ''))
+            )
+            self.vantor_discovery_access_token.setText(
+                vantor_creds.get(
+                    'discovery_access_token', vantor_creds.get('access_token', '')
+                )
+            )
+            self.vantor_tasking_access_token.setText(
+                vantor_creds.get('tasking_access_token', vantor_creds.get('access_token', ''))
+            )
+        
+        self.vantor_tasking_base_url.setText(
+            self.settings.value(f"{self.SETTINGS_PREFIX}vantor_tasking_base_url", '')
+        )
+        self.vantor_tasking_create_path.setText(
+            self.settings.value(f"{self.SETTINGS_PREFIX}vantor_tasking_create_path", '/tasking/v2/requests')
+        )
+        self.vantor_tasking_list_path.setText(
+            self.settings.value(f"{self.SETTINGS_PREFIX}vantor_tasking_list_path", '/tasking/v2/requests')
+        )
+        self.vantor_tasking_timeout.setValue(
+            self.settings.value(f"{self.SETTINGS_PREFIX}vantor_tasking_timeout", 30, type=int)
+        )
+
         # ICEYE
         default_iceye_endpoint = 'https://api.iceye.com'
         self.iceye_endpoint.setText(
@@ -975,20 +1418,56 @@ class SettingsDockWidget(QDockWidget):
         self.umbra_search_timeout.setValue(
             self.settings.value(f"{self.SETTINGS_PREFIX}umbra_search_timeout", 15, type=int)
         )
+
+        # Earth Search (Element84 STAC)
+        if hasattr(self, 'element84_stac_api_url'):
+            self.element84_stac_api_url.setText(
+                self.settings.value(
+                    f"{self.SETTINGS_PREFIX}element84_stac_api_url",
+                    'https://earth-search.aws.element84.com/v1'
+                )
+            )
+            self.element84_stac_timeout.setValue(
+                self.settings.value(
+                    f"{self.SETTINGS_PREFIX}element84_stac_timeout",
+                    30,
+                    type=int,
+                )
+            )
+
+        if hasattr(self, 'planetary_computer_stac_api_url'):
+            self.planetary_computer_stac_api_url.setText(
+                self.settings.value(
+                    f"{self.SETTINGS_PREFIX}planetary_computer_stac_api_url",
+                    'https://planetarycomputer.microsoft.com/api/stac/v1'
+                )
+            )
+            self.planetary_computer_stac_timeout.setValue(
+                self.settings.value(
+                    f"{self.SETTINGS_PREFIX}planetary_computer_stac_timeout",
+                    30,
+                    type=int,
+                )
+            )
         
-        # Copernicus STAC (OAuth2 credentials from secure storage service 'copernicus')
+        # CDSE Sentinel credentials from secure storage
         if self.secure_storage:
-            copernicus_stac_creds = self.secure_storage.get_credentials('copernicus')
-            logger.debug(f"Loading Copernicus STAC credentials from secure storage: {copernicus_stac_creds is not None}")
-            if copernicus_stac_creds:
-                client_id = copernicus_stac_creds.get('client_id', '')
-                client_secret = copernicus_stac_creds.get('client_secret', '')
-                logger.debug(f"Copernicus STAC client_id length: {len(client_id)}, client_secret length: {len(client_secret)}")
+            cdse_sentinel_creds = self.secure_storage.get_credentials('cdse_sentinel')
+            logger.debug(
+                f"Loading CDSE Sentinel credentials from secure storage: {cdse_sentinel_creds is not None}"
+            )
+            if cdse_sentinel_creds:
+                client_id = cdse_sentinel_creds.get('client_id', '')
+                client_secret = cdse_sentinel_creds.get('client_secret', '')
+                logger.debug(
+                    f"CDSE Sentinel client_id length: {len(client_id)}, "
+                    f"client_secret length: {len(client_secret)}"
+                )
                 self.copernicus_client_id.setText(client_id)
                 self.copernicus_client_secret.setText(client_secret)
         
-        self.copernicus_stac_timeout.setValue(
-            self.settings.value(f"{self.SETTINGS_PREFIX}copernicus_stac_timeout", 15, type=int)
+        self.cdse_sentinel_timeout.setValue(
+            self.settings.value(f"{self.SETTINGS_PREFIX}cdse_sentinel_timeout", 15, type=int)
         )
         
         # NASA EarthData
@@ -1016,20 +1495,92 @@ class SettingsDockWidget(QDockWidget):
         self.nasa_cache_timeout.setValue(
             self.settings.value(f"{self.SETTINGS_PREFIX}nasa_cache_timeout", 7, type=int)
         )
-        
-        # Check NASA authentication status
-        self._check_nasa_auth_status()
 
-        # Capella Space (credentials from secure storage)
-        if self.secure_storage:
-            capella_creds = self.secure_storage.get_credentials('capella')
-            if capella_creds:
-                self.capella_username.setText(capella_creds.get('username', ''))
-                self.capella_password.setText(capella_creds.get('password', ''))
-        default_capella_url = 'https://api.capellaspace.com/catalog/stac/v1'
-        self.capella_stac_url.setText(
-            self.settings.value(f"{self.SETTINGS_PREFIX}capella_stac_url", default_capella_url)
+        # Do not auto-validate NASA credentials on settings load.
+        # Validation is network-bound and should be user-triggered via Test Credentials.
+        self.nasa_auth_status.setText("Not verified (click Test Credentials)")
+        self.nasa_auth_status.setStyleSheet("color: #404040; font-size: 9px;")
+
+        # Capella API
+        self.capella_api_base_url.setText(
+            self.settings.value(
+                f"{self.SETTINGS_PREFIX}capella_api_base_url",
+                'https://api.capellaspace.com'
+            )
         )
+        self.capella_collections_path.setText(
+            self.settings.value(
+                f"{self.SETTINGS_PREFIX}capella_collections_path",
+                '/stac/collections'
+            )
+        )
+        self.capella_search_path.setText(
+            self.settings.value(
+                f"{self.SETTINGS_PREFIX}capella_search_path",
+                '/stac/search'
+            )
+        )
+        if self.secure_storage:
+            capella_creds = self.secure_storage.get_credentials('capella') or {}
+            self.capella_access_token.setText(
+                capella_creds.get('access_token', '')
+            )
+
+        # Jilin catalog/tasking
+        if hasattr(self, 'jilin_catalog_base_url'):
+            self.jilin_catalog_base_url.setText(
+                self.settings.value(f"{self.SETTINGS_PREFIX}jilin_catalog_base_url", '')
+            )
+            self.jilin_default_collection.setText(
+                self.settings.value(f"{self.SETTINGS_PREFIX}jilin_default_collection", '')
+            )
+            self.jilin_tasking_base_url.setText(
+                self.settings.value(f"{self.SETTINGS_PREFIX}jilin_tasking_base_url", '')
+            )
+            self.jilin_tasking_create_path.setText(
+                self.settings.value(f"{self.SETTINGS_PREFIX}jilin_tasking_create_path", '/tasking/v2/requests')
+            )
+            self.jilin_tasking_list_path.setText(
+                self.settings.value(f"{self.SETTINGS_PREFIX}jilin_tasking_list_path", '/tasking/v2/requests')
+            )
+
+        # JAXA catalog/tasking
+        if hasattr(self, 'jaxa_catalog_url'):
+            self.jaxa_catalog_url.setText(
+                self.settings.value(
+                    f"{self.SETTINGS_PREFIX}jaxa_catalog_url",
+                    'https://data.earth.jaxa.jp/stac/cog/v1/catalog.json'
+                )
+            )
+            self.jaxa_search_url.setText(
+                self.settings.value(
+                    f"{self.SETTINGS_PREFIX}jaxa_search_url",
+                    'https://data.earth.jaxa.jp/stac/cog/v1/search'
+                )
+            )
+            self.jaxa_tasking_base_url.setText(
+                self.settings.value(f"{self.SETTINGS_PREFIX}jaxa_tasking_base_url", '')
+            )
+            self.jaxa_tasking_create_path.setText(
+                self.settings.value(f"{self.SETTINGS_PREFIX}jaxa_tasking_create_path", '/tasking/v2/requests')
+            )
+            self.jaxa_tasking_list_path.setText(
+                self.settings.value(f"{self.SETTINGS_PREFIX}jaxa_tasking_list_path", '/tasking/v2/requests')
+            )
+
+        if self.secure_storage:
+            if hasattr(self, 'jilin_access_token'):
+                jilin_creds = self.secure_storage.get_credentials('jilin_gaofen_stac') or {}
+                self.jilin_access_token.setText(jilin_creds.get('access_token', ''))
+                self.jilin_tasking_access_token.setText(
+                    jilin_creds.get('tasking_access_token', jilin_creds.get('access_token', ''))
+                )
+
+            if hasattr(self, 'jaxa_tasking_access_token'):
+                jaxa_creds = self.secure_storage.get_credentials('jaxa_earth_stac') or {}
+                self.jaxa_tasking_access_token.setText(
+                    jaxa_creds.get('tasking_access_token', jaxa_creds.get('access_token', ''))
+                )
 
     def _save_settings(self):
         """Save settings to QSettings and SecureStorage"""
@@ -1087,28 +1638,93 @@ class SettingsDockWidget(QDockWidget):
             f"{self.SETTINGS_PREFIX}planet_api_base_url",
             self.planet_api_base_url.text().strip()
         )
-
-        if self.secure_storage:
-            planet_access_token = self.planet_access_token.text().strip()
-            if planet_access_token:
-                self.secure_storage.store_credentials('planet', {
-                    'access_token': planet_access_token
-                })
-                logger.info("Planet access token saved to secure storage")
-        
-        # Vantor STAC
         self.settings.setValue(
-            f"{self.SETTINGS_PREFIX}vantor_endpoint",
-            self.vantor_endpoint.text()
+            f"{self.SETTINGS_PREFIX}planet_tasking_base_url",
+            self.planet_tasking_base_url.text().strip()
         )
         self.settings.setValue(
-            f"{self.SETTINGS_PREFIX}vantor_catalog_timeout",
-            self.vantor_catalog_timeout.value()
+            f"{self.SETTINGS_PREFIX}planet_tasking_orders_path",
+            self.planet_tasking_orders_path.text().strip()
+        )
+        self.settings.setValue(
+            f"{self.SETTINGS_PREFIX}planet_tasking_pricing_path",
+            self.planet_tasking_pricing_path.text().strip()
+        )
+
+        if self.secure_storage:
+            planet_api_key = self.planet_api_key.text().strip()
+            if planet_api_key:
+                self.secure_storage.store_credentials('planet', {
+                    'api_key': planet_api_key,
+                    'access_token': planet_api_key
+                })
+                logger.info("Planet API key saved to secure storage")
+        
+        # Vantor Discovery API
+        self.settings.setValue(
+            f"{self.SETTINGS_PREFIX}vantor_discovery_enabled",
+            self.vantor_discovery_enabled.isChecked()
+        )
+        self.settings.setValue(
+            f"{self.SETTINGS_PREFIX}vantor_discovery_base_url",
+            self.vantor_discovery_base_url.text().strip()
+        )
+        self.settings.setValue(
+            f"{self.SETTINGS_PREFIX}vantor_discovery_search_path",
+            self.vantor_discovery_search_path.text().strip()
+        )
+        self.settings.setValue(
+            f"{self.SETTINGS_PREFIX}vantor_discovery_timeout",
+            self.vantor_discovery_timeout.value()
+        )
+        self.settings.setValue(
+            f"{self.SETTINGS_PREFIX}vantor_discovery_collections",
+            self.vantor_discovery_collections.text().strip()
+        )
+        self.settings.setValue(
+            f"{self.SETTINGS_PREFIX}vantor_discovery_sortby",
+            self.vantor_discovery_sortby.text().strip()
+        )
+        self.settings.setValue(
+            f"{self.SETTINGS_PREFIX}vantor_discovery_area_based_calc",
+            self.vantor_discovery_area_based_calc.isChecked()
         )
         self.settings.setValue(
             f"{self.SETTINGS_PREFIX}vantor_search_timeout",
-            self.vantor_search_timeout.value()
+            self.vantor_discovery_timeout.value()
         )
+        self.settings.setValue(
+            f"{self.SETTINGS_PREFIX}vantor_tasking_base_url",
+            self.vantor_tasking_base_url.text().strip()
+        )
+        self.settings.setValue(
+            f"{self.SETTINGS_PREFIX}vantor_tasking_create_path",
+            self.vantor_tasking_create_path.text().strip()
+        )
+        self.settings.setValue(
+            f"{self.SETTINGS_PREFIX}vantor_tasking_list_path",
+            self.vantor_tasking_list_path.text().strip()
+        )
+        self.settings.setValue(
+            f"{self.SETTINGS_PREFIX}vantor_tasking_timeout",
+            self.vantor_tasking_timeout.value()
+        )
+        self.settings.remove(f"{self.SETTINGS_PREFIX}vantor_endpoint")
+        self.settings.remove(f"{self.SETTINGS_PREFIX}vantor_catalog_timeout")
+        if self.secure_storage:
+            vantor_payload = {}
+            api_key = self.vantor_discovery_api_key.text().strip()
+            access_token = self.vantor_discovery_access_token.text().strip()
+            tasking_token = self.vantor_tasking_access_token.text().strip()
+            if api_key:
+                vantor_payload['discovery_api_key'] = api_key
+                vantor_payload['api_key'] = api_key
+            if access_token:
+                vantor_payload['discovery_access_token'] = access_token
+                vantor_payload['access_token'] = access_token
+            if tasking_token:
+                vantor_payload['tasking_access_token'] = tasking_token
+            self.secure_storage.store_credentials('vantor', vantor_payload)
         
         # ICEYE
         self.settings.setValue(
@@ -1165,24 +1781,47 @@ class SettingsDockWidget(QDockWidget):
                 umbra_payload['client_secret'] = umbra_client_secret
             if umbra_payload:
                 self.secure_storage.store_credentials('umbra', umbra_payload)
+
+        # Earth Search (Element84 STAC)
+        if hasattr(self, 'element84_stac_api_url'):
+            self.settings.setValue(
+                f"{self.SETTINGS_PREFIX}element84_stac_api_url",
+                self.element84_stac_api_url.text().strip()
+            )
+            self.settings.setValue(
+                f"{self.SETTINGS_PREFIX}element84_stac_timeout",
+                self.element84_stac_timeout.value()
+            )
+
+        if hasattr(self, 'planetary_computer_stac_api_url'):
+            self.settings.setValue(
+                f"{self.SETTINGS_PREFIX}planetary_computer_stac_api_url",
+                self.planetary_computer_stac_api_url.text().strip()
+            )
+            self.settings.setValue(
+                f"{self.SETTINGS_PREFIX}planetary_computer_stac_timeout",
+                self.planetary_computer_stac_timeout.value()
+            )
         
-        # Copernicus STAC (save OAuth2 to secure storage service 'copernicus')
+        # CDSE Sentinel credentials in secure storage
         if self.secure_storage:
-            copernicus_stac_client_id = self.copernicus_client_id.text().strip()
-            copernicus_stac_client_secret = self.copernicus_client_secret.text().strip()
-            if copernicus_stac_client_id and copernicus_stac_client_secret:
-                logger.info(f"Saving Copernicus STAC credentials - client_id length: {len(copernicus_stac_client_id)}")
-                self.secure_storage.store_credentials('copernicus', {
-                    'client_id': copernicus_stac_client_id,
-                    'client_secret': copernicus_stac_client_secret
+            cdse_sentinel_client_id = self.copernicus_client_id.text().strip()
+            cdse_sentinel_client_secret = self.copernicus_client_secret.text().strip()
+            if cdse_sentinel_client_id and cdse_sentinel_client_secret:
+                logger.info(
+                    f"Saving CDSE Sentinel credentials - client_id length: {len(cdse_sentinel_client_id)}"
+                )
+                self.secure_storage.store_credentials('cdse_sentinel', {
+                    'client_id': cdse_sentinel_client_id,
+                    'client_secret': cdse_sentinel_client_secret
                 })
-                logger.info("Copernicus STAC credentials saved to secure storage")
+                logger.info("CDSE Sentinel credentials saved to secure storage")
             else:
-                logger.debug("Copernicus STAC credentials empty, not saving")
+                logger.debug("CDSE Sentinel credentials empty, not saving")
         
         self.settings.setValue(
-            f"{self.SETTINGS_PREFIX}copernicus_stac_timeout",
-            self.copernicus_stac_timeout.value()
+            f"{self.SETTINGS_PREFIX}cdse_sentinel_timeout",
+            self.cdse_sentinel_timeout.value()
         )
         
         # NASA EarthData
@@ -1216,20 +1855,89 @@ class SettingsDockWidget(QDockWidget):
                 self.secure_storage.store_credentials('nasa_earthdata', {})
             logger.info("NASA EarthData credentials cleared")
 
-        # Capella Space
-        if self.secure_storage:
-            capella_username = self.capella_username.text().strip()
-            capella_password = self.capella_password.text().strip()
-            if capella_username and capella_password:
-                self.secure_storage.store_credentials('capella', {
-                    'username': capella_username,
-                    'password': capella_password,
-                })
-                logger.info('Capella credentials saved to secure storage')
+        # Capella API
         self.settings.setValue(
-            f"{self.SETTINGS_PREFIX}capella_stac_url",
-            self.capella_stac_url.text().strip()
+            f"{self.SETTINGS_PREFIX}capella_api_base_url",
+            self.capella_api_base_url.text().strip()
         )
+        self.settings.setValue(
+            f"{self.SETTINGS_PREFIX}capella_collections_path",
+            self.capella_collections_path.text().strip()
+        )
+        self.settings.setValue(
+            f"{self.SETTINGS_PREFIX}capella_search_path",
+            self.capella_search_path.text().strip()
+        )
+        if self.secure_storage:
+            capella_payload = {}
+            capella_token = self.capella_access_token.text().strip()
+            if capella_token:
+                capella_payload['access_token'] = capella_token
+            self.secure_storage.store_credentials('capella', capella_payload)
+
+        # Jilin catalog/tasking
+        if hasattr(self, 'jilin_catalog_base_url'):
+            self.settings.setValue(
+                f"{self.SETTINGS_PREFIX}jilin_catalog_base_url",
+                self.jilin_catalog_base_url.text().strip()
+            )
+            self.settings.setValue(
+                f"{self.SETTINGS_PREFIX}jilin_default_collection",
+                self.jilin_default_collection.text().strip()
+            )
+            self.settings.setValue(
+                f"{self.SETTINGS_PREFIX}jilin_tasking_base_url",
+                self.jilin_tasking_base_url.text().strip()
+            )
+            self.settings.setValue(
+                f"{self.SETTINGS_PREFIX}jilin_tasking_create_path",
+                self.jilin_tasking_create_path.text().strip()
+            )
+            self.settings.setValue(
+                f"{self.SETTINGS_PREFIX}jilin_tasking_list_path",
+                self.jilin_tasking_list_path.text().strip()
+            )
+
+        # JAXA catalog/tasking
+        if hasattr(self, 'jaxa_catalog_url'):
+            self.settings.setValue(
+                f"{self.SETTINGS_PREFIX}jaxa_catalog_url",
+                self.jaxa_catalog_url.text().strip()
+            )
+            self.settings.setValue(
+                f"{self.SETTINGS_PREFIX}jaxa_search_url",
+                self.jaxa_search_url.text().strip()
+            )
+            self.settings.setValue(
+                f"{self.SETTINGS_PREFIX}jaxa_tasking_base_url",
+                self.jaxa_tasking_base_url.text().strip()
+            )
+            self.settings.setValue(
+                f"{self.SETTINGS_PREFIX}jaxa_tasking_create_path",
+                self.jaxa_tasking_create_path.text().strip()
+            )
+            self.settings.setValue(
+                f"{self.SETTINGS_PREFIX}jaxa_tasking_list_path",
+                self.jaxa_tasking_list_path.text().strip()
+            )
+
+        if self.secure_storage:
+            if hasattr(self, 'jilin_access_token'):
+                jilin_payload = {}
+                jilin_token = self.jilin_access_token.text().strip()
+                jilin_tasking_token = self.jilin_tasking_access_token.text().strip()
+                if jilin_token:
+                    jilin_payload['access_token'] = jilin_token
+                if jilin_tasking_token:
+                    jilin_payload['tasking_access_token'] = jilin_tasking_token
+                self.secure_storage.store_credentials('jilin_gaofen_stac', jilin_payload)
+
+            if hasattr(self, 'jaxa_tasking_access_token'):
+                jaxa_payload = {}
+                jaxa_tasking_token = self.jaxa_tasking_access_token.text().strip()
+                if jaxa_tasking_token:
+                    jaxa_payload['tasking_access_token'] = jaxa_tasking_token
+                self.secure_storage.store_credentials('jaxa_earth_stac', jaxa_payload)
         
         self.settings.setValue(
             f"{self.SETTINGS_PREFIX}nasa_cache_timeout",
@@ -1265,15 +1973,31 @@ class SettingsDockWidget(QDockWidget):
         self.auto_zoom.setChecked(True)
         self.max_results.setValue(100)
         
+        # Planet
+        self._restore_default_planet()
+
         # Vantor
         self._restore_default_vantor_endpoint()
-        
+
         # ICEYE
         self._restore_default_iceye()
 
         # Umbra
         self._restore_default_umbra()
+
+        # Capella
+        self._restore_default_capella()
+
+        # Earth Search
+        self._restore_default_element84_stac()
+
+        # Planetary Computer
+        self._restore_default_planetary_computer_stac()
         
+        # Jilin and JAXA
+        self._restore_default_jilin()
+        self._restore_default_jaxa()
+
         # Copernicus
         self._restore_default_copernicus()
         
@@ -1316,149 +2040,107 @@ class SettingsDockWidget(QDockWidget):
                 f"Directory: {log_dir}"
             )
     
+    def _restore_default_planet(self):
+        """Restore default Planet settings."""
+        self.planet_api_base_url.setText('https://api.planet.com')
+        self.planet_tasking_base_url.setText('https://api.planet.com')
+        self.planet_tasking_orders_path.setText('/tasking/v2/orders/')
+        self.planet_tasking_pricing_path.setText('/tasking/v2/pricing/')
+        logger.info('Restored default Planet settings')
+
     def _restore_default_vantor_endpoint(self):
-        """Restore default Vantor STAC endpoint"""
-        default_url = 'https://maxar-opendata.s3.amazonaws.com/events/catalog.json'
-        self.vantor_endpoint.setText(default_url)
-        logger.info(f"Restored default Vantor STAC endpoint: {default_url}")
+        """Restore default Vantor Discovery API settings"""
+        self.vantor_discovery_enabled.setChecked(True)
+        self.vantor_discovery_base_url.setText('https://api.maxar.com/discovery/v1')
+        self.vantor_discovery_search_path.setText('/catalogs/imagery/search')
+        self.vantor_discovery_timeout.setValue(30)
+        self.vantor_discovery_collections.clear()
+        self.vantor_discovery_sortby.clear()
+        self.vantor_discovery_area_based_calc.setChecked(False)
+        self.vantor_discovery_api_key.clear()
+        self.vantor_discovery_access_token.clear()
+        self.vantor_tasking_base_url.clear()
+        self.vantor_tasking_create_path.setText('/tasking/v2/requests')
+        self.vantor_tasking_list_path.setText('/tasking/v2/requests')
+        self.vantor_tasking_timeout.setValue(30)
+        self.vantor_tasking_access_token.clear()
+        logger.info('Restored default Vantor Discovery/Tasking API settings')
     
     def _test_vantor_connection(self):
-        """Test Vantor STAC connection and count available data"""
+        """Test Vantor Discovery API connection and query flow"""
         import time
-        import json
-        
-        endpoint = self.vantor_endpoint.text().strip()
-        timeout = self.vantor_catalog_timeout.value()
-        
-        if not endpoint:
-            QMessageBox.warning(self, "Missing URL", "Please enter STAC endpoint URL.")
+
+        base_url = self.vantor_discovery_base_url.text().strip()
+        search_path = self.vantor_discovery_search_path.text().strip()
+        timeout = self.vantor_discovery_timeout.value()
+        collections = [
+            part.strip()
+            for part in self.vantor_discovery_collections.text().split(',')
+            if part.strip()
+        ]
+
+        if not base_url:
+            QMessageBox.warning(self, "Missing URL", "Please enter Discovery API base URL.")
             return
-        
-        self.vantor_results.setText("Testing connection...")
+
+        self.vantor_results.setText("Testing Discovery connection...")
         QApplication.processEvents()
-        
+
         try:
-            from qgis.core import QgsBlockingNetworkRequest, QgsNetworkAccessManager
-            from qgis.PyQt.QtNetwork import QNetworkRequest
-            from qgis.PyQt.QtCore import QUrl
-            
-            # Setup proxy
-            QgsNetworkAccessManager.instance().setupDefaultProxyAndCache()
-            
-            # Test connection with timing
+            from ..connectors.vantor import VantorConnector
+
+            connector = VantorConnector()
+            payload = {
+                'discovery_enabled': self.vantor_discovery_enabled.isChecked(),
+                'discovery_base_url': base_url,
+                'discovery_search_path': search_path or '/catalogs/imagery/search',
+                'discovery_timeout': timeout,
+                'discovery_api_key': self.vantor_discovery_api_key.text().strip(),
+                'discovery_access_token': self.vantor_discovery_access_token.text().strip(),
+                'tasking_base_url': self.vantor_tasking_base_url.text().strip(),
+                'tasking_create_path': self.vantor_tasking_create_path.text().strip(),
+                'tasking_list_path': self.vantor_tasking_list_path.text().strip(),
+                'tasking_timeout': self.vantor_tasking_timeout.value(),
+                'tasking_access_token': self.vantor_tasking_access_token.text().strip(),
+            }
+
+            connector.authenticate(**payload)
+
             start_time = time.time()
-            
-            request = QNetworkRequest(QUrl(endpoint))
-            blocking_request = QgsBlockingNetworkRequest()
-            error = blocking_request.get(request, forceRefresh=True)
-            
-            response_time_ms = int((time.time() - start_time) * 1000)
-            
-            if error != QgsBlockingNetworkRequest.NoError:
-                self.vantor_results.setText(
-                    f"❌ Connection failed\n"
-                    f"Error: {blocking_request.errorMessage()}"
-                )
-                self.vantor_results.setStyleSheet("color: #ff6666; font-size: 9px; font-family: monospace;")
-                return
-            
-            # Parse STAC catalog
-            reply = blocking_request.reply()
-            content = reply.content().data().decode('utf-8')
-            catalog = json.loads(content)
-            
-            # Count collections (events)
-            collections = []
-            for link in catalog.get('links', []):
-                if link.get('rel') == 'child':
-                    coll_title = link.get('title', link.get('href', 'Unknown'))
-                    collections.append(coll_title)
-            
-            num_collections = len(collections)
-            
-            # Try to count total items and COG assets across all collections
-            total_items = 0
-            total_cog_assets = 0
-            collections_sampled = 0
-            max_sample = 3  # Sample first 3 collections
-            
-            for link in catalog.get('links', [])[:max_sample]:
-                if link.get('rel') == 'child':
-                    child_url = link.get('href')
-                    if child_url:
-                        try:
-                            # Fetch collection
-                            child_request = QNetworkRequest(QUrl(child_url))
-                            child_blocking = QgsBlockingNetworkRequest()
-                            child_error = child_blocking.get(child_request, forceRefresh=True)
-                            
-                            if child_error == QgsBlockingNetworkRequest.NoError:
-                                child_reply = child_blocking.reply()
-                                child_content = child_reply.content().data().decode('utf-8')
-                                collection_data = json.loads(child_content)
-                                
-                                # Count items in this collection
-                                coll_items = 0
-                                coll_cog_assets = 0
-                                
-                                # Check for features array (GeoJSON)
-                                if 'features' in collection_data:
-                                    coll_items = len(collection_data['features'])
-                                    
-                                    # Count COG/TIF/JP2 assets
-                                    for feature in collection_data['features']:
-                                        for asset_key, asset in feature.get('assets', {}).items():
-                                            asset_type = asset.get('type', '').lower()
-                                            asset_href = asset.get('href', '').lower()
-                                            
-                                            # Check if it's a COG, TIF, or JP2
-                                            if any(ext in asset_type or ext in asset_href for ext in ['tif', 'tiff', 'cog', 'jp2', 'jpeg2000']):
-                                                coll_cog_assets += 1
-                                
-                                total_items += coll_items
-                                total_cog_assets += coll_cog_assets
-                                collections_sampled += 1
-                        except:
-                            pass
-            
-            # Build result text
-            result_text = (
-                f"✅ Connection successful\n"
-                f"Response time: {response_time_ms} ms\n"
-                f"─────────────────────\n"
-                f"Collections (events): {num_collections}\n"
+            results = connector.search(
+                limit=3,
+                timeout=timeout,
+                use_discovery_api=self.vantor_discovery_enabled.isChecked(),
+                discovery_search_path=payload['discovery_search_path'],
+                discovery_collections=collections or None,
+                discovery_sortby=self.vantor_discovery_sortby.text().strip() or None,
+                discovery_area_based_calc=self.vantor_discovery_area_based_calc.isChecked(),
             )
-            
-            if collections_sampled > 0:
-                avg_items = total_items // collections_sampled if collections_sampled > 0 else 0
-                avg_cogs = total_cog_assets // collections_sampled if collections_sampled > 0 else 0
-                estimated_total_cogs = avg_cogs * num_collections
-                
-                result_text += (
-                    f"Sampled: {collections_sampled} collections\n"
-                    f"Total items (sample): {total_items}\n"
-                    f"COG/TIF/JP2 assets (sample): {total_cog_assets}\n"
-                    f"Estimated total assets: ~{estimated_total_cogs}\n"
-                )
-            
-            result_text += f"─────────────────────\n"
-            result_text += "Sample events:\n"
-            
-            for i, coll in enumerate(collections[:5]):
-                result_text += f"  • {coll}\n"
-            
-            if num_collections > 5:
-                result_text += f"  ... and {num_collections - 5} more"
-            
+            response_time_ms = int((time.time() - start_time) * 1000)
+
+            result_count = len(results or [])
+            result_text = (
+                f"✅ Discovery request successful\n"
+                f"Response time: {response_time_ms} ms\n"
+                f"Endpoint: {base_url.rstrip('/')}{payload['discovery_search_path']}\n"
+                f"Collections filter: {', '.join(collections) if collections else '(none)'}\n"
+                f"Sample results: {result_count}\n"
+            )
+
+            if results:
+                result_text += "─────────────────────\n"
+                result_text += "Sample scene IDs:\n"
+                for item in results[:3]:
+                    result_text += f"  • {item.get('id', 'unknown')}\n"
+
             self.vantor_results.setText(result_text)
             self.vantor_results.setStyleSheet("color: #226633; font-size: 9px; font-family: monospace;")
-            
-            logger.info(f"Vantor test: {num_collections} collections, {total_cog_assets} COG assets (sample), {response_time_ms}ms")
-            
+            logger.info(f"Vantor Discovery test successful: {result_count} sample result(s)")
+
         except Exception as e:
-            logger.error(f"Vantor connection test error: {e}")
+            logger.error(f"Vantor Discovery connection test error: {e}")
             self.vantor_results.setText(
-                f"❌ Test failed\n"
+                f"❌ Discovery test failed\n"
                 f"Error: {str(e)}"
             )
             self.vantor_results.setStyleSheet("color: #ff6666; font-size: 9px; font-family: monospace;")
@@ -1515,88 +2197,148 @@ class SettingsDockWidget(QDockWidget):
             )
     
     def _test_planet_connection(self):
-        """Test Planet Catalog API access token"""
-        access_token = self.planet_access_token.text().strip()
-        api_base_url = self.planet_api_base_url.text().strip() or 'https://services.sentinel-hub.com'
-        
-        if not access_token:
+        """Test Planet API key"""
+        api_key = self.planet_api_key.text().strip()
+        api_base_url = self.planet_api_base_url.text().strip()
+        if not api_base_url:
+            api_base_url = 'https://api.planet.com'
+
+        if not api_key:
             QMessageBox.warning(
                 self,
-                "Missing Access Token",
-                "Please enter your Planet OAuth2 Access Token."
+                'Missing API Key',
+                'Please enter your Planet API key.',
             )
             return
-        
+
         try:
             from ..connectors import PlanetConnector
-            
+
             connector = PlanetConnector()
             credentials = {
-                'access_token': access_token,
+                'api_key': api_key,
+                'access_token': api_key,
                 'api_base_url': api_base_url,
+                'tasking_base_url': self.planet_tasking_base_url.text().strip() or api_base_url,
+                'tasking_orders_path': self.planet_tasking_orders_path.text().strip(),
+                'tasking_pricing_path': self.planet_tasking_pricing_path.text().strip(),
             }
-            
-            # Test authentication with network verification
+
             success = connector.authenticate(credentials, verify=True)
-            
+
             if success:
                 QMessageBox.information(
                     self,
-                    "Token Valid",
-                    "✅ Planet Catalog token verified!\n\n"
-                    "Token accepted by Catalog API."
+                    'API Key Valid',
+                    '✅ Planet API key verified!\n\n'
+                    'The key was accepted by the Planet API.',
                 )
-                logger.info("Planet token verification successful")
+                logger.info('Planet API key verification successful')
             else:
                 QMessageBox.warning(
                     self,
-                    "Verification Failed",
-                    "❌ Planet Catalog token verification failed.\n\n"
-                    "Please check token/base URL and try again.\n"
-                    "Ensure your Planet access is active for Catalog API."
+                    'Verification Failed',
+                    '❌ Planet API key verification failed.\n\n'
+                    'Please check the API key and base URL and try again.\n'
+                    'Ensure your Planet account has access to the requested services.',
                 )
-                logger.warning("Planet token verification failed")
-                
+                logger.warning('Planet API key verification failed')
+
         except Exception as e:
-            logger.error(f"Planet token verification error: {e}")
+            logger.error(f'Planet API key verification error: {e}')
             QMessageBox.critical(
                 self,
-                "Verification Error",
-                f"Error verifying Planet token:\n\n{str(e)}"
+                'Connection Error',
+                f'Error verifying Planet connection:\n\n{str(e)}',
             )
-    
+
     def _restore_default_iceye(self):
-        """Restore default ICEYE endpoint"""
+        """Restore default ICEYE settings"""
         self.iceye_endpoint.setText('https://api.iceye.com')
+        self.iceye_access_token.clear()
         self.iceye_contract_id.clear()
         self.iceye_collections.setText('public')
         self.iceye_catalog_timeout.setValue(12)
         self.iceye_search_timeout.setValue(15)
+        self.iceye_results.clear()
         logger.info("Restored default ICEYE settings")
 
     def _restore_default_umbra(self):
         """Restore default Umbra endpoint"""
         self.umbra_api_base_url.setText('https://api.canopy.umbra.space')
+        self.umbra_access_token.clear()
         self.umbra_client_id.clear()
         self.umbra_client_secret.clear()
         self.umbra_catalog_timeout.setValue(12)
         self.umbra_search_timeout.setValue(15)
         logger.info("Restored default Umbra settings")
+
+    def _restore_default_capella(self):
+        """Restore default Capella API settings."""
+        self.capella_api_base_url.setText('https://api.capellaspace.com')
+        self.capella_access_token.clear()
+        self.capella_collections_path.setText('/stac/collections')
+        self.capella_search_path.setText('/stac/search')
+        self.capella_results.clear()
+        logger.info("Restored default Capella API settings")
+
+    def _restore_default_element84_stac(self):
+        """Restore default Earth Search STAC settings."""
+        if hasattr(self, 'element84_stac_api_url'):
+            self.element84_stac_api_url.setText(
+                'https://earth-search.aws.element84.com/v1'
+            )
+            self.element84_stac_timeout.setValue(30)
+            self.element84_stac_results.clear()
+        logger.info("Restored default Earth Search STAC settings")
+
+    def _restore_default_planetary_computer_stac(self):
+        """Restore default Planetary Computer STAC settings."""
+        if hasattr(self, 'planetary_computer_stac_api_url'):
+            self.planetary_computer_stac_api_url.setText(
+                'https://planetarycomputer.microsoft.com/api/stac/v1'
+            )
+            self.planetary_computer_stac_timeout.setValue(30)
+            self.planetary_computer_stac_results.clear()
+        logger.info("Restored default Planetary Computer STAC settings")
+
+    def _restore_default_jilin(self):
+        """Restore default Jilin API settings."""
+        self.jilin_catalog_base_url.clear()
+        self.jilin_default_collection.clear()
+        self.jilin_access_token.clear()
+        self.jilin_tasking_base_url.clear()
+        self.jilin_tasking_create_path.setText('/tasking/v2/requests')
+        self.jilin_tasking_list_path.setText('/tasking/v2/requests')
+        self.jilin_tasking_access_token.clear()
+        self.jilin_results.clear()
+        logger.info("Restored default Jilin API settings")
+
+    def _restore_default_jaxa(self):
+        """Restore default JAXA API settings."""
+        self.jaxa_catalog_url.setText('https://data.earth.jaxa.jp/stac/cog/v1/catalog.json')
+        self.jaxa_search_url.setText('https://data.earth.jaxa.jp/stac/cog/v1/search')
+        self.jaxa_tasking_base_url.clear()
+        self.jaxa_tasking_create_path.setText('/tasking/v2/requests')
+        self.jaxa_tasking_list_path.setText('/tasking/v2/requests')
+        self.jaxa_tasking_access_token.clear()
+        self.jaxa_status_label.clear()
+        logger.info("Restored default JAXA API settings")
     
     def _restore_default_copernicus(self):
         """Restore default Copernicus settings (DEPRECATED - redirects to STAC)"""
         # This function is deprecated but kept for backward compatibility
         # HDA connector has been removed, only STAC remains
         logger.warning("_restore_default_copernicus() is deprecated, redirecting to STAC")
-        self._restore_default_copernicus_stac()
+        self._restore_default_cdse_sentinel()
     
-    def _restore_default_copernicus_stac(self):
-        """Restore default Copernicus STAC settings"""
+    def _restore_default_cdse_sentinel(self):
+        """Restore default CDSE Sentinel settings"""
         self.copernicus_client_id.clear()
         self.copernicus_client_secret.clear()
-        self.copernicus_stac_timeout.setValue(15)
-        self.copernicus_stac_results.clear()
-        logger.info("Restored default Copernicus STAC settings")
+        self.cdse_sentinel_timeout.setValue(15)
+        self.cdse_sentinel_results.clear()
+        logger.info("Restored default Sentinel Catalog API settings")
     
     def _test_iceye_connection(self):
         """Test ICEYE Catalog API v2 connection and credentials"""
@@ -1725,9 +2467,9 @@ class SettingsDockWidget(QDockWidget):
         QApplication.processEvents()
 
         try:
-            from ..connectors import UmbraSTACConnector
+            from ..connectors import UmbraConnector
 
-            connector = UmbraSTACConnector()
+            connector = UmbraConnector()
             success = connector.authenticate({
                 'access_token': access_token,
                 'client_id': client_id,
@@ -1761,21 +2503,195 @@ class SettingsDockWidget(QDockWidget):
                 f"Error: {str(e)}"
             )
             self.umbra_results.setStyleSheet("color: #ff6666; font-size: 9px; font-family: monospace;")
+
+    def _test_element84_stac_connection(self):
+        """Test Earth Search STAC endpoint and Sentinel/Landsat collections."""
+        import time
+
+        api_root = self.element84_stac_api_url.text().strip().rstrip('/')
+        timeout = self.element84_stac_timeout.value()
+
+        if not api_root:
+            QMessageBox.warning(self, "Missing URL", "Please enter Earth Search API root URL.")
+            return
+
+        self.element84_stac_results.setText("Testing endpoint...")
+        QApplication.processEvents()
+
+        try:
+            from ..connectors.element84_stac import Element84StacConnector
+
+            connector = Element84StacConnector()
+
+            started = time.time()
+            connector.authenticate({
+                'api_root': api_root,
+                'timeout': timeout,
+            })
+            elapsed_ms = int((time.time() - started) * 1000)
+
+            collections = connector.get_collections() or []
+            collection_ids = [str(c.get('id', '')) for c in collections if isinstance(c, dict)]
+
+            items, error = connector.search_unified(
+                bbox=[13.0, 45.0, 14.0, 46.0],
+                start_date='2024-01-01',
+                end_date='2024-01-31',
+                limit=1,
+                timeout=float(timeout),
+            )
+
+            if error:
+                self.element84_stac_results.setText(
+                    f"❌ Search probe failed\n"
+                    f"Error: {error}"
+                )
+                self.element84_stac_results.setStyleSheet(
+                    "color: #ff6666; font-size: 9px; font-family: monospace;"
+                )
+                return
+
+            self.element84_stac_results.setText(
+                f"✅ Endpoint reachable\n"
+                f"Response time: {elapsed_ms} ms\n"
+                f"─────────────────────\n"
+                f"Collections (Sentinel/Landsat): {len(collection_ids)}\n"
+                f"Sample search items: {len(items)}\n"
+                f"API Root: {api_root}"
+            )
+            self.element84_stac_results.setStyleSheet(
+                "color: #226633; font-size: 9px; font-family: monospace;"
+            )
+            logger.info(
+                "Earth Search STAC test OK: collections=%s, sample_items=%s",
+                len(collection_ids),
+                len(items),
+            )
+
+        except Exception as e:
+            logger.error(f"Earth Search STAC connection test error: {e}")
+            self.element84_stac_results.setText(
+                f"❌ Test failed\n"
+                f"Error: {str(e)}"
+            )
+            self.element84_stac_results.setStyleSheet(
+                "color: #ff6666; font-size: 9px; font-family: monospace;"
+            )
+
+    def _test_planetary_computer_stac_connection(self):
+        """Test Planetary Computer STAC endpoint and RGB-ready archive items."""
+        import time
+
+        api_root = self.planetary_computer_stac_api_url.text().strip().rstrip('/')
+        timeout = self.planetary_computer_stac_timeout.value()
+
+        if not api_root:
+            QMessageBox.warning(
+                self,
+                "Missing URL",
+                "Please enter Planetary Computer STAC API root URL.",
+            )
+            return
+
+        self.planetary_computer_stac_results.setText("Testing endpoint...")
+        QApplication.processEvents()
+
+        try:
+            from ..connectors.planetary_computer_stac import (
+                PlanetaryComputerStacConnector,
+            )
+
+            connector = PlanetaryComputerStacConnector()
+
+            started = time.time()
+            connector.authenticate({
+                'api_root': api_root,
+                'timeout': timeout,
+            })
+            elapsed_ms = int((time.time() - started) * 1000)
+
+            collections = connector.get_collections() or []
+            collection_ids = [
+                str(c.get('id', ''))
+                for c in collections
+                if isinstance(c, dict)
+            ]
+
+            items, error = connector.search_unified(
+                bbox=[13.0, 45.0, 14.0, 46.0],
+                start_date='2024-01-01',
+                end_date='2024-01-31',
+                limit=3,
+                timeout=float(timeout),
+            )
+
+            if error:
+                self.planetary_computer_stac_results.setText(
+                    f"❌ Search probe failed\n"
+                    f"Error: {error}"
+                )
+                self.planetary_computer_stac_results.setStyleSheet(
+                    "color: #ff6666; font-size: 9px; font-family: monospace;"
+                )
+                return
+
+            rgb_ready = 0
+            for item in items:
+                assets = item.get('assets') if isinstance(item, dict) else {}
+                visual = (
+                    (assets or {}).get('visual')
+                    if isinstance(assets, dict)
+                    else None
+                )
+                if isinstance(visual, dict) and str(visual.get('href') or '').strip():
+                    rgb_ready += 1
+
+            self.planetary_computer_stac_results.setText(
+                f"✅ Endpoint reachable\n"
+                f"Response time: {elapsed_ms} ms\n"
+                f"─────────────────────\n"
+                f"Optical collections: {len(collection_ids)}\n"
+                f"Sample items: {len(items)}\n"
+                f"RGB-ready items: {rgb_ready}\n"
+                f"API Root: {api_root}"
+            )
+            self.planetary_computer_stac_results.setStyleSheet(
+                "color: #226633; font-size: 9px; font-family: monospace;"
+            )
+            logger.info(
+                (
+                    "Planetary Computer STAC test OK: collections=%s, "
+                    "sample_items=%s, rgb_ready=%s"
+                ),
+                len(collection_ids),
+                len(items),
+                rgb_ready,
+            )
+
+        except Exception as e:
+            logger.error(f"Planetary Computer STAC connection test error: {e}")
+            self.planetary_computer_stac_results.setText(
+                f"❌ Test failed\n"
+                f"Error: {str(e)}"
+            )
+            self.planetary_computer_stac_results.setStyleSheet(
+                "color: #ff6666; font-size: 9px; font-family: monospace;"
+            )
     
     def _test_copernicus_connection(self):
         """Test Copernicus connection (DEPRECATED - redirects to STAC test)"""
         # This function is deprecated but kept for backward compatibility
         # Redirect to the new STAC-specific test
-        logger.warning("_test_copernicus_connection() is deprecated, redirecting to _test_copernicus_stac_connection()")
-        self._test_copernicus_stac_connection()
+        logger.warning("_test_copernicus_connection() is deprecated, redirecting to _test_cdse_sentinel_connection()")
+        self._test_cdse_sentinel_connection()
     
-    def _test_copernicus_stac_connection(self):
-        """Test Copernicus STAC OAuth2 authentication and API access"""
+    def _test_cdse_sentinel_connection(self):
+        """Test CDSE Sentinel OAuth2 authentication and API access"""
         import time
         
         client_id = self.copernicus_client_id.text().strip()
         client_secret = self.copernicus_client_secret.text().strip()
-        timeout = self.copernicus_stac_timeout.value()
+        timeout = self.cdse_sentinel_timeout.value()
         
         if not client_id or not client_secret:
             QMessageBox.warning(
@@ -1785,14 +2701,14 @@ class SettingsDockWidget(QDockWidget):
             )
             return
         
-        self.copernicus_stac_results.setText("Testing authentication...")
+        self.cdse_sentinel_results.setText("Testing authentication...")
         QApplication.processEvents()
         
         try:
-            # Import Copernicus STAC connector
-            from ..connectors.copernicus_stac import CopernicusStacConnector
+            # Import CDSE Sentinel connector
+            from ..connectors.cdse_sentinel import CdseSentinelConnector
             
-            connector = CopernicusStacConnector()
+            connector = CdseSentinelConnector()
             
             # Test authentication
             start_time = time.time()
@@ -1800,85 +2716,121 @@ class SettingsDockWidget(QDockWidget):
             success = connector.authenticate({
                 'client_id': client_id,
                 'client_secret': client_secret
-            })
+            }, timeout=timeout)
             
             auth_time_ms = int((time.time() - start_time) * 1000)
             
             if not success:
-                self.copernicus_stac_results.setText(
+                failure_hint = ""
+                if hasattr(connector, "get_auth_failure_hint"):
+                    try:
+                        failure_hint = connector.get_auth_failure_hint()
+                    except Exception:
+                        failure_hint = ""
+
+                if not failure_hint:
+                    failure_hint = "Check credentials and network/proxy settings."
+
+                self.cdse_sentinel_results.setText(
                     f"❌ Authentication failed\n"
-                    f"Check your credentials at dataspace.copernicus.eu"
+                    f"{failure_hint}"
                 )
-                self.copernicus_stac_results.setStyleSheet("color: #ff6666; font-size: 9px; font-family: monospace;")
+                self.cdse_sentinel_results.setStyleSheet("color: #ff6666; font-size: 9px; font-family: monospace;")
+                return
+
+            # Verify access against official CDSE Sentinel Catalog endpoint
+            catalog_ok, catalog_msg, catalog_items = connector.verify_catalog_access(
+                timeout=timeout,
+                collection='sentinel-2-l2a',
+            )
+            if not catalog_ok:
+                self.cdse_sentinel_results.setText(
+                    f"❌ Catalog access failed\n"
+                    f"{catalog_msg}"
+                )
+                self.cdse_sentinel_results.setStyleSheet("color: #ff6666; font-size: 9px; font-family: monospace;")
                 return
             
-            # Get available collections
-            collections_info = [
-                ('Sentinel-1 GRD', 'sentinel-1-grd', 'SAR Ground Range Detected'),
-                ('Sentinel-2 L2A', 'sentinel-2-l2a', 'Surface Reflectance'),
-                ('Sentinel-2 L1C', 'sentinel-2-l1c', 'Top of Atmosphere')
+            # Get available Sentinel data sources
+            datasources = [
+                ('Sentinel-1 GRD', 'S1GRD', 'SAR Ground Range Detected'),
+                ('Sentinel-2 L2A', 'S2L2A', 'Surface Reflectance'),
+                ('Sentinel-2 L1C', 'S2L1C', 'Top-of-Atmosphere'),
+                ('Sentinel-5P', 'S5P', 'Atmospheric Data')
             ]
             
             # Build result text
             result_text = (
-                f"✅ Authentication successful\n"
+                f"✅ CDSE Sentinel authentication successful\n"
                 f"Auth time: {auth_time_ms} ms\n"
+                f"Catalog check: OK (items returned: {catalog_items})\n"
                 f"─────────────────────\n"
-                f"Available Collections:\n"
+                f"Available Sentinel Data:\n"
             )
             
-            for name, collection_id, description in collections_info:
+            for name, source_id, description in datasources:
                 result_text += f"  • {name}\n    ({description})\n"
             
             result_text += (
                 f"─────────────────────\n"
-                f"API Endpoint: Copernicus STAC\n"
+                f"Token Endpoint: identity.dataspace.copernicus.eu\n"
+                f"Catalog Endpoint: sh.dataspace.copernicus.eu/catalog/v1/search\n"
                 f"Coverage: 2014-present (global)"
             )
             
-            self.copernicus_stac_results.setText(result_text)
-            self.copernicus_stac_results.setStyleSheet("color: #226633; font-size: 9px; font-family: monospace;")
+            self.cdse_sentinel_results.setText(result_text)
+            self.cdse_sentinel_results.setStyleSheet("color: #226633; font-size: 9px; font-family: monospace;")
             
-            logger.info(f"Copernicus STAC test: authenticated in {auth_time_ms}ms")
+            logger.info(f"CDSE Sentinel test: authenticated in {auth_time_ms}ms")
             
         except ImportError as e:
-            logger.error(f"Copernicus STAC connector not available: {e}")
-            self.copernicus_stac_results.setText(
-                f"❌ Copernicus STAC connector not available\n"
+            logger.error(f"CDSE Sentinel connector not available: {e}")
+            self.cdse_sentinel_results.setText(
+                f"❌ CDSE Sentinel connector not available\n"
                 f"Error: {str(e)}"
             )
-            self.copernicus_stac_results.setStyleSheet("color: #ff6666; font-size: 9px; font-family: monospace;")
+            self.cdse_sentinel_results.setStyleSheet("color: #ff6666; font-size: 9px; font-family: monospace;")
         except Exception as e:
-            logger.error(f"Copernicus STAC connection test error: {e}")
-            self.copernicus_stac_results.setText(
+            logger.error(f"CDSE Sentinel connection test error: {e}")
+            self.cdse_sentinel_results.setText(
                 f"❌ Test failed\n"
                 f"Error: {str(e)}"
             )
-            self.copernicus_stac_results.setStyleSheet("color: #ff6666; font-size: 9px; font-family: monospace;")
+            self.cdse_sentinel_results.setStyleSheet("color: #ff6666; font-size: 9px; font-family: monospace;")
     
     def _check_nasa_auth_status(self):
         """Check NASA EarthData authentication status"""
         try:
-            import earthaccess
-            import os
+            from ..connectors.nasa_earthdata import NasaEarthdataConnector
 
-            # Prefer token path if available, then env username/password
-            token = self.nasa_access_token.text().strip()
-            if token:
-                os.environ['EARTHDATA_TOKEN'] = token
-            
-            # Try to check if authenticated
-            auth = earthaccess.login(strategy="environment", persist=False)
-            
-            if auth.authenticated:
-                self.nasa_auth_status.setText("✅ Authenticated (environment/token)")
+            connector = NasaEarthdataConnector(
+                username=self.nasa_username.text().strip(),
+                password=self.nasa_password.text().strip(),
+                access_token=self.nasa_access_token.text().strip(),
+            )
+            if connector.authenticate(
+                credentials={"allow_deferred_validation": True},
+                verify=True,
+            ):
+                self.nasa_auth_status.setText("✅ Authenticated")
                 self.nasa_auth_status.setStyleSheet("color: #00ff00; font-size: 9px;")
             else:
-                self.nasa_auth_status.setText("❌ Not authenticated")
-                self.nasa_auth_status.setStyleSheet("color: #ff6666; font-size: 9px;")
+                kind = connector.get_last_auth_error_kind()
+                if kind == "proxy_auth_required":
+                    self.nasa_auth_status.setText("⚠️ Proxy authentication required")
+                    self.nasa_auth_status.setStyleSheet("color: #ffaa00; font-size: 9px;")
+                elif kind == "proxy_connection_error":
+                    self.nasa_auth_status.setText("⚠️ Proxy connection failed")
+                    self.nasa_auth_status.setStyleSheet("color: #ffaa00; font-size: 9px;")
+                elif kind == "invalid_credentials":
+                    self.nasa_auth_status.setText("❌ Invalid credentials")
+                    self.nasa_auth_status.setStyleSheet("color: #ff6666; font-size: 9px;")
+                else:
+                    self.nasa_auth_status.setText("❌ Not authenticated")
+                    self.nasa_auth_status.setStyleSheet("color: #ff6666; font-size: 9px;")
                 
         except ImportError:
-            self.nasa_auth_status.setText("⚠️ earthaccess not installed")
+            self.nasa_auth_status.setText("⚠️ NASA connector module unavailable")
             self.nasa_auth_status.setStyleSheet("color: #ffaa00; font-size: 9px;")
         except Exception:
             self.nasa_auth_status.setText("❌ Authentication check failed")
@@ -1934,6 +2886,7 @@ class SettingsDockWidget(QDockWidget):
                     'username': username,
                     'password': password,
                     'access_token': access_token,
+                    'allow_deferred_validation': True,
                 },
                 verify=True,
             )
@@ -1941,13 +2894,41 @@ class SettingsDockWidget(QDockWidget):
             auth_time_ms = int((time.time() - start_time) * 1000)
             
             if not success:
+                failure_hint = ""
+                if hasattr(connector, "get_auth_failure_hint"):
+                    try:
+                        failure_hint = connector.get_auth_failure_hint()
+                    except Exception:
+                        failure_hint = ""
+
+                if not failure_hint:
+                    failure_hint = "Check your credentials and proxy settings."
+
                 self.nasa_results.setText(
                     f"❌ Authentication failed\n"
-                    f"Check your credentials and try again"
+                    f"{failure_hint}"
                 )
                 self.nasa_results.setStyleSheet("color: #ff6666; font-size: 9px; font-family: monospace;")
-                self.nasa_auth_status.setText("❌ Not authenticated")
-                self.nasa_auth_status.setStyleSheet("color: #ff6666; font-size: 9px;")
+
+                kind = ""
+                if hasattr(connector, "get_last_auth_error_kind"):
+                    try:
+                        kind = connector.get_last_auth_error_kind()
+                    except Exception:
+                        kind = ""
+
+                if kind == "proxy_auth_required":
+                    self.nasa_auth_status.setText("⚠️ Proxy authentication required")
+                    self.nasa_auth_status.setStyleSheet("color: #ffaa00; font-size: 9px;")
+                elif kind == "proxy_connection_error":
+                    self.nasa_auth_status.setText("⚠️ Proxy connection failed")
+                    self.nasa_auth_status.setStyleSheet("color: #ffaa00; font-size: 9px;")
+                elif kind == "invalid_credentials":
+                    self.nasa_auth_status.setText("❌ Invalid credentials")
+                    self.nasa_auth_status.setStyleSheet("color: #ff6666; font-size: 9px;")
+                else:
+                    self.nasa_auth_status.setText("❌ Not authenticated")
+                    self.nasa_auth_status.setStyleSheet("color: #ff6666; font-size: 9px;")
                 return
             
             # Load catalog
@@ -1955,7 +2936,16 @@ class SettingsDockWidget(QDockWidget):
             catalog = connector._load_catalog()
             catalog_time_ms = int((time.time() - start_time) * 1000)
             
-            if catalog is None or catalog.empty:
+            # Check if catalog is empty (supports CatalogData, DataFrame, and list)
+            catalog_is_empty = catalog is None
+            if not catalog_is_empty:
+                if hasattr(catalog, '__len__'):
+                    catalog_is_empty = len(catalog) == 0
+                elif hasattr(catalog, 'empty'):
+                    # Fallback for DataFrame
+                    catalog_is_empty = catalog.empty
+            
+            if catalog_is_empty:
                 self.nasa_results.setText(
                     f"✅ Authentication successful\n"
                     f"⚠️ Catalog loading failed"
@@ -1968,11 +2958,33 @@ class SettingsDockWidget(QDockWidget):
             
             # Get top collections by category (if available)
             categories_info = ""
-            if 'Category' in catalog.columns:
-                top_categories = catalog['Category'].value_counts().head(5)
-                categories_info = "\nTop Categories:\n"
-                for cat, count in top_categories.items():
-                    if str(cat).strip() and str(cat).lower() != 'nan':
+            if hasattr(catalog, 'get_category_counts'):
+                # CatalogData path
+                category_counts = catalog.get_category_counts()
+                if category_counts:
+                    top_categories = sorted(category_counts.items(), key=lambda kv: kv[1], reverse=True)[:5]
+                    categories_info = "\nTop Categories:\n"
+                    for cat, count in top_categories:
+                        categories_info += f"  • {cat}: {count}\n"
+            elif hasattr(catalog, 'columns'):
+                # Legacy DataFrame fallback path
+                if 'Category' in catalog.columns:
+                    top_categories = catalog['Category'].value_counts().head(5)
+                    categories_info = "\nTop Categories:\n"
+                    for cat, count in top_categories.items():
+                        if str(cat).strip() and str(cat).lower() != 'nan':
+                            categories_info += f"  • {cat}: {count}\n"
+            elif isinstance(catalog, list):
+                # stdlib CSV fallback path
+                category_counts = {}
+                for row in catalog:
+                    category = str(row.get('Category', '') or '').strip()
+                    if category:
+                        category_counts[category] = category_counts.get(category, 0) + 1
+                if category_counts:
+                    top_categories = sorted(category_counts.items(), key=lambda kv: kv[1], reverse=True)[:5]
+                    categories_info = "\nTop Categories:\n"
+                    for cat, count in top_categories:
                         categories_info += f"  • {cat}: {count}\n"
 
             auth_mode = "token" if has_token else "username/password"
@@ -2004,7 +3016,6 @@ class SettingsDockWidget(QDockWidget):
             logger.error(f"NASA EarthData connector not available: {e}")
             self.nasa_results.setText(
                 f"❌ NASA EarthData not available\n"
-                f"Install: pip install earthaccess pandas\n"
                 f"Error: {str(e)}"
             )
             self.nasa_results.setStyleSheet("color: #ff6666; font-size: 9px; font-family: monospace;")
@@ -2015,8 +3026,10 @@ class SettingsDockWidget(QDockWidget):
                 f"Error: {str(e)}\n\n"
                 f"Check:\n"
                 f"  1. Token or credentials are correct\n"
-                f"  2. earthaccess and pandas are installed\n"
-                f"  3. Internet connection is active"
+                f"  2. Internet/proxy connectivity is active\n"
+                f"  3. NASA CMR endpoint is reachable"
             )
             self.nasa_results.setStyleSheet("color: #ff6666; font-size: 9px; font-family: monospace;")
+
+
 

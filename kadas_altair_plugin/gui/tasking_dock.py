@@ -92,7 +92,7 @@ class TaskingDockWidget(QDockWidget):
         layout.setSpacing(6)
         layout.setAlignment(Qt.AlignTop)
 
-        header = QLabel('TEST Satellite Tasking Request')
+        header = QLabel('DEMO Satellite Tasking Request')
         header_font = QFont()
         header_font.setPointSize(12)
         header_font.setBold(True)
@@ -296,6 +296,23 @@ class TaskingDockWidget(QDockWidget):
             logger.warning(f'Failed to read AOI extent: {e}')
             return None
 
+    def _get_aoi_wkt_wgs84(self):
+        """Build AOI polygon WKT from the AOI extent after WGS84 reprojection."""
+        bbox = self._get_aoi_bbox_wgs84()
+        if bbox is None:
+            return None
+
+        min_lon, min_lat, max_lon, max_lat = bbox
+        return (
+            'POLYGON (('
+            f'{min_lon:.6f} {min_lat:.6f}, '
+            f'{max_lon:.6f} {min_lat:.6f}, '
+            f'{max_lon:.6f} {max_lat:.6f}, '
+            f'{min_lon:.6f} {max_lat:.6f}, '
+            f'{min_lon:.6f} {min_lat:.6f}'
+            '))'
+        )
+
     def _on_sensor_type_changed(self, sensor_type: str):
         sensor = sensor_type.lower()
         optical_enabled = 'optical' in sensor
@@ -341,6 +358,8 @@ class TaskingDockWidget(QDockWidget):
         else:
             bbox_text = 'N/A'
 
+        aoi_wkt_wgs84 = self._get_aoi_wkt_wgs84() or 'N/A'
+
         body_lines = [
             'Satellite Tasking Request (Generic Form)',
             '',
@@ -359,7 +378,7 @@ class TaskingDockWidget(QDockWidget):
             'AOI',
             f"- AOI Name: {self.aoi_name.text().strip() or 'N/A'}",
             f"- BBox WGS84: {bbox_text}",
-            f"- AOI WKT: {self.aoi_wkt.toPlainText().strip() or 'N/A'}",
+            f"- AOI WKT WGS84: {aoi_wkt_wgs84}",
             '',
             'ACQUISITION REQUIREMENTS',
             f"- Window Start: {self.start_date.date().toString('yyyy-MM-dd')}",

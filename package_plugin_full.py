@@ -11,11 +11,13 @@ Output:
 """
 
 import os
+import re
 import sys
 import zipfile
 import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 from datetime import datetime
 
@@ -23,6 +25,15 @@ from datetime import datetime
 PLUGIN_NAME = "kadas_altair_plugin"
 OUTPUT_ZIP = None  # Will be set after reading version from metadata.txt
 REQUIREMENTS_FILE = "kadas_altair_plugin/requirements.txt"
+
+# QGIS/KADAS built-in packages (don't bundle these)
+QGIS_BUILTIN = {
+    "pyqt5",
+    "requests",
+    "urllib3",
+    "keyring",
+    "cryptography",
+}
 
 # Files/folders to exclude from plugin
 EXCLUDE_PATTERNS = [
@@ -39,23 +50,54 @@ EXCLUDE_PATTERNS = [
     "Thumbs.db",
 ]
 
-# External dependencies to bundle (not provided by QGIS)
-EXTERNAL_DEPS = [
-    "pystac-client>=0.7.0",
-]
-
 # Set KADAS_SKIP_PIP=1 to package without attempting pip installs
 SKIP_DEP_INSTALL = os.environ.get("KADAS_SKIP_PIP", "0").strip().lower() in {
     "1", "true", "yes", "on"
 }
 
-# QGIS built-in packages (don't bundle these)
-QGIS_BUILTIN = [
-    "PyQt5",
-    "requests",
-    "urllib3",
-    "keyring",
-    "cryptography",
+
+def parse_requirement_name(requirement):
+    """Extract normalized package name from a requirements entry."""
+    cleaned = requirement.split(";", 1)[0].strip()
+    match = re.match(r"([A-Za-z0-9_.-]+)", cleaned)
+    if not match:
+        return ""
+    return match.group(1).strip().lower()
+
+
+def requirement_to_import_root(requirement):
+    """Convert a requirement specifier into its import root name."""
+    package_name = parse_requirement_name(requirement)
+    return package_name.replace("-", "_")
+
+
+def load_external_dependencies(requirements_path):
+    """Load non-QGIS runtime dependencies from requirements.txt."""
+    deps = []
+
+    with open(requirements_path, "r", encoding="utf-8") as handle:
+        for raw_line in handle:
+            line = raw_line.split("#", 1)[0].strip()
+            if not line:
+                continue
+
+            package_name = parse_requirement_name(line)
+            if not package_name:
+                continue
+            if package_name in QGIS_BUILTIN:
+                continue
+
+            deps.append(line)
+
+    return deps
+
+
+# External dependencies to bundle (derived from runtime requirements)
+EXTERNAL_DEPS = load_external_dependencies(REQUIREMENTS_FILE)
+
+# Import roots that must be present in bundled lib for a valid FULL package.
+REQUIRED_BUNDLED_MODULES = [
+    requirement_to_import_root(dep) for dep in EXTERNAL_DEPS
 ]
 
 
@@ -109,6 +151,29 @@ def is_group_policy_block(error_text: str) -> bool:
     return any(marker in text for marker in markers)
 
 
+def is_network_error(error_text: str) -> bool:
+    """Return True when pip output indicates transient network/proxy issues."""
+    text = (error_text or "").lower()
+    markers = [
+        "timed out",
+        "timeout",
+        "connection",
+        "connection reset",
+        "proxyerror",
+        "newconnectionerror",
+        "temporary failure in name resolution",
+        "name or service not known",
+        "getaddrinfo failed",
+        "connection aborted",
+        "read timed out",
+        "max retries exceeded",
+        "ssl: wrong version number",
+        "certificate verify failed",
+        "tlsv1",
+    ]
+    return any(marker in text for marker in markers)
+
+
 def check_requirements():
     """Check if all requirements are met."""
     global OUTPUT_ZIP
@@ -127,6 +192,11 @@ def check_requirements():
         print_error(f"metadata.txt not found in {PLUGIN_NAME}")
         return False
     print_success("Found metadata.txt")
+
+    if not os.path.isfile(REQUIREMENTS_FILE):
+        print_error(f"Requirements file not found: {REQUIREMENTS_FILE}")
+        return False
+    print_success(f"Found requirements file: {REQUIREMENTS_FILE}")
     
     # Read version from metadata
     version = None
@@ -165,6 +235,50 @@ def should_exclude(path, base_path):
     return False
 
 
+def get_pip_install_cmd(lib_dir, dep):
+    """Build pip install command with proxy and network settings."""
+    pip_retries = os.environ.get("KADAS_PIP_RETRIES", "4").strip()
+    pip_timeout = os.environ.get("KADAS_PIP_TIMEOUT", "45").strip()
+
+    cmd = [
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "--target",
+        lib_dir,
+        "--upgrade",
+        "--disable-pip-version-check",
+        "--retries",
+        pip_retries,
+        "--timeout",
+        pip_timeout,
+    ]
+    
+    # Add proxy if configured
+    proxy = os.environ.get("PIP_PROXY") or os.environ.get("HTTP_PROXY") or os.environ.get("HTTPS_PROXY")
+    if proxy:
+        cmd.extend(["--proxy", proxy])
+        print_info(f"Using proxy: {proxy}")
+    
+    # Add trusted hosts if configured
+    trusted_hosts = os.environ.get("PIP_TRUSTED_HOST")
+    if trusted_hosts:
+        for host in trusted_hosts.split():
+            cmd.extend(["--trusted-host", host])
+        print_info(f"Trusted hosts: {trusted_hosts}")
+    
+    # Add custom index URL if configured
+    index_url = os.environ.get("PIP_INDEX_URL")
+    if index_url:
+        cmd.extend(["--index-url", index_url])
+        print_info(f"Index URL: {index_url}")
+    
+    # Add the dependency
+    cmd.append(dep)
+    return cmd
+
+
 def install_dependencies(temp_dir):
     """Install external dependencies to temporary directory."""
     print_step(2, "Installing external dependencies")
@@ -185,43 +299,70 @@ def install_dependencies(temp_dir):
     
     for dep in EXTERNAL_DEPS:
         print(f"   • Installing {dep}...")
-        
-        try:
-            # Use pip to install to lib directory
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    "-m",
-                    "pip",
-                    "install",
-                    "--target",
-                    lib_dir,
-                    "--upgrade",
-                    dep,
-                ],
-                capture_output=True,
-                text=True,
-                check=True
-            )
-            
-            print_success(f"Installed {dep}")
-            
-        except subprocess.CalledProcessError as e:
-            stderr = e.stderr or ""
-            stdout = e.stdout or ""
-            combined = f"{stderr}\n{stdout}".strip()
 
-            if is_group_policy_block(combined):
-                print_warning(
-                    "pip blocked by Group Policy/AppLocker. "
-                    "Continuing without bundled dependencies."
+        max_attempts = max(1, int(os.environ.get("KADAS_DEP_INSTALL_ATTEMPTS", "3")))
+        for attempt in range(1, max_attempts + 1):
+            try:
+                # Build and execute pip install command
+                cmd = get_pip_install_cmd(lib_dir, dep)
+                subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                    env=os.environ.copy()
                 )
-                print_info("Set KADAS_SKIP_PIP=1 to skip this step explicitly")
-                return True
 
-            print_error(f"Failed to install {dep}")
-            print(f"Error: {stderr}")
-            return False
+                print_success(f"Installed {dep}")
+                break
+
+            except subprocess.CalledProcessError as e:
+                stderr = e.stderr or ""
+                stdout = e.stdout or ""
+                combined = f"{stderr}\n{stdout}".strip()
+
+                if is_group_policy_block(combined):
+                    print_error(
+                        "pip blocked by Group Policy/AppLocker. "
+                        "Cannot build FULL package without bundled dependencies."
+                    )
+                    print_info(
+                        "Run packaging in an environment where pip install is allowed, "
+                        "or use package_plugin_lite.py if dependencies are managed externally."
+                    )
+                    return False
+
+                if is_network_error(combined):
+                    if attempt < max_attempts:
+                        backoff_seconds = min(20, 2 ** (attempt - 1))
+                        print_warning(
+                            f"Network error while installing {dep} (attempt {attempt}/{max_attempts}). "
+                            f"Retrying in {backoff_seconds}s..."
+                        )
+                        time.sleep(backoff_seconds)
+                        continue
+
+                    print_error(f"Failed to install {dep}: Network/Connection error")
+                    print_info(
+                        "If behind a corporate proxy, set environment variables:"
+                    )
+                    print_info(
+                        '  PowerShell: $env:PIP_PROXY=\'http://proxy:8080\'; '
+                        '$env:PIP_TRUSTED_HOST=\'pypi.org files.pythonhosted.org\''
+                    )
+                    print_info(
+                        "  Bash: export PIP_PROXY=http://proxy:8080 "
+                        "PIP_TRUSTED_HOST='pypi.org files.pythonhosted.org'"
+                    )
+                    print_info(
+                        "Optional tuning: KADAS_DEP_INSTALL_ATTEMPTS=5, "
+                        "KADAS_PIP_TIMEOUT=60, KADAS_PIP_RETRIES=6"
+                    )
+                    return False
+
+                print_error(f"Failed to install {dep}")
+                print(f"Error: {stderr}")
+                return False
     
     # Clean up unnecessary files in lib
     cleanup_lib_directory(lib_dir)
@@ -229,9 +370,46 @@ def install_dependencies(temp_dir):
     return True
 
 
+def verify_bundled_dependencies(temp_dir):
+    """Ensure required dependencies are actually present in plugin lib/."""
+    print_step(2.5, "Verifying bundled dependencies")
+
+    lib_dir = os.path.join(temp_dir, PLUGIN_NAME, "lib")
+    if not os.path.isdir(lib_dir):
+        print_error("Missing lib directory in FULL package staging area")
+        return False
+
+    missing = []
+    for module_name in REQUIRED_BUNDLED_MODULES:
+        pkg_dir = os.path.join(lib_dir, module_name)
+        pkg_file = os.path.join(lib_dir, f"{module_name}.py")
+        if not os.path.isdir(pkg_dir) and not os.path.isfile(pkg_file):
+            missing.append(module_name)
+
+    if missing:
+        print_error(
+            "Missing required bundled dependencies in lib/: "
+            + ", ".join(missing)
+        )
+        print_info(
+            "FULL package must include all non-QGIS runtime dependencies "
+            "listed in requirements.txt."
+        )
+        return False
+
+    print_success("Bundled dependencies verified")
+    return True
+
+
 def cleanup_lib_directory(lib_dir):
     """Remove unnecessary files from lib directory."""
     print_info("Cleaning up lib directory...")
+
+    # Keep botocore/docs because earthaccess imports runtime helpers from there
+    # (e.g. botocore.docs.docstring).
+    protected_dirs = {
+        os.path.join("botocore", "docs"),
+    }
     
     cleanup_patterns = [
         "*.dist-info",
@@ -261,6 +439,16 @@ def cleanup_lib_directory(lib_dir):
                 else:
                     if dir_name == pattern:
                         dir_path = os.path.join(root, dir_name)
+
+                        rel_dir_path = os.path.relpath(dir_path, lib_dir)
+                        rel_dir_norm = rel_dir_path.replace("/", os.sep).replace("\\", os.sep)
+                        if any(
+                            rel_dir_norm == protected
+                            or rel_dir_norm.startswith(protected + os.sep)
+                            for protected in protected_dirs
+                        ):
+                            continue
+
                         shutil.rmtree(dir_path, ignore_errors=True)
                         removed_count += 1
                         dirs.remove(dir_name)
@@ -484,6 +672,10 @@ def main():
             
             # Step 2: Install dependencies
             if not install_dependencies(temp_dir):
+                return 1
+
+            # Step 2.5: Verify required bundled modules are present
+            if not verify_bundled_dependencies(temp_dir):
                 return 1
             
             # Step 3: Copy plugin files

@@ -811,88 +811,91 @@ class AltairDockWidget(QDockWidget):
             logger.error(f"Failed to register Vantor connector: {e}")
             self.vantor_connector = None
         
-        # Register ICEYE STAC connector (ICEYE SAR Open Data)
+        # Register ICEYE API connector
         try:
-            from ..connectors.iceye_stac import IceyeStacConnector
-            iceye_connector = IceyeStacConnector()
-            
+            from ..connectors.iceye import IceyeConnector
+            iceye_api_connector = IceyeConnector()
+
             self.connector_manager.register_connector(
-                connector_id='iceye_stac',
-                connector_instance=iceye_connector,
-                display_name='ICEYE SAR Open Data',
+                connector_id='iceye',
+                connector_instance=iceye_api_connector,
+                display_name='ICEYE SAR API',
                 capabilities=[
                     ConnectorCapability.BBOX_SEARCH,
                     ConnectorCapability.DATE_RANGE,
                     ConnectorCapability.COLLECTIONS,
-                    ConnectorCapability.COG_SUPPORT
+                    ConnectorCapability.AUTHENTICATION,
+                    ConnectorCapability.COMMERCIAL,
+                    ConnectorCapability.COG_SUPPORT,
                 ],
-                description='ICEYE Synthetic Aperture Radar open data via STAC'
+                description='ICEYE Synthetic Aperture Radar commercial Catalog API'
             )
-            logger.info("Registered ICEYE STAC connector")
-            
-            self.iceye_connector = iceye_connector
-            
+            logger.info("Registered ICEYE API connector")
+            self.iceye_connector = iceye_api_connector
+
         except ImportError as e:
-            logger.warning(f"ICEYE STAC connector not available: {e}")
+            logger.warning(f"ICEYE API connector not available: {e}")
             self.iceye_connector = None
         except Exception as e:
-            logger.error(f"Failed to register ICEYE STAC connector: {e}")
+            logger.error(f"Failed to register ICEYE API connector: {e}")
             self.iceye_connector = None
 
-        # Register Umbra STAC connector (Umbra SAR Open Data)
+        # Register Umbra API connector
         try:
-            from ..connectors.umbra_stac import UmbraSTACConnector
-            umbra_connector = UmbraSTACConnector()
-            
+            from ..connectors.umbra import UmbraConnector
+            umbra_api_connector = UmbraConnector()
+
             self.connector_manager.register_connector(
-                connector_id='umbra_stac',
-                connector_instance=umbra_connector,
-                display_name='Umbra SAR Open Data',
+                connector_id='umbra',
+                connector_instance=umbra_api_connector,
+                display_name='Umbra SAR API',
                 capabilities=[
                     ConnectorCapability.BBOX_SEARCH,
                     ConnectorCapability.DATE_RANGE,
                     ConnectorCapability.COLLECTIONS,
-                    ConnectorCapability.COG_SUPPORT
+                    ConnectorCapability.AUTHENTICATION,
+                    ConnectorCapability.COMMERCIAL,
+                    ConnectorCapability.COG_SUPPORT,
                 ],
-                description='Umbra high-resolution SAR imagery (up to 16cm) via STAC'
+                description='Umbra high-resolution SAR imagery commercial API'
             )
-            logger.info("Registered Umbra STAC connector")
-            
-            self.umbra_connector = umbra_connector
-            
+            logger.info("Registered Umbra API connector")
+            self.umbra_connector = umbra_api_connector
+
         except ImportError as e:
-            logger.warning(f"Umbra STAC connector not available: {e}")
+            logger.warning(f"Umbra API connector not available: {e}")
             self.umbra_connector = None
         except Exception as e:
-            logger.error(f"Failed to register Umbra STAC connector: {e}")
+            logger.error(f"Failed to register Umbra API connector: {e}")
             self.umbra_connector = None
         
-        # Register Capella STAC connector (Capella SAR Open Data)
+        # Register Capella API connector
         try:
-            from ..connectors.capella_stac import CapellaSTACConnector
-            capella_connector = CapellaSTACConnector()
-            
+            from ..connectors.capella import CapellaConnector
+            capella_api_connector = CapellaConnector()
+
             self.connector_manager.register_connector(
-                connector_id='capella_stac',
-                connector_instance=capella_connector,
-                display_name='Capella SAR Open Data',
+                connector_id='capella',
+                connector_instance=capella_api_connector,
+                display_name='Capella SAR API',
                 capabilities=[
                     ConnectorCapability.BBOX_SEARCH,
                     ConnectorCapability.DATE_RANGE,
                     ConnectorCapability.COLLECTIONS,
-                    ConnectorCapability.COG_SUPPORT
+                    ConnectorCapability.AUTHENTICATION,
+                    ConnectorCapability.COMMERCIAL,
+                    ConnectorCapability.COG_SUPPORT,
                 ],
-                description='Capella Space high-resolution SAR imagery (~1000 images) via STAC'
+                description='Capella Space high-resolution SAR imagery commercial API'
             )
-            logger.info("Registered Capella STAC connector")
-            
-            self.capella_connector = capella_connector
-            
+            logger.info("Registered Capella API connector")
+            self.capella_connector = capella_api_connector
+
         except ImportError as e:
-            logger.warning(f"Capella STAC connector not available: {e}")
+            logger.warning(f"Capella API connector not available: {e}")
             self.capella_connector = None
         except Exception as e:
-            logger.error(f"Failed to register Capella STAC connector: {e}")
+            logger.error(f"Failed to register Capella API connector: {e}")
             self.capella_connector = None
         
         # Connector decommissioned
@@ -1032,11 +1035,11 @@ class AltairDockWidget(QDockWidget):
         # Load collections for specific connectors
         if connector_id == 'vantor':
             self._load_vantor_collections()
-        elif connector_id == 'iceye_stac':
+        elif connector_id in ('iceye', 'iceye_stac'):
             self._load_iceye_collections()
-        elif connector_id == 'umbra_stac':
+        elif connector_id in ('umbra', 'umbra_stac'):
             self._load_umbra_collections()
-        elif connector_id == 'capella_stac':
+        elif connector_id in ('capella', 'capella_stac'):
             self._load_capella_collections()
         
         logger.debug(f"UI updated for connector: {connector_id} (collections={has_collections}, cloud={has_cloud_cover}, bbox={has_bbox})")
@@ -1140,17 +1143,37 @@ class AltairDockWidget(QDockWidget):
             self._set_status(f"Error loading Vantor events: {e}", "color: #FF0000;")
     
     def _load_iceye_collections(self):
-        """Load collections from ICEYE STAC connector"""
+        """Load collections from ICEYE API connector."""
         if not self.iceye_connector:
             return
         
         try:
             self._set_status("Loading ICEYE SAR collections...", "color: #FFA500;")
             
-            # Authenticate to load catalog
-            if not self.iceye_connector.authenticate():
-                logger.error("Failed to authenticate ICEYE STAC connector")
-                self._set_status("Failed to load ICEYE catalog", "color: #FF0000;")
+            creds = {}
+            if self.secure_storage:
+                creds = self.secure_storage.get_credentials('iceye') or {}
+            token = str(creds.get('access_token') or '').strip()
+            if not token:
+                self._set_status("Configure ICEYE API token in Settings", "color: #FF0000;")
+                return
+
+            auth_payload = {
+                'access_token': token,
+                'api_base_url': str(
+                    self.settings.value('AltairEOData/iceye_endpoint', 'https://api.iceye.com')
+                ).strip(),
+                'contract_id': str(
+                    self.settings.value('AltairEOData/iceye_contract_id', '')
+                ).strip() or None,
+                'collections': str(
+                    self.settings.value('AltairEOData/iceye_collections', '')
+                ).strip() or None,
+            }
+
+            if not self.connector_manager.authenticate_connector('iceye', credentials=auth_payload):
+                logger.error("Failed to authenticate ICEYE API connector")
+                self._set_status("Failed to authenticate ICEYE API", "color: #FF0000;")
                 return
             
             # Get collections
@@ -1190,35 +1213,51 @@ class AltairDockWidget(QDockWidget):
             self._set_status(f"Error loading collections: {e}", "color: #FF0000;")
     
     def _load_umbra_collections(self):
-        """Load collections from Umbra STAC connector"""
+        """Load collections from Umbra API connector."""
         if not self.umbra_connector:
             return
         
         try:
             self._set_status("Loading Umbra SAR collections...", "color: #FFA500;")
             
-            # Authenticate to load catalog
-            if not self.umbra_connector.authenticate({}):
-                logger.error("Failed to authenticate Umbra STAC connector")
-                self._set_status("Failed to load Umbra catalog", "color: #FF0000;")
+            creds = {}
+            if self.secure_storage:
+                creds = self.secure_storage.get_credentials('umbra') or {}
+
+            token = str(creds.get('access_token') or '').strip()
+            client_id = str(creds.get('client_id') or '').strip()
+            client_secret = str(creds.get('client_secret') or '').strip()
+            if not token and not (client_id and client_secret):
+                self._set_status("Configure Umbra credentials in Settings", "color: #FF0000;")
+                return
+
+            auth_payload = {
+                'access_token': token or None,
+                'client_id': client_id or None,
+                'client_secret': client_secret or None,
+                'api_base_url': str(
+                    self.settings.value('AltairEOData/umbra_api_base_url', 'https://api.canopy.umbra.space')
+                ).strip(),
+            }
+
+            if not self.connector_manager.authenticate_connector('umbra', credentials=auth_payload):
+                logger.error("Failed to authenticate Umbra API connector")
+                self._set_status("Failed to authenticate Umbra API", "color: #FF0000;")
                 return
             
             # Get collections (year catalogs)
             collections = self.umbra_connector.get_collections()
             
             self.collections_combo.clear()
-            self.collections_combo.addItem("All Years", userData=None)
+            self.collections_combo.addItem("All Collections", userData=None)
             
             for collection in collections:
                 collection_id = collection.get('id', 'unknown')
                 title = collection.get('title', collection_id)
                 
-                # Get month count (stored as asset_count)
-                month_count = collection.get('asset_count', 0)
-                
-                # Format: "2024 [12 months]"
-                if month_count > 0:
-                    display_text = f"{title} [{month_count} months]"
+                asset_count = collection.get('asset_count', 0)
+                if asset_count > 0:
+                    display_text = f"{title} [{asset_count} items]"
                 else:
                     display_text = title
                 
@@ -1228,28 +1267,48 @@ class AltairDockWidget(QDockWidget):
             self.collections_combo.setEnabled(True)
             
             self._set_status(
-                f"Loaded {len(collections)} Umbra year catalogs",
+                f"Loaded {len(collections)} Umbra collections",
                 "color: #00FF00;"
             )
-            
-            logger.info(f"Loaded {len(collections)} Umbra year catalogs")
+
+            logger.info(f"Loaded {len(collections)} Umbra collections")
             
         except Exception as e:
             logger.error(f"Failed to load Umbra collections: {e}")
             self._set_status(f"Error loading collections: {e}", "color: #FF0000;")
     
     def _load_capella_collections(self):
-        """Load collections from Capella STAC connector"""
+        """Load collections from Capella API connector."""
         if not self.capella_connector:
             return
         
         try:
             self._set_status("Loading Capella SAR collections...", "color: #FFA500;")
             
-            # Authenticate to load catalog
-            if not self.capella_connector.authenticate({}):
-                logger.error("Failed to authenticate Capella STAC connector")
-                self._set_status("Failed to load Capella catalog", "color: #FF0000;")
+            creds = {}
+            if self.secure_storage:
+                creds = self.secure_storage.get_credentials('capella') or {}
+            token = str(creds.get('access_token') or '').strip()
+            if not token:
+                self._set_status("Configure Capella API token in Settings", "color: #FF0000;")
+                return
+
+            auth_payload = {
+                'access_token': token,
+                'api_base_url': str(
+                    self.settings.value('AltairEOData/capella_api_base_url', 'https://api.capellaspace.com')
+                ).strip(),
+                'collections_path': str(
+                    self.settings.value('AltairEOData/capella_collections_path', '/stac/collections')
+                ).strip() or '/stac/collections',
+                'search_path': str(
+                    self.settings.value('AltairEOData/capella_search_path', '/stac/search')
+                ).strip() or '/stac/search',
+            }
+
+            if not self.connector_manager.authenticate_connector('capella', credentials=auth_payload):
+                logger.error("Failed to authenticate Capella API connector")
+                self._set_status("Failed to authenticate Capella API", "color: #FF0000;")
                 return
             
             # Get collections (organizational views)
@@ -1306,11 +1365,11 @@ class AltairDockWidget(QDockWidget):
         # Reload collections based on current connector
         if connector_id == 'vantor':
             self._load_vantor_collections()
-        elif connector_id == 'iceye_stac':
+        elif connector_id in ('iceye', 'iceye_stac'):
             self._load_iceye_collections()
-        elif connector_id == 'umbra_stac':
+        elif connector_id in ('umbra', 'umbra_stac'):
             self._load_umbra_collections()
-        elif connector_id == 'capella_stac':
+        elif connector_id in ('capella', 'capella_stac'):
             self._load_capella_collections()
     
     def _load_copernicus_collections(self):
@@ -1334,10 +1393,10 @@ class AltairDockWidget(QDockWidget):
                 logger.error("COPERNICUS: Secure storage not available!")
                 return
             
-            logger.info("COPERNICUS: Attempting to retrieve credentials from secure storage...")
-            creds = self.secure_storage.get_credentials('copernicus')
+            logger.info("CDSE Sentinel: Attempting to retrieve credentials from secure storage...")
+            creds = self.secure_storage.get_credentials('cdse_sentinel')
             
-            logger.info(f"COPERNICUS: Retrieved credentials: {creds is not None}")
+            logger.info(f"CDSE Sentinel: Retrieved credentials: {creds is not None}")
             if creds:
                 logger.info(f"COPERNICUS: Credentials keys: {list(creds.keys())}")
                 client_id = creds.get('client_id', '')
@@ -1346,7 +1405,7 @@ class AltairDockWidget(QDockWidget):
                 logger.info(f"COPERNICUS: client_secret length: {len(client_secret)}")
                 logger.info(f"COPERNICUS: client_id first 20 chars: {client_id[:20] if client_id else 'EMPTY'}")
             else:
-                logger.error("COPERNICUS: get_credentials('copernicus') returned None!")
+                logger.error("CDSE Sentinel: get_credentials('cdse_sentinel') returned None!")
             
             if not creds or not creds.get('client_id') or not creds.get('client_secret'):
                 self._set_status("Copernicus credentials not configured", "color: #FF0000;")
@@ -1357,9 +1416,9 @@ class AltairDockWidget(QDockWidget):
                 return
             
             # Authenticate with OAuth2 via ConnectorManager (this updates the 'authenticated' flag)
-            logger.info("COPERNICUS: Calling authenticate_connector() via ConnectorManager...")
+            logger.info("CDSE Sentinel: Calling authenticate_connector() via ConnectorManager...")
             auth_result = self.connector_manager.authenticate_connector(
-                connector_id='copernicus',
+                connector_id='cdse_sentinel',
                 credentials=creds
             )
             logger.info(f"COPERNICUS: authenticate_connector() returned: {auth_result}")
@@ -3157,8 +3216,8 @@ class AltairDockWidget(QDockWidget):
                     try:
                         if hasattr(self, 'connector_manager') and self.connector_manager:
                             # Access connector instance from manager's internal dict
-                            if 'copernicus_stac' in self.connector_manager._connectors:
-                                copernicus_connector = self.connector_manager._connectors['copernicus_stac']['instance']
+                            if 'cdse_sentinel' in self.connector_manager._connectors:
+                                copernicus_connector = self.connector_manager._connectors['cdse_sentinel']['instance']
                                 if copernicus_connector and hasattr(copernicus_connector, 'access_token'):
                                     copernicus_token = copernicus_connector.access_token
                                     logger.debug(f"  Got Copernicus token: {copernicus_token[:20] if copernicus_token else 'None'}...")
@@ -3538,8 +3597,8 @@ class AltairDockWidget(QDockWidget):
                         try:
                             if hasattr(self, 'connector_manager') and self.connector_manager:
                                 # Access connector instance from manager's internal dict
-                                if 'copernicus_stac' in self.connector_manager._connectors:
-                                    copernicus_connector = self.connector_manager._connectors['copernicus_stac']['instance']
+                                if 'cdse_sentinel' in self.connector_manager._connectors:
+                                    copernicus_connector = self.connector_manager._connectors['cdse_sentinel']['instance']
                                     if copernicus_connector and hasattr(copernicus_connector, 'access_token'):
                                         copernicus_token = copernicus_connector.access_token
                                         logger.debug(f"  Got Copernicus token for download: {copernicus_token[:20] if copernicus_token else 'None'}...")

@@ -5,6 +5,22 @@ All notable changes to KADAS Altair Plugin will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-08-08
+
+### Added
+- **Startup disclaimer dialog** (`gui/disclaimer_dialog.py`) shown during plugin activation, requiring explicit acceptance of:
+  - limitation of liability / misuse disclaimer
+  - MIT license terms
+- **Persisted acceptance option** in settings key `AltairEOData/disclaimer_accepted` ("remember" choice).
+- **Planetary Computer regression tests** (`tests/test_planetary_computer_stac.py`) for collection filtering and COG-only item normalization.
+
+### Changed
+- **Plugin activation flow** (`plugin.py`): initialization now requires disclaimer acceptance before registering Altair tab actions.
+- **Planetary Computer connector** (`connectors/planetary_computer_stac.py`): searches are now restricted to collections tagged as `Imagery` or `Fire`, and only items with valid raster/COG assets are returned.
+
+### Fixed
+- **Smart Tasking geometry CRS reliability** (`gui/smart_tasking_dock.py`): memory layers now explicitly set CRS to `EPSG:4326` to ensure correct on-the-fly reprojection in project CRSs such as `EPSG:2056` and `EPSG:3857`.
+
 ## [0.4.5] - 2025-06-05
 
 ### Added

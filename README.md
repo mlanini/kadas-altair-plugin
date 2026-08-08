@@ -3,16 +3,14 @@
 **Multi-source satellite imagery browser for KADAS Albireo 2**
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/Version-0.4.3-success.svg)](https://github.com/mlanini/kadas-altair-plugin)
+[![Version](https://img.shields.io/badge/Version-0.5.0-success.svg)](https://github.com/mlanini/kadas-altair-plugin)
 [![Status](https://img.shields.io/badge/Status-Production-success.svg)](https://github.com/mlanini/kadas-altair-plugin)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/mlanini/kadas-altair-plugin)
 
 ## Screenshots
 
-![Vantor EO Open Data Connector](screenshots/screenshot01_vantor.jpg)
-![ICEYE SAR Open Data Connector](screenshots/screenshot02_iceye.jpg)
-![Archive Search — Copernicus](screenshots/screenshot03_copernicus.jpg)
-![Smart Tasking with orbit prediction](screenshots/screenshot04_smarttasking.jpg)
+![Archive Search](screenshots/screenshot01_archive.png)
+![Smart Tasking Prediction](screenshots/screenshot02_predict.png)
 
 ---
 
@@ -22,8 +20,6 @@
 |----------|----------|
 | **[README.md](README.md)** | Overview, features, quick start (this file) |
 | **[GUIDE.md](GUIDE.md)** | Installation, configuration, usage tutorial |
-| **[ARCHITECTURE.md](ARCHITECTURE.md)** | System design, network stack, OpenSSL, proxy/VPN |
-| **[CONTRIBUTING.md](CONTRIBUTING.md)** | Development setup, adding connectors, testing |
 | **[CHANGELOG.md](CHANGELOG.md)** | Version-by-version change log |
 
 ---
@@ -32,7 +28,7 @@
 
 ### Installation
 
-Download [kadas_altair_plugin_full_vX.Y.Z.zip](releases/download/v0.4.3/kadas_altair_plugin_full_v0.4.3.zip) and copy manually:
+Download [kadas_altair_plugin_full_vX.Y.Z.zip](releases/download/v0.5.0/kadas_altair_plugin_full_v0.5.0.zip) and copy manually:
 
 ```powershell
 # Windows
@@ -45,7 +41,7 @@ cp -r kadas_altair_plugin ~/.local/share/Kadas/KadasZivil/profiles/default/pytho
 
 ### First Use
 
-1. Activate **KADAS Albireo** → `Settings` → `Plugins Manager` → `KADAS Altair v0.4.3` 
+1. Activate **KADAS Albireo** → `Settings` → `Plugins Manager` → `KADAS Altair v0.5.0` 
 2. Go to "EO" menu tab
 3. Choose **Altair Open Data Panel** from Altair menu button
 4. Select a connector (e.g. *Vantor Open Data*)
@@ -111,50 +107,6 @@ cp -r kadas_altair_plugin ~/.local/share/Kadas/KadasZivil/profiles/default/pytho
 
 ---
 
-## Project Structure
-
-```
-kadas-altair-plugin/
-├── README.md
-├── GUIDE.md
-├── ARCHITECTURE.md
-├── CONTRIBUTING.md
-├── CHANGELOG.md
-├── RELEASE_NOTES.md
-├── LICENSE
-├── package_plugin_full.py          # Build (full, with deps)
-├── package_plugin_lite.py          # Build (lite, no deps)
-└── kadas_altair_plugin/
-    ├── plugin.py                   # Entry point
-    ├── logger.py                   # Logging subsystem
-    ├── connectors/
-    │   ├── base.py                 # Abstract connector interface
-    │   ├── connector_manager.py    # Registry + parallel loader
-    │   ├── iceye_stac.py
-    │   ├── umbra_stac.py
-    │   ├── capella_stac.py
-    │   ├── vantor.py               # Vantor Open Data
-    │   ├── swisstopo_stac.py
-    │   ├── copernicus_stac.py      # OAuth2 STAC 1.1
-    │   ├── nasa_earthdata.py
-    │   ├── planet.py               # Stub
-    │   └── oneatlas.py             # Stub
-    ├── gui/
-    │   ├── dock.py                 # Main search panel
-    │   ├── archive_dock.py         # Archive browser
-    │   ├── smart_tasking_dock.py   # Overpass prediction + 3D viz
-    │   ├── tasking_dock.py         # Tasking order form
-    │   ├── settings_dock.py        # Settings panel
-    │   ├── footprint_tool.py       # Map-click interaction
-    │   └── log_viewer.py           # Log viewer dialog
-    ├── utilities/
-    │   └── proxy_handler.py
-    └── secrets/
-        └── secure_storage.py       # Keyring / encryption fallback
-```
-
----
-
 ## Building
 
 ```powershell
@@ -165,9 +117,6 @@ python package_plugin_full.py
 # Skip pip install (CI / offline)
 $env:KADAS_SKIP_PIP = "1"; python package_plugin_full.py
 
-# Lite package (no bundled deps)
-python package_plugin_lite.py
-# → kadas_altair_plugin_lite.zip
 ```
 
 ---
@@ -176,7 +125,7 @@ python package_plugin_lite.py
 
 - **KADAS Albireo 2.3+** (QGIS 3.x based)
 - Internet connection
-- No external Python dependencies required at runtime (only QGIS/Qt built-ins)
+- Full package bundles required Python dependencies; lightweight installs only need separate OAuth libraries for CDSE Sentinel
 
 ---
 
@@ -187,9 +136,9 @@ python package_plugin_lite.py
 | Plugin not appearing | Verify folder name is `kadas_altair_plugin`; restart KADAS |
 | Collections not loading | Select connector, wait for auto-population |
 | No search results | Expand date range / cloud cover; verify AOI on map |
-| Proxy / VPN errors | Auto-configured from KADAS settings — see [ARCHITECTURE.md](ARCHITECTURE.md) |
+| Proxy / VPN errors | Auto-configured from KADAS settings — see [GUIDE.md](GUIDE.md) |
 | COG loading fails | Check internet; verify GDAL vsicurl support |
-| OpenSSL 3.0 legacy error | Auto-configured by plugin — see [ARCHITECTURE.md](ARCHITECTURE.md) |
+| OpenSSL 3.0 legacy error | Auto-configured by plugin — see [GUIDE.md](GUIDE.md) |
 
 Full troubleshooting: [GUIDE.md](GUIDE.md)
 
@@ -197,11 +146,11 @@ Full troubleshooting: [GUIDE.md](GUIDE.md)
 
 ## Contributing
 
-Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines and [ARCHITECTURE.md](ARCHITECTURE.md) for technical details.
+Contributions welcome via pull request and issue discussion on GitHub.
 
 **Before submitting issues:**
 - Check logs: `Plugins` → `Altair` → `View Log`
-- Include KADAS version, plugin version (`0.4.3`), and steps to reproduce
+- Include KADAS version, plugin version (`0.5.0`), and steps to reproduce
 
 ---
 
@@ -221,12 +170,33 @@ Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines 
 **Inspired by:**
 [eo-predictor](https://github.com/developmentseed/eo-predictor) · [sat-predict](https://sat-predict.davidhsu.cc/) · [kadas-vantor-plugin](https://github.com/mlanini/kadas-vantor-plugin) · [qgis-maxar-plugin](https://github.com/opengeos/qgis-maxar-plugin)
 
-**Open-data providers:**
-ICEYE · Umbra · Capella · Vantor · swisstopo · Copernicus · NASA
+## Imagery Data Licenses And Attributions
+
+The plugin code is MIT licensed, but imagery and metadata are licensed by each
+provider. Always follow the provider contract, dataset EULA, and distribution
+terms.
+
+| Provider | Data Licensing Model | Attribution Guidance |
+|---|---|---|
+| ICEYE | Commercial license / contract terms | Include acquisition ID, provider name, and contractual copyright notice required by ICEYE |
+| Umbra | Commercial license / contract terms | Include Umbra as source and any contract-specific usage/copyright notice |
+| Capella Space | Commercial license / contract terms | Include Capella Space source credit and contractual notice |
+| Planet | Commercial license / Planet account terms | Include Planet Labs attribution and order/scene identifiers as required by contract |
+| Vantor / Maxar Discovery + Tasking | Commercial license / contract terms | Include Maxar or Vantor source credit and contractual notice |
+| Vantor Open Data events | Open-data program terms (check event/dataset page) | Attribute Maxar Open Data / Vantor Open Data and preserve any dataset-specific notice |
+| Jilin-1 Gaofen | Tenant/provider-specific terms | Use attribution text from your Jilin API/data agreement |
+| JAXA Earth | Public datasets with JAXA terms of use | Credit JAXA Earth / dataset name and comply with dataset terms |
+| CDSE Sentinel | Copernicus free and open data policy | Credit European Union, Copernicus Sentinel data, and product generation chain when required |
+| swisstopo RapidMapping | Swiss open government/public sector data terms | Credit swisstopo and dataset/event identifier |
+| NASA EarthData | Dataset-specific NASA/DAAC terms | Credit NASA + DAAC + collection identifier (for example concept ID/short name) |
+
+Recommended operational rule:
+- Store a project-level attribution note with provider, dataset/collection ID,
+  acquisition date, and scene/order ID for every published map or export.
 
 ---
 
-**[GUIDE.md](GUIDE.md)** · **[ARCHITECTURE.md](ARCHITECTURE.md)** · **[CONTRIBUTING.md](CONTRIBUTING.md)** · **[CHANGELOG.md](CHANGELOG.md)**
+**[GUIDE.md](GUIDE.md)** · **[CHANGELOG.md](CHANGELOG.md)**
 Issues: https://github.com/mlanini/kadas-altair-plugin/issues
 
 © 2026 Michael Lanini — Open Source Software

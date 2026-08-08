@@ -15,6 +15,7 @@ Notes:
 
 import json
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urlencode
 
 try:
     from qgis.PyQt.QtCore import QEventLoop, QTimer, QUrl, QSettings
@@ -29,6 +30,14 @@ from ..logger import get_logger
 
 logger = get_logger('connectors.jilin_gaofen_stac')
 
+CATALOG_BASE_KEY = 'AltairEOData/jilin_catalog_base_url'
+CATALOG_COLLECTION_KEY = 'AltairEOData/jilin_default_collection'
+CATALOG_TOKEN_KEY = 'AltairEOData/jilin_access_token'
+TASKING_BASE_KEY = 'AltairEOData/jilin_tasking_base_url'
+TASKING_CREATE_PATH_KEY = 'AltairEOData/jilin_tasking_create_path'
+TASKING_LIST_PATH_KEY = 'AltairEOData/jilin_tasking_list_path'
+TASKING_TOKEN_KEY = 'AltairEOData/jilin_tasking_access_token'
+
 
 class JilinGaofenStacConnector(ConnectorBase):
     """STAC connector for Jilin-1 Gaofen constellation archives."""
@@ -41,6 +50,10 @@ class JilinGaofenStacConnector(ConnectorBase):
         self._base_url = (base_url or '').strip().rstrip('/')
         self._access_token: Optional[str] = None
         self._default_collection: Optional[str] = None
+        self._tasking_base_url: str = ''
+        self._tasking_create_path: str = '/tasking/v2/requests'
+        self._tasking_list_path: str = '/tasking/v2/requests'
+        self._tasking_access_token: Optional[str] = None
         self._load_settings_defaults()
 
     def _load_settings_defaults(self) -> None:
@@ -48,15 +61,44 @@ class JilinGaofenStacConnector(ConnectorBase):
         try:
             settings = QSettings()
             if not self._base_url:
-                self._base_url = str(settings.value('altair/jilin_stac_base_url', '') or '').strip().rstrip('/')
+                self._base_url = str(
+                    settings.value(CATALOG_BASE_KEY, '')
+                    or settings.value('altair/jilin_stac_base_url', '')
+                    or ''
+                ).strip().rstrip('/')
 
-            token = str(settings.value('altair/jilin_access_token', '') or '').strip()
+            token = str(
+                settings.value(CATALOG_TOKEN_KEY, '')
+                or settings.value('altair/jilin_access_token', '')
+                or ''
+            ).strip()
             if token:
                 self._access_token = token
 
-            collection = str(settings.value('altair/jilin_collection', '') or '').strip()
+            collection = str(
+                settings.value(CATALOG_COLLECTION_KEY, '')
+                or settings.value('altair/jilin_collection', '')
+                or ''
+            ).strip()
             if collection:
                 self._default_collection = collection
+
+            self._tasking_base_url = str(
+                settings.value(TASKING_BASE_KEY, '') or ''
+            ).strip().rstrip('/')
+            self._tasking_create_path = str(
+                settings.value(TASKING_CREATE_PATH_KEY, '/tasking/v2/requests')
+                or '/tasking/v2/requests'
+            ).strip()
+            self._tasking_list_path = str(
+                settings.value(TASKING_LIST_PATH_KEY, '/tasking/v2/requests')
+                or '/tasking/v2/requests'
+            ).strip()
+            tasking_token = str(
+                settings.value(TASKING_TOKEN_KEY, '') or ''
+            ).strip()
+            if tasking_token:
+                self._tasking_access_token = tasking_token
 
         except Exception as exc:
             logger.debug(f'Jilin settings read skipped: {exc}')
@@ -68,6 +110,8 @@ class JilinGaofenStacConnector(ConnectorBase):
         - base_url / stac_url / api_base_url
         - access_token / token / api_key
         - collection
+        - tasking_base_url / tasking_create_path / tasking_list_path
+        - tasking_access_token
         """
         credentials = credentials or {}
 
@@ -94,8 +138,30 @@ class JilinGaofenStacConnector(ConnectorBase):
         collection = str(collection).strip()
         self._default_collection = collection or None
 
+        tasking_base_url = str(credentials.get('tasking_base_url') or self._tasking_base_url or '').strip()
+        self._tasking_base_url = tasking_base_url.rstrip('/') if tasking_base_url else ''
+
+        tasking_create_path = str(
+            credentials.get('tasking_create_path') or self._tasking_create_path or '/tasking/v2/requests'
+        ).strip()
+        self._tasking_create_path = tasking_create_path or '/tasking/v2/requests'
+
+        tasking_list_path = str(
+            credentials.get('tasking_list_path') or self._tasking_list_path or '/tasking/v2/requests'
+        ).strip()
+        self._tasking_list_path = tasking_list_path or '/tasking/v2/requests'
+
+        tasking_token = str(
+            credentials.get('tasking_access_token')
+            or credentials.get('tasking_token')
+            or self._tasking_access_token
+            or token
+            or ''
+        ).strip()
+        self._tasking_access_token = tasking_token or None
+
         if not self._base_url:
-            logger.warning('Jilin connector authenticated without endpoint (set altair/jilin_stac_base_url)')
+            logger.warning('Jilin connector authenticated without endpoint (set AltairEOData/jilin_catalog_base_url)')
         else:
             logger.info(f'Jilin connector configured for endpoint: {self._base_url}')
 
@@ -108,6 +174,7 @@ class JilinGaofenStacConnector(ConnectorBase):
         method: str = 'GET',
         payload: Optional[Dict[str, Any]] = None,
         timeout: float = 30.0,
+        headers: Optional[Dict[str, str]] = None,
     ) -> Optional[Dict[str, Any]]:
         if not QGIS_AVAILABLE:
             logger.error('QGIS network manager not available for Jilin request')
@@ -119,6 +186,9 @@ class JilinGaofenStacConnector(ConnectorBase):
             request.setRawHeader(b'Content-Type', b'application/json')
             if self._access_token:
                 request.setRawHeader(b'Authorization', f'Bearer {self._access_token}'.encode('utf-8'))
+            if headers:
+                for key, value in headers.items():
+                    request.setRawHeader(str(key).encode('utf-8'), str(value).encode('utf-8'))
 
             nam = QgsNetworkAccessManager.instance()
             body = json.dumps(payload or {}).encode('utf-8')
@@ -281,6 +351,106 @@ class JilinGaofenStacConnector(ConnectorBase):
 
         normalized = self._normalize_items(features, selected_collection)
         return normalized[:max_items], None
+
+    @staticmethod
+    def _normalize_path(path: str, default: str) -> str:
+        text = str(path or '').strip()
+        if not text:
+            text = default
+        if not text.startswith('/'):
+            text = '/' + text
+        return text
+
+    def tasking_url(self) -> str:
+        if not self._tasking_base_url:
+            return ''
+        create_path = self._normalize_path(self._tasking_create_path, '/tasking/v2/requests')
+        return f"{self._tasking_base_url.rstrip('/')}{create_path}"
+
+    def create_tasking_request(self, request: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        if not self._tasking_base_url:
+            logger.warning('Jilin tasking base URL not configured')
+            return None
+
+        path = self._normalize_path(self._tasking_create_path, '/tasking/v2/requests')
+        url = f"{self._tasking_base_url.rstrip('/')}{path}"
+
+        payload = request if isinstance(request, dict) else {}
+        request_headers: Dict[bytes, bytes] = {
+            b'Accept': b'application/json',
+            b'Content-Type': b'application/json',
+        }
+        token = self._tasking_access_token or self._access_token
+        if token:
+            request_headers[b'Authorization'] = f'Bearer {token}'.encode('utf-8')
+            request_headers[b'x-api-key'] = token.encode('utf-8')
+
+        if not QGIS_AVAILABLE:
+            return None
+
+        try:
+            request_qt = QNetworkRequest(QUrl(url))
+            for key, value in request_headers.items():
+                request_qt.setRawHeader(key, value)
+
+            nam = QgsNetworkAccessManager.instance()
+            body = json.dumps(payload).encode('utf-8')
+            reply = nam.post(request_qt, body)
+
+            loop = QEventLoop()
+            reply.finished.connect(loop.quit)
+            timer = QTimer()
+            timer.setSingleShot(True)
+            timer.timeout.connect(loop.quit)
+            timer.start(int(self.timeout_search * 1000))
+            loop.exec_()
+
+            if not reply.isFinished():
+                reply.abort()
+                logger.warning('Jilin tasking request timeout')
+                return None
+
+            status_code = reply.attribute(QNetworkRequest.HttpStatusCodeAttribute)
+            if reply.error() or (status_code and int(status_code) >= 400):
+                logger.warning(
+                    f'Jilin tasking request failed: HTTP {status_code}, error={reply.errorString()}'
+                )
+                reply.deleteLater()
+                return None
+
+            raw = reply.readAll().data().decode('utf-8', errors='ignore')
+            reply.deleteLater()
+            return json.loads(raw) if raw.strip() else {'status': 'submitted'}
+
+        except Exception as exc:
+            logger.warning(f'Jilin tasking request error: {exc}')
+            return None
+
+    def list_tasking_requests(self, params: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+        if not self._tasking_base_url:
+            logger.warning('Jilin tasking base URL not configured')
+            return None
+
+        path = self._normalize_path(self._tasking_list_path, '/tasking/v2/requests')
+        base_url = f"{self._tasking_base_url.rstrip('/')}{path}"
+        query = urlencode(params or {}) if params else ''
+        url = f"{base_url}?{query}" if query else base_url
+
+        token = self._tasking_access_token or self._access_token
+        headers = {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+        }
+        if token:
+            headers['Authorization'] = f'Bearer {token}'
+            headers['x-api-key'] = token
+
+        return self._http_json(
+            url,
+            method='GET',
+            timeout=self.timeout_search,
+            headers=headers,
+        )
 
     def get_tile_url(self, result: Dict[str, Any], z: int, x: int, y: int) -> str:
         assets = result.get('assets') if isinstance(result.get('assets'), dict) else {}

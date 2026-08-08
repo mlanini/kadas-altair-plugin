@@ -4,7 +4,7 @@ KADAS Altair EO Data Plugin - Main Module
 import os
 import socket
 from qgis.PyQt.QtCore import QObject, QSettings, QStandardPaths
-from qgis.PyQt.QtWidgets import QAction, QMenu, QMessageBox
+from qgis.PyQt.QtWidgets import QAction, QMessageBox
 from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtCore import Qt
 from qgis.PyQt.QtNetwork import QNetworkProxy, QNetworkProxyFactory
@@ -51,6 +51,8 @@ except ImportError:
 class KadasAltair(QObject):
     """KADAS-compatible plugin for EO data browsing."""
 
+    CUSTOM_TAB_NAME = "ALTAIR"
+
     def __init__(self, iface):
         QObject.__init__(self)
         logger.info("Initializing KADAS Altair plugin")
@@ -58,7 +60,7 @@ class KadasAltair(QObject):
         self.iface = KadasPluginInterface.cast(iface)
         self.plugin_dir = os.path.dirname(__file__)
         self.actions = []
-        self.menu = None
+        self.menus = []
         self._main_dock = None
         self._settings_dock = None
         self._tasking_dock = None
@@ -72,8 +74,8 @@ class KadasAltair(QObject):
         """Translate message"""
         return message
 
-    def add_action(self, icon_path, text, callback, add_to_menu=True, 
-                   status_tip=None, checkable=False, parent=None):
+    def add_action(self, icon_path, text, callback, add_to_menu=True,
+                   status_tip=None, checkable=False, parent=None, target_menu=None):
         """Add action to menu"""
         icon = QIcon(icon_path) if icon_path else QIcon()
         action = QAction(icon, text, parent)
@@ -81,10 +83,20 @@ class KadasAltair(QObject):
         action.setCheckable(checkable)
         if status_tip:
             action.setStatusTip(status_tip)
-        if add_to_menu and self.menu:
-            self.menu.addAction(action)
+        if add_to_menu and target_menu is not None:
+            target_menu.addAction(action)
         self.actions.append(action)
         return action
+
+    def _register_action(self, action):
+        """Register one action as a direct button in the custom ALTAIR tab (no dropdown)."""
+        self.iface.addAction(
+            action,
+            self.iface.PLUGIN_MENU,
+            self.iface.CUSTOM_TAB,
+            self.CUSTOM_TAB_NAME,
+        )
+        self.menus.append(action)
 
     def _apply_proxy_settings(self):
         """Apply proxy settings from KADAS/QGIS to Qt and HTTP libraries.
@@ -175,6 +187,35 @@ class KadasAltair(QObject):
         except Exception as e:
             logger.warning(f"Unable to determine VPN status: {e}")
 
+    def _ensure_disclaimer_accepted(self) -> bool:
+        """Require the user to accept disclaimer and license before use."""
+        try:
+            from .gui.disclaimer_dialog import (
+                DisclaimerDialog,
+                disclaimer_already_accepted,
+            )
+        except Exception as exc:
+            # Fail open if the dialog cannot be loaded to avoid bricking startup.
+            logger.warning(f"Disclaimer dialog unavailable, continuing without prompt: {exc}")
+            return True
+
+        if disclaimer_already_accepted():
+            return True
+
+        dlg = DisclaimerDialog(parent=self.iface.mainWindow())
+        if dlg.exec() == DisclaimerDialog.Accepted:
+            return True
+
+        QMessageBox.warning(
+            self.iface.mainWindow(),
+            self.tr("Altair EO Data - Disclaimer not accepted"),
+            self.tr(
+                "You must accept the license terms and limitation of liability "
+                "to use this plugin."
+            ),
+        )
+        return False
+
     def initGui(self):
         """Initialize GUI - setup menu and actions"""
         # Apply KADAS proxy settings (propagate to Qt and environment variables)
@@ -182,110 +223,117 @@ class KadasAltair(QObject):
         # use the same proxy configuration from KADAS Settings → Network
         self._apply_proxy_settings()
         logger.info("Proxy configuration applied from KADAS settings")
-        
-        # Create menu
-        self.menu = QMenu(self.tr("Altair"))
 
+        if not self._ensure_disclaimer_accepted():
+            logger.info("Plugin activation aborted: disclaimer/license not accepted")
+            return
+        
         # Icon paths
         icon_base = os.path.join(self.plugin_dir, "icons")
         main_icon = os.path.join(icon_base, "icon.svg")
+        search_icon = os.path.join(icon_base, "search.svg")
+        tasking_icon = os.path.join(icon_base, "tasking.svg")
+        smart_tasking_icon = os.path.join(icon_base, "smart_tasking.svg")
         settings_icon = os.path.join(icon_base, "settings.svg")
         about_icon = os.path.join(icon_base, "about.svg")
+        logging_icon = os.path.join(icon_base, "logging.svg")
         help_icon = os.path.join(icon_base, "help.svg")  # Will fallback to default if not exists
-
         # Open Data search action
         self.main_action = self.add_action(
-            main_icon,
+            search_icon,
             self.tr("Open Data Search"),
-            self.toggle_main_dock,
+            self.open_main_dock,
             status_tip=self.tr("Toggle Open Data Search Panel"),
-            checkable=True,
+            checkable=False,
+            add_to_menu=False,
             parent=self.iface.mainWindow(),
         )
 
         # Archive action
         self.archive_action = self.add_action(
-            main_icon,
+            search_icon,
             self.tr("Archive Search"),
-            self.toggle_archive_dock,
+            self.open_archive_dock,
             status_tip=self.tr("Toggle Archive Search Panel"),
-            checkable=True,
+            checkable=False,
+            add_to_menu=False,
             parent=self.iface.mainWindow(),
         )
         
         # Tasking order action
         self.tasking_action = self.add_action(
-            main_icon,
+            tasking_icon,
             self.tr("Tasking Order"),
-            self.toggle_tasking_dock,
+            self.open_tasking_dock,
             status_tip=self.tr("Toggle Tasking Order Panel"),
-            checkable=True,
+            checkable=False,
+            add_to_menu=False,
             parent=self.iface.mainWindow(),
         )
 
-        # Smart Tasking action
+        # Search & Predict action
         self.smart_tasking_action = self.add_action(
             main_icon,
-            self.tr("Smart Tasking"),
-            self.toggle_smart_tasking_dock,
-            status_tip=self.tr("Toggle Smart Tasking Panel"),
-            checkable=True,
+            self.tr("Search and Predict"),
+            self.open_smart_tasking_dock,
+            status_tip=self.tr("Toggle Search and Predict Panel"),
+            checkable=False,
+            add_to_menu=False,
             parent=self.iface.mainWindow(),
         )
-        
-        # Separator
-        self.menu.addSeparator()
         
         # Settings action
         self.settings_action = self.add_action(
             settings_icon,
             self.tr("Settings"),
-            self.toggle_settings_dock,
+            self.open_settings_dock,
             status_tip=self.tr("Toggle Settings Panel"),
-            checkable=True,
+            checkable=False,
+            add_to_menu=False,
             parent=self.iface.mainWindow(),
         )
 
         # View Logs action
-        self.add_action(
-            None,  # No icon for now
+        self.view_log_action = self.add_action(
+            logging_icon,
             self.tr("View Log"),
             self.show_log_viewer,
-            add_to_menu=True,
-            status_tip=self.tr("Open Plugin Log Viewer"),
+            add_to_menu=False,
+            status_tip=self.tr("View Log Viewer"),
             parent=self.iface.mainWindow(),
         )
 
         # Help action
-        self.add_action(
+        self.help_action = self.add_action(
             help_icon if os.path.exists(help_icon) else None,
             self.tr("Help"),
             self.show_help,
-            add_to_menu=True,
+            add_to_menu=False,
             status_tip=self.tr("Open Altair Plugin Help"),
             parent=self.iface.mainWindow(),
         )
 
         # About action
-        self.add_action(
+        self.about_action = self.add_action(
             about_icon,
-            self.tr("About Altair EO Data Plugin"),
+            self.tr("About"),
             self.show_about,
-            add_to_menu=True,
+            add_to_menu=False,
             status_tip=self.tr("About Altair EO Data Plugin"),
             parent=self.iface.mainWindow(),
         )
 
-        # Register menu with KADAS interface - create custom "EO" tab
-        # Pattern from kadas-vantor: addActionMenu(title, icon, menu, PLUGIN_MENU, CUSTOM_TAB, tab_name)
-        self.iface.addActionMenu(
-            self.tr("Altair EO"), 
-            QIcon(main_icon), 
-            self.menu, 
-            self.iface.PLUGIN_MENU, 
-            self.iface.CUSTOM_TAB,
-            "EO"
+        # Register one action per direct button in custom "ALTAIR" tab (no dropdown).
+        action_registry = (
+            ("smart_tasking", self.smart_tasking_action),
+            ("settings", self.settings_action),
+            ("view_log", self.view_log_action),
+            ("help", self.help_action),
+            ("about", self.about_action),
         )
+
+        for action_key, action in action_registry:
+            self._register_action(action)
 
     def unload(self):
         """Clean up and unload the plugin"""
@@ -310,10 +358,15 @@ class KadasAltair(QObject):
             self._smart_tasking_dock.close()
             self._smart_tasking_dock = None
         
-        # Remove menu
-        if self.menu:
-            self.iface.removeActionMenu(self.menu, self.iface.PLUGIN_MENU, self.iface.CUSTOM_TAB, "EO")
-            self.menu = None
+        # Remove action buttons from custom tab
+        for action in self.menus:
+            self.iface.removeAction(
+                action,
+                self.iface.PLUGIN_MENU,
+                self.iface.CUSTOM_TAB,
+                self.CUSTOM_TAB_NAME,
+            )
+        self.menus = []
         
         # Clear actions
         for action in self.actions:
@@ -335,6 +388,46 @@ class KadasAltair(QObject):
             if candidate is not None and candidate is not new_dock:
                 mw.tabifyDockWidget(candidate, new_dock)
                 return
+
+    def open_main_dock(self):
+        """Open/focus main dock without toggle hide behavior."""
+        if self._main_dock is None:
+            self.toggle_main_dock()
+            return
+        self._main_dock.show()
+        self._main_dock.raise_()
+
+    def open_settings_dock(self):
+        """Open/focus settings dock without toggle hide behavior."""
+        if self._settings_dock is None:
+            self.toggle_settings_dock()
+            return
+        self._settings_dock.show()
+        self._settings_dock.raise_()
+
+    def open_tasking_dock(self):
+        """Open/focus tasking dock without toggle hide behavior."""
+        if self._tasking_dock is None:
+            self.toggle_tasking_dock()
+            return
+        self._tasking_dock.show()
+        self._tasking_dock.raise_()
+
+    def open_archive_dock(self):
+        """Open/focus archive dock without toggle hide behavior."""
+        if self._archive_dock is None:
+            self.toggle_archive_dock()
+            return
+        self._archive_dock.show()
+        self._archive_dock.raise_()
+
+    def open_smart_tasking_dock(self):
+        """Open/focus Smart Tasking dock without toggle hide behavior."""
+        if self._smart_tasking_dock is None:
+            self.toggle_smart_tasking_dock()
+            return
+        self._smart_tasking_dock.show()
+        self._smart_tasking_dock.raise_()
 
     def toggle_main_dock(self):
         """Toggle main EO data dock"""
@@ -722,9 +815,9 @@ class KadasAltair(QObject):
             config.read(metadata_path, encoding='utf-8')
             
             name = config.get('general', 'name', fallback='KADAS Altair')
-            version = config.get('general', 'version', fallback='0.1.0')
+            version = config.get('general', 'version', fallback='0.5.0')
             author = config.get('general', 'author', fallback='Michael Lanini')
-            email = config.get('general', 'email', fallback='michael@intelligeo.ch')
+            email = config.get('general', 'email', fallback='mlanini@proton.me')
             repository = config.get('general', 'repository', fallback='https://github.com/mlanini/kadas-altair-plugin')
             description = config.get('general', 'description', fallback='Unified satellite imagery browser for KADAS')
             
@@ -737,7 +830,7 @@ class KadasAltair(QObject):
 
 <hr>
 
-<h3>📋 Description</h3>
+<h3>Description</h3>
 <p>{description}</p>
 
 <h3>Key Features</h3>
@@ -781,5 +874,5 @@ Licensed under the MIT License.<br>
             QMessageBox.about(
                 self.iface.mainWindow(),
                 "About KADAS Altair",
-                f"KADAS Altair EO Data Plugin\n\nVersion: 0.1.0\nAuthor: Michael Lanini\n\nError loading full metadata: {str(e)}"
+                f"KADAS Altair EO Data Plugin\n\nVersion: 0.5.0\nAuthor: Michael Lanini\n\nError loading full metadata: {str(e)}"
             )

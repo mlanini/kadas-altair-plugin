@@ -12,6 +12,8 @@ Architecture:
 - Connection pooling and caching
 """
 import logging
+import threading
+import inspect
 from typing import Optional, List, Dict, Any, Tuple, Type
 from enum import Enum
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -25,10 +27,15 @@ logger = get_logger('connectors.manager')
 class ConnectorType(Enum):
     """Supported connector types"""
     AWS_STAC = "aws_stac"
+    ELEMENT84_STAC = "element84_stac"
+    PLANETARY_COMPUTER_STAC = "planetary_computer_stac"
     COPERNICUS = "copernicus"
     ONEATLAS = "oneatlas"
     PLANET = "planet"
     VANTOR = "vantor"
+    ICEYE = "iceye"
+    UMBRA = "umbra"
+    CAPELLA = "capella"
     ICEYE_STAC = "iceye_stac"
     UMBRA_STAC = "umbra_stac"
     CAPELLA_STAC = "capella_stac"
@@ -64,6 +71,8 @@ class ConnectorManager:
     - Connection management
     - Capability negotiation
     """
+
+    DEFAULT_SEARCH_TIMEOUT: float = 60.0
     
     def __init__(self):
         """Initialize connector manager"""
@@ -231,7 +240,9 @@ class ConnectorManager:
         collection: Optional[str] = None,
         text_query: Optional[str] = None,
         limit: int = 100,
-        connector_id: Optional[str] = None
+        connector_id: Optional[str] = None,
+        timeout: Optional[float] = None,
+        extra_filters: Optional[Dict[str, Any]] = None,
     ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
         """Unified search interface across all connectors
         
@@ -244,6 +255,8 @@ class ConnectorManager:
             text_query: Text search query
             limit: Maximum results to return
             connector_id: Specific connector to use (default: active connector)
+            timeout: Per-search timeout in seconds (default: 60)
+            extra_filters: Optional connector-specific filters
             
         Returns:
             Tuple of (items, next_token)
@@ -267,6 +280,20 @@ class ConnectorManager:
                 return [], "Connector not authenticated"
         
         instance = connector_info['instance']
+        try:
+            search_timeout = float(timeout) if timeout is not None else self.DEFAULT_SEARCH_TIMEOUT
+        except (TypeError, ValueError):
+            search_timeout = self.DEFAULT_SEARCH_TIMEOUT
+        if search_timeout <= 0:
+            search_timeout = self.DEFAULT_SEARCH_TIMEOUT
+
+        # Keep connector-level HTTP calls aligned with the unified manager timeout
+        # when the connector exposes a timeout_search attribute.
+        if hasattr(instance, 'timeout_search'):
+            try:
+                setattr(instance, 'timeout_search', float(search_timeout))
+            except Exception:
+                pass
         
         try:
             logger.info(f"Executing search on connector: {target_connector}")
@@ -283,7 +310,9 @@ class ConnectorManager:
                 max_cloud_cover=max_cloud_cover,
                 collection=collection,
                 text_query=text_query,
-                limit=limit
+                limit=limit,
+                timeout=search_timeout,
+                extra_filters=extra_filters or {},
             )
             
             logger.info(f"Raw search results from {target_connector}: {len(items)} items")
@@ -309,7 +338,9 @@ class ConnectorManager:
         max_cloud_cover: Optional[float],
         collection: Optional[str],
         text_query: Optional[str],
-        limit: int
+        limit: int,
+        timeout: float,
+        extra_filters: Dict[str, Any],
     ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
         """Execute search on a connector via the unified ``search_unified()`` interface.
 
@@ -325,22 +356,85 @@ class ConnectorManager:
         connector was added.
         """
         connector_class = instance.__class__.__name__
-        try:
-            return instance.search_unified(
-                bbox=bbox,
-                start_date=start_date,
-                end_date=end_date,
-                max_cloud_cover=max_cloud_cover,
-                collection=collection,
-                text_query=text_query,
-                limit=limit,
+        result_holder: Dict[str, Any] = {}
+        error_holder: Dict[str, Exception] = {}
+
+        def _run_search() -> None:
+            try:
+                try:
+                    search_kwargs = {
+                        'bbox': bbox,
+                        'start_date': start_date,
+                        'end_date': end_date,
+                        'max_cloud_cover': max_cloud_cover,
+                        'collection': collection,
+                        'text_query': text_query,
+                        'limit': limit,
+                        'timeout': timeout,
+                    }
+
+                    if extra_filters:
+                        try:
+                            sig = inspect.signature(instance.search_unified)
+                            has_var_kw = any(
+                                p.kind == inspect.Parameter.VAR_KEYWORD
+                                for p in sig.parameters.values()
+                            )
+                            if has_var_kw:
+                                search_kwargs.update(extra_filters)
+                            else:
+                                for key, value in extra_filters.items():
+                                    if key in sig.parameters:
+                                        search_kwargs[key] = value
+                        except Exception:
+                            # If introspection fails, keep safe base kwargs.
+                            pass
+
+                    result_holder['result'] = instance.search_unified(**search_kwargs)
+                except TypeError as te:
+                    # Backward-compatibility for connectors that do not accept
+                    # a timeout keyword in search_unified().
+                    if "timeout" in str(te) and "unexpected keyword argument" in str(te):
+                        result_holder['result'] = instance.search_unified(
+                            bbox=bbox,
+                            start_date=start_date,
+                            end_date=end_date,
+                            max_cloud_cover=max_cloud_cover,
+                            collection=collection,
+                            text_query=text_query,
+                            limit=limit,
+                        )
+                    else:
+                        raise
+            except Exception as e:
+                error_holder['error'] = e
+
+        worker = threading.Thread(
+            target=_run_search,
+            name=f"{connector_class}Search",
+            daemon=True,
+        )
+        worker.start()
+        worker.join(timeout=timeout)
+
+        if worker.is_alive():
+            logger.error(
+                f"search_unified() timeout for {connector_class} after {timeout:.0f}s"
             )
-        except Exception as e:
+            return [], f"Search timeout after {int(timeout)} seconds"
+
+        if 'error' in error_holder:
+            e = error_holder['error']
             logger.error(
                 f"search_unified() failed for {connector_class}: {e}",
                 exc_info=True,
             )
             return [], None
+
+        result = result_holder.get('result')
+        if isinstance(result, tuple):
+            return result
+        return result or [], None
     
     def _validate_stac_item(
         self,

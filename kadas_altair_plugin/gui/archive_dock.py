@@ -8,7 +8,7 @@ Provides unified search across commercial satellite image archives:
   - ICEYE SAR constellation
   - Capella Space SAR
     - Vantor (via Vantor STAC)
-  - Copernicus Dataspace (Sentinel-1/2/3/5P) [optional]
+    - Earth Search (Element84 STAC: Sentinel/Landsat)
 
 Search runs in a background QgsTask; footprints are displayed on the map
 as a temporary vector layer that stays in sync with the results table.
@@ -18,6 +18,8 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+from datetime import datetime
+from pathlib import Path
 from urllib.parse import urlparse
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -37,8 +39,10 @@ from qgis.PyQt.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QLineEdit,
     QMessageBox,
     QPushButton,
+    QFileDialog,
     QScrollArea,
     QSlider,
     QSplitter,
@@ -53,6 +57,19 @@ from .footprint_tool import FootprintSelectionTool
 from .aoi_draw_tool import AoiWidget
 
 logger = get_logger('gui.archive')
+
+
+def _nasa_workflow_dir(settings: Optional[QSettings] = None) -> Path:
+    """Return the export directory previously provided by nasa_workflows."""
+    configured = ""
+    if settings is not None:
+        try:
+            configured = settings.value('NASAEarthdata/workflow_dir', '', type=str)
+        except Exception:
+            configured = ''
+    if configured:
+        return Path(configured).expanduser()
+    return Path.home() / '.altair_nasa_earthdata' / 'workflows'
 
 try:
     from ..secrets.secure_storage import get_secure_storage
@@ -112,12 +129,13 @@ ARCHIVE_PROVIDERS: Dict[str, str] = {
     'Planet Labs':        'planet',
     'OneAtlas (Airbus)':  'oneatlas',
     'Jilin-1 Gaofen':     'jilin_gaofen_stac',
-    'Umbra SAR':          'umbra_stac',
-    'ICEYE SAR':          'iceye_stac',
-    'Capella Space':      'capella_stac',
-    'Vantor':             'vantor',
+    'Umbra SAR':          'umbra',
+    'ICEYE SAR':          'iceye',
+    'Capella Space':      'capella',
+    'Vantor Hub Discovery': 'vantor',
     'NASA EarthData':     'nasa_earthdata',
-    'Copernicus':         'copernicus_stac',
+    'Earth Search (Element84)': 'element84_stac',
+    'Microsoft Planetary Computer': 'planetary_computer_stac',
     'swisstopo S2-SR':    'swisstopo_stac',
     'JAXA Earth':         'jaxa_earth_stac',
 }
@@ -152,6 +170,7 @@ class ArchiveSearchTask(QgsTask if QGIS_AVAILABLE else object):  # type: ignore
 
             aggregated: List[Dict[str, Any]] = []
             for connector_id in connector_ids:
+                extra_filters = self.search_params.get('extra_filters', {}) or {}
                 items, _ = self.connector_manager.search(
                     bbox=bbox,
                     start_date=start_date,
@@ -159,6 +178,8 @@ class ArchiveSearchTask(QgsTask if QGIS_AVAILABLE else object):  # type: ignore
                     max_cloud_cover=max_cloud_cover,
                     limit=limit,
                     connector_id=connector_id,
+                    text_query=self.search_params.get('text_query'),
+                    extra_filters=extra_filters,
                 )
 
                 display_name = connector_id
@@ -261,6 +282,7 @@ class ArchiveDockWidget(QDockWidget):
         self._selection_tool = None
         self._previous_map_tool = None
         self._quicklook_source_pixmap: Optional[QPixmap] = None
+        self._last_search_params: Dict[str, Any] = {}
 
         self._setup_ui()
         self._init_connector_manager()
@@ -289,7 +311,7 @@ class ArchiveDockWidget(QDockWidget):
         layout.setAlignment(Qt.AlignTop)
 
         # --- Header ---
-        header = QLabel('TEST Archive Search')
+        header = QLabel('Archive Search')
         hf = QFont()
         hf.setPointSize(12)
         hf.setBold(True)
@@ -300,7 +322,7 @@ class ArchiveDockWidget(QDockWidget):
 
         subtitle = QLabel(
             'Search commercial satellite archives (Planet, Airbus, Jilin-1, Umbra, ICEYE, Capella, Vantor, '
-            'Copernicus). Credentials are configured in Settings.'
+            'Earth Search, Planetary Computer, NASA). Credentials/endpoints are configured in Settings.'
         )
         subtitle.setWordWrap(True)
         subtitle.setStyleSheet(f'color: {self._LABEL_COLOR}; font-size: 10px;')
@@ -353,6 +375,32 @@ class ArchiveDockWidget(QDockWidget):
         date_row.addWidget(QLabel('To:'))
         date_row.addWidget(self.date_end)
         filter_form.addRow('Date Range:', date_row)
+
+        # Free-text dataset query (used by providers that support text search,
+        # notably NASA EarthData catalog short-name/title/concept-id matching).
+        self.query_input = QLineEdit()
+        self.query_input.setPlaceholderText('Dataset/query (e.g. HLSL30, GEDI, C2021957657-LPCLOUD)')
+        filter_form.addRow('Text Query:', self.query_input)
+
+        # Optional advanced provider-side filters used by NASA EarthData.
+        self.daynight_combo = QComboBox()
+        self.daynight_combo.addItem('Any', None)
+        self.daynight_combo.addItem('Day only', 'day')
+        self.daynight_combo.addItem('Night only', 'night')
+        self.daynight_combo.addItem('Both (unspecified)', 'unspecified')
+        filter_form.addRow('Day/Night:', self.daynight_combo)
+
+        self.provider_filter_input = QLineEdit()
+        self.provider_filter_input.setPlaceholderText('Provider filter (e.g. LPCLOUD, PODAAC)')
+        filter_form.addRow('Provider:', self.provider_filter_input)
+
+        self.version_filter_input = QLineEdit()
+        self.version_filter_input.setPlaceholderText('Version filter (e.g. 061, 2.0)')
+        filter_form.addRow('Version:', self.version_filter_input)
+
+        self.granule_id_input = QLineEdit()
+        self.granule_id_input.setPlaceholderText('Granule ID pattern (e.g. *T11* or HLS.L30.*)')
+        filter_form.addRow('Granule ID:', self.granule_id_input)
 
         # Cloud cover (optical only)
         cloud_row = QHBoxLayout()
@@ -428,6 +476,17 @@ class ArchiveDockWidget(QDockWidget):
         self.results_table.itemSelectionChanged.connect(self._on_table_selection_changed)
         results_layout.addWidget(self.results_table)
 
+        result_filter_row = QHBoxLayout()
+        result_filter_row.addWidget(QLabel('Filter Rows:'))
+        self.result_filter_input = QLineEdit()
+        self.result_filter_input.setPlaceholderText('Filter by ID, provider, date, cloud, GSD...')
+        self.result_filter_input.textChanged.connect(self._filter_result_rows)
+        result_filter_row.addWidget(self.result_filter_input, 1)
+        clear_filter_btn = QPushButton('Clear Filter')
+        clear_filter_btn.clicked.connect(self.result_filter_input.clear)
+        result_filter_row.addWidget(clear_filter_btn)
+        results_layout.addLayout(result_filter_row)
+
         result_count_row = QHBoxLayout()
         self.result_count_label = QLabel('No search performed')
         self.result_count_label.setStyleSheet(f'color: {self._LABEL_COLOR}; font-size: 10px;')
@@ -475,7 +534,10 @@ class ArchiveDockWidget(QDockWidget):
 
         self.load_cog_btn = QPushButton('Load COG')
         self.load_cog_btn.setEnabled(False)
-        self.load_cog_btn.setToolTip('Add COG visual layer to map')
+        self.load_cog_btn.setToolTip(
+            'Select a result, then click to load the scene as a COG layer. '
+            'For CDSE Sentinel this is the exact UI action.'
+        )
         self.load_cog_btn.clicked.connect(self._load_cog)
         actions_row.addWidget(self.load_cog_btn)
 
@@ -486,6 +548,34 @@ class ArchiveDockWidget(QDockWidget):
         actions_row.addWidget(self.order_btn)
 
         layout.addLayout(actions_row)
+
+        export_row = QHBoxLayout()
+        self.export_csv_btn = QPushButton('Export CSV')
+        self.export_csv_btn.setEnabled(False)
+        self.export_csv_btn.clicked.connect(lambda: self._export_results('csv'))
+        export_row.addWidget(self.export_csv_btn)
+
+        self.export_geojson_btn = QPushButton('Export GeoJSON')
+        self.export_geojson_btn.setEnabled(False)
+        self.export_geojson_btn.clicked.connect(lambda: self._export_results('geojson'))
+        export_row.addWidget(self.export_geojson_btn)
+
+        self.export_json_btn = QPushButton('Export JSON')
+        self.export_json_btn.setEnabled(False)
+        self.export_json_btn.clicked.connect(lambda: self._export_results('json'))
+        export_row.addWidget(self.export_json_btn)
+
+        self.export_stac_btn = QPushButton('Export STAC')
+        self.export_stac_btn.setEnabled(False)
+        self.export_stac_btn.clicked.connect(lambda: self._export_results('stac'))
+        export_row.addWidget(self.export_stac_btn)
+
+        self.export_bundle_btn = QPushButton('Bundle')
+        self.export_bundle_btn.setEnabled(False)
+        self.export_bundle_btn.clicked.connect(lambda: self._export_results('bundle'))
+        export_row.addWidget(self.export_bundle_btn)
+
+        layout.addLayout(export_row)
 
         # --- Status ---
         self.status_label = QLabel('Ready — configure credentials in Settings, then search.')
@@ -545,29 +635,12 @@ class ArchiveDockWidget(QDockWidget):
             except Exception as exc:
                 logger.warning(f'OneAtlas connector unavailable: {exc}')
 
-            # ICEYE STAC
+            # ICEYE API
             try:
-                from ..connectors.iceye_stac import IceyeStacConnector
-                iceye = IceyeStacConnector()
+                from ..connectors.iceye import IceyeConnector
+                iceye_api = IceyeConnector()
                 self._connector_manager.register_connector(
-                    'iceye_stac', iceye, 'ICEYE SAR',
-                    capabilities=[
-                        ConnectorCapability.BBOX_SEARCH,
-                        ConnectorCapability.DATE_RANGE,
-                        ConnectorCapability.AUTHENTICATION,
-                        ConnectorCapability.COMMERCIAL,
-                    ]
-                )
-                logger.debug('ICEYE connector registered')
-            except Exception as exc:
-                logger.warning(f'ICEYE connector unavailable: {exc}')
-
-            # Umbra STAC v2 (commercial archive)
-            try:
-                from ..connectors.umbra_stac import UmbraSTACConnector
-                umbra = UmbraSTACConnector()
-                self._connector_manager.register_connector(
-                    'umbra_stac', umbra, 'Umbra SAR',
+                    'iceye', iceye_api, 'ICEYE SAR',
                     capabilities=[
                         ConnectorCapability.BBOX_SEARCH,
                         ConnectorCapability.DATE_RANGE,
@@ -576,33 +649,53 @@ class ArchiveDockWidget(QDockWidget):
                         ConnectorCapability.COMMERCIAL,
                     ]
                 )
-                logger.debug('Umbra connector registered')
+                logger.debug('ICEYE API connector registered')
             except Exception as exc:
-                logger.warning(f'Umbra connector unavailable: {exc}')
+                logger.warning(f'ICEYE API connector unavailable: {exc}')
 
-            # Capella Space
+            # Umbra API
             try:
-                from ..connectors.capella_stac import CapellaSTACConnector
-                capella = CapellaSTACConnector()
+                from ..connectors.umbra import UmbraConnector
+                umbra_api = UmbraConnector()
                 self._connector_manager.register_connector(
-                    'capella_stac', capella, 'Capella Space',
+                    'umbra', umbra_api, 'Umbra SAR',
                     capabilities=[
                         ConnectorCapability.BBOX_SEARCH,
                         ConnectorCapability.DATE_RANGE,
                         ConnectorCapability.COLLECTIONS,
+                        ConnectorCapability.AUTHENTICATION,
+                        ConnectorCapability.COMMERCIAL,
+                    ]
+                )
+                logger.debug('Umbra API connector registered')
+            except Exception as exc:
+                logger.warning(f'Umbra API connector unavailable: {exc}')
+
+            # Capella API
+            try:
+                from ..connectors.capella import CapellaConnector
+                capella_api = CapellaConnector()
+                self._connector_manager.register_connector(
+                    'capella', capella_api, 'Capella Space',
+                    capabilities=[
+                        ConnectorCapability.BBOX_SEARCH,
+                        ConnectorCapability.DATE_RANGE,
+                        ConnectorCapability.COLLECTIONS,
+                        ConnectorCapability.AUTHENTICATION,
                         ConnectorCapability.COG_SUPPORT,
+                        ConnectorCapability.COMMERCIAL,
                     ]
                 )
-                logger.debug('Capella connector registered')
+                logger.debug('Capella API connector registered')
             except Exception as exc:
-                logger.warning(f'Capella connector unavailable: {exc}')
+                logger.warning(f'Capella API connector unavailable: {exc}')
 
             # Vantor
             try:
                 from ..connectors.vantor import VantorConnector
                 vantor = VantorConnector()
                 self._connector_manager.register_connector(
-                    'vantor', vantor, 'Vantor',
+                    'vantor', vantor, 'Vantor Hub Discovery',
                     capabilities=[
                         ConnectorCapability.BBOX_SEARCH,
                         ConnectorCapability.DATE_RANGE,
@@ -613,22 +706,43 @@ class ArchiveDockWidget(QDockWidget):
             except Exception as exc:
                 logger.warning(f'Vantor connector unavailable: {exc}')
 
-            # Copernicus
+            # Earth Search (Element84 STAC)
             try:
-                from ..connectors.copernicus_stac import CopernicusStacConnector
-                copernicus = CopernicusStacConnector()
+                from ..connectors.element84_stac import Element84StacConnector
+                element84_stac = Element84StacConnector()
                 self._connector_manager.register_connector(
-                    'copernicus_stac', copernicus, 'Copernicus',
+                    'element84_stac', element84_stac, 'Earth Search (Element84)',
                     capabilities=[
                         ConnectorCapability.BBOX_SEARCH,
                         ConnectorCapability.DATE_RANGE,
+                        ConnectorCapability.COLLECTIONS,
                         ConnectorCapability.CLOUD_COVER,
-                        ConnectorCapability.AUTHENTICATION,
+                        ConnectorCapability.COG_SUPPORT,
                     ]
                 )
-                logger.debug('Copernicus connector registered')
+                logger.debug('Earth Search connector registered')
             except Exception as exc:
-                logger.warning(f'Copernicus connector unavailable: {exc}')
+                logger.warning(f'Earth Search connector unavailable: {exc}')
+
+            # Microsoft Planetary Computer (open-data STAC)
+            try:
+                from ..connectors.planetary_computer_stac import PlanetaryComputerStacConnector
+                planetary_computer_stac = PlanetaryComputerStacConnector()
+                self._connector_manager.register_connector(
+                    'planetary_computer_stac',
+                    planetary_computer_stac,
+                    'Microsoft Planetary Computer',
+                    capabilities=[
+                        ConnectorCapability.BBOX_SEARCH,
+                        ConnectorCapability.DATE_RANGE,
+                        ConnectorCapability.COLLECTIONS,
+                        ConnectorCapability.CLOUD_COVER,
+                        ConnectorCapability.COG_SUPPORT,
+                    ]
+                )
+                logger.debug('Planetary Computer connector registered')
+            except Exception as exc:
+                logger.warning(f'Planetary Computer connector unavailable: {exc}')
 
             # NASA EarthData
             try:
@@ -780,6 +894,55 @@ class ArchiveDockWidget(QDockWidget):
         cloud_max = self.cloud_slider.value() / 100.0  # 0.0–1.0 for most connectors
         limit     = int(self.limit_combo.currentText())
         sensor    = self.sensor_combo.currentText()
+        text_query = self.query_input.text().strip()
+
+        orbit_min = str(self.settings.value('altair/nasa_orbit_min', '')).strip()
+        orbit_max = str(self.settings.value('altair/nasa_orbit_max', '')).strip()
+        orbit_number = None
+        try:
+            orbit_min_i = int(orbit_min) if orbit_min else 0
+            orbit_max_i = int(orbit_max) if orbit_max else 0
+            if orbit_min_i > 0 and orbit_max_i > 0:
+                orbit_number = (orbit_min_i, orbit_max_i)
+            elif orbit_min_i > 0:
+                orbit_number = orbit_min_i
+            elif orbit_max_i > 0:
+                orbit_number = orbit_max_i
+        except Exception:
+            orbit_number = None
+
+        extra_filters = {
+            'day_night_flag': self.daynight_combo.currentData(),
+            'provider': self.provider_filter_input.text().strip() or None,
+            'version': self.version_filter_input.text().strip() or None,
+            'granule_id': self.granule_id_input.text().strip() or None,
+            'orbit_number': orbit_number,
+            # Vantor Discovery API controls (ignored by other connectors).
+            'vantor_use_discovery_api': self.settings.value(
+                'AltairEOData/vantor_discovery_enabled', True, type=bool
+            ),
+            'discovery_search_path': str(
+                self.settings.value(
+                    'AltairEOData/vantor_discovery_search_path',
+                    '/catalogs/imagery/search',
+                )
+            ).strip() or '/catalogs/imagery/search',
+            'discovery_sortby': str(
+                self.settings.value('AltairEOData/vantor_discovery_sortby', '')
+            ).strip() or None,
+            'discovery_area_based_calc': self.settings.value(
+                'AltairEOData/vantor_discovery_area_based_calc', False, type=bool
+            ),
+            'discovery_collections': [
+                part.strip()
+                for part in str(
+                    self.settings.value(
+                        'AltairEOData/vantor_discovery_collections', ''
+                    )
+                ).split(',')
+                if part.strip()
+            ] or None,
+        }
 
         search_params = {
             'bbox':          bbox,
@@ -789,7 +952,11 @@ class ArchiveDockWidget(QDockWidget):
             'limit':         limit,
             'sensor_type':   sensor,
             'connector_ids': ready_providers,
+            'text_query':    text_query,
+            'extra_filters': extra_filters,
         }
+
+        self._last_search_params = dict(search_params)
 
         if skipped_providers:
             self.status_label.setText(
@@ -824,6 +991,54 @@ class ArchiveDockWidget(QDockWidget):
 
         capabilities = connector_info.get('capabilities', [])
         needs_auth = any(getattr(cap, 'value', '') == 'authentication' for cap in capabilities)
+
+        # Vantor uses a public fallback, but we still call authenticate() to apply
+        # Discovery runtime config (base URL, search path, API key/token).
+        if connector_id == 'vantor':
+            try:
+                credentials = self._get_credentials_for_connector('vantor') or {}
+                self._connector_manager.authenticate_connector(
+                    connector_id='vantor',
+                    credentials=credentials,
+                )
+                connector_info['authenticated'] = True
+                return True
+            except Exception as exc:
+                logger.warning(f'Archive search: Vantor setup failed: {exc}')
+                # Keep open-data fallback reachable even if Discovery setup fails.
+                connector_info['authenticated'] = True
+                return True
+
+        # Earth Search is public, but we still call authenticate() to apply
+        # endpoint/timeout settings and optionally probe API reachability.
+        if connector_id == 'element84_stac':
+            try:
+                credentials = self._get_credentials_for_connector('element84_stac') or {}
+                self._connector_manager.authenticate_connector(
+                    connector_id='element84_stac',
+                    credentials=credentials,
+                )
+                connector_info['authenticated'] = True
+                return True
+            except Exception as exc:
+                logger.warning(f'Archive search: Earth Search setup failed: {exc}')
+                connector_info['authenticated'] = True
+                return True
+
+        if connector_id == 'planetary_computer_stac':
+            try:
+                credentials = self._get_credentials_for_connector('planetary_computer_stac') or {}
+                self._connector_manager.authenticate_connector(
+                    connector_id='planetary_computer_stac',
+                    credentials=credentials,
+                )
+                connector_info['authenticated'] = True
+                return True
+            except Exception as exc:
+                logger.warning(f'Archive search: Planetary Computer setup failed: {exc}')
+                connector_info['authenticated'] = True
+                return True
+
         if not needs_auth:
             connector_info['authenticated'] = True
             return True
@@ -845,14 +1060,210 @@ class ArchiveDockWidget(QDockWidget):
 
     def _get_credentials_for_connector(self, connector_id: str) -> Optional[Dict[str, Any]]:
         """Read provider credentials from secure storage/QSettings."""
+        if connector_id == 'vantor':
+            settings = QSettings()
+            credentials: Dict[str, Any] = {
+                'discovery_enabled': settings.value(
+                    'AltairEOData/vantor_discovery_enabled', True, type=bool
+                ),
+                'discovery_base_url': str(
+                    settings.value(
+                        'AltairEOData/vantor_discovery_base_url',
+                        'https://api.maxar.com/discovery/v1',
+                    )
+                ).strip() or 'https://api.maxar.com/discovery/v1',
+                'discovery_timeout': int(
+                    settings.value(
+                        'AltairEOData/vantor_discovery_timeout',
+                        settings.value('AltairEOData/vantor_search_timeout', 30),
+                        type=int,
+                    )
+                ),
+                'discovery_search_path': str(
+                    settings.value(
+                        'AltairEOData/vantor_discovery_search_path',
+                        '/catalogs/imagery/search',
+                    )
+                ).strip() or '/catalogs/imagery/search',
+                'tasking_base_url': str(
+                    settings.value('AltairEOData/vantor_tasking_base_url', '')
+                ).strip(),
+                'tasking_create_path': str(
+                    settings.value('AltairEOData/vantor_tasking_create_path', '/tasking/v2/requests')
+                ).strip() or '/tasking/v2/requests',
+                'tasking_list_path': str(
+                    settings.value('AltairEOData/vantor_tasking_list_path', '/tasking/v2/requests')
+                ).strip() or '/tasking/v2/requests',
+                'tasking_timeout': int(
+                    settings.value('AltairEOData/vantor_tasking_timeout', 30, type=int)
+                ),
+            }
+
+            if self.secure_storage:
+                vantor_creds = self.secure_storage.get_credentials('vantor') or {}
+                api_key = (
+                    vantor_creds.get('discovery_api_key')
+                    or vantor_creds.get('api_key')
+                    or ''
+                )
+                access_token = (
+                    vantor_creds.get('discovery_access_token')
+                    or vantor_creds.get('access_token')
+                    or ''
+                )
+                if api_key:
+                    credentials['discovery_api_key'] = str(api_key).strip()
+                if access_token:
+                    credentials['discovery_access_token'] = str(access_token).strip()
+                tasking_token = (
+                    vantor_creds.get('tasking_access_token')
+                    or vantor_creds.get('access_token')
+                    or ''
+                )
+                if tasking_token:
+                    credentials['tasking_access_token'] = str(tasking_token).strip()
+
+            return credentials
+
+        if connector_id == 'element84_stac':
+            settings = QSettings()
+            return {
+                'api_root': str(
+                    settings.value(
+                        'AltairEOData/element84_stac_api_url',
+                        'https://earth-search.aws.element84.com/v1',
+                    )
+                ).strip(),
+                'timeout': int(
+                    settings.value(
+                        'AltairEOData/element84_stac_timeout',
+                        30,
+                        type=int,
+                    )
+                ),
+            }
+
+        if connector_id == 'planetary_computer_stac':
+            settings = QSettings()
+            return {
+                'api_root': str(
+                    settings.value(
+                        'AltairEOData/planetary_computer_stac_api_url',
+                        'https://planetarycomputer.microsoft.com/api/stac/v1',
+                    )
+                ).strip(),
+                'timeout': int(
+                    settings.value(
+                        'AltairEOData/planetary_computer_stac_timeout',
+                        30,
+                        type=int,
+                    )
+                ),
+            }
+
         if connector_id == 'planet':
             planet_creds = self.secure_storage.get_credentials('planet') if self.secure_storage else {}
             planet_creds = planet_creds or {}
-            token = (planet_creds.get('access_token') or '').strip()
+            token = (planet_creds.get('api_key') or planet_creds.get('access_token') or '').strip()
 
             settings = QSettings()
             api_base_url = str(
-                settings.value('altair/planet_api_base_url', 'https://services.sentinel-hub.com')
+                settings.value(
+                    'AltairEOData/planet_api_base_url',
+                    settings.value('altair/planet_api_base_url', 'https://api.planet.com')
+                )
+            ).strip()
+
+            if not token:
+                return {}
+
+            return {
+                'api_key': token,
+                'access_token': token,
+                'api_base_url': api_base_url,
+                'tasking_base_url': str(
+                    settings.value('AltairEOData/planet_tasking_base_url', 'https://api.planet.com')
+                ).strip() or 'https://api.planet.com',
+                'tasking_orders_path': str(
+                    settings.value('AltairEOData/planet_tasking_orders_path', '/tasking/v2/orders/')
+                ).strip() or '/tasking/v2/orders/',
+                'tasking_pricing_path': str(
+                    settings.value('AltairEOData/planet_tasking_pricing_path', '/tasking/v2/pricing/')
+                ).strip() or '/tasking/v2/pricing/',
+            }
+
+        if connector_id == 'jilin_gaofen_stac':
+            settings = QSettings()
+            creds = self.secure_storage.get_credentials('jilin_gaofen_stac') if self.secure_storage else {}
+            creds = creds or {}
+            return {
+                'base_url': str(settings.value('AltairEOData/jilin_catalog_base_url', '')).strip(),
+                'collection': str(settings.value('AltairEOData/jilin_default_collection', '')).strip(),
+                'access_token': str(creds.get('access_token') or '').strip(),
+                'tasking_base_url': str(settings.value('AltairEOData/jilin_tasking_base_url', '')).strip(),
+                'tasking_create_path': str(
+                    settings.value('AltairEOData/jilin_tasking_create_path', '/tasking/v2/requests')
+                ).strip() or '/tasking/v2/requests',
+                'tasking_list_path': str(
+                    settings.value('AltairEOData/jilin_tasking_list_path', '/tasking/v2/requests')
+                ).strip() or '/tasking/v2/requests',
+                'tasking_access_token': str(
+                    creds.get('tasking_access_token') or creds.get('access_token') or ''
+                ).strip(),
+            }
+
+        if connector_id == 'jaxa_earth_stac':
+            settings = QSettings()
+            creds = self.secure_storage.get_credentials('jaxa_earth_stac') if self.secure_storage else {}
+            creds = creds or {}
+            return {
+                'catalog_url': str(
+                    settings.value('AltairEOData/jaxa_catalog_url', 'https://data.earth.jaxa.jp/stac/cog/v1/catalog.json')
+                ).strip(),
+                'search_url': str(
+                    settings.value('AltairEOData/jaxa_search_url', 'https://data.earth.jaxa.jp/stac/cog/v1/search')
+                ).strip(),
+                'tasking_base_url': str(settings.value('AltairEOData/jaxa_tasking_base_url', '')).strip(),
+                'tasking_create_path': str(
+                    settings.value('AltairEOData/jaxa_tasking_create_path', '/tasking/v2/requests')
+                ).strip() or '/tasking/v2/requests',
+                'tasking_list_path': str(
+                    settings.value('AltairEOData/jaxa_tasking_list_path', '/tasking/v2/requests')
+                ).strip() or '/tasking/v2/requests',
+                'tasking_access_token': str(
+                    creds.get('tasking_access_token') or ''
+                ).strip(),
+            }
+
+        if connector_id == 'oneatlas' and self.secure_storage:
+            return self.secure_storage.get_credentials('oneatlas')
+
+        if connector_id == 'cdse_sentinel' and self.secure_storage:
+            return self.secure_storage.get_credentials('cdse_sentinel')
+
+        if connector_id in ('capella', 'capella_stac'):
+            creds = self.secure_storage.get_credentials('capella') if self.secure_storage else {}
+            creds = creds or {}
+            token = (creds.get('access_token') or '').strip()
+
+            settings = QSettings()
+            api_base_url = str(
+                settings.value(
+                    'AltairEOData/capella_api_base_url',
+                    settings.value('altair/capella_api_base_url', 'https://api.capellaspace.com')
+                )
+            ).strip()
+            collections_path = str(
+                settings.value(
+                    'AltairEOData/capella_collections_path',
+                    settings.value('altair/capella_collections_path', '/stac/collections')
+                )
+            ).strip()
+            search_path = str(
+                settings.value(
+                    'AltairEOData/capella_search_path',
+                    settings.value('altair/capella_search_path', '/stac/search')
+                )
             ).strip()
 
             if not token:
@@ -861,27 +1272,35 @@ class ArchiveDockWidget(QDockWidget):
             return {
                 'access_token': token,
                 'api_base_url': api_base_url,
+                'collections_path': collections_path,
+                'search_path': search_path,
             }
 
-        if connector_id == 'oneatlas' and self.secure_storage:
-            return self.secure_storage.get_credentials('oneatlas')
-
-        if connector_id == 'copernicus_stac' and self.secure_storage:
-            return self.secure_storage.get_credentials('copernicus')
-
-        if connector_id == 'capella_stac' and self.secure_storage:
-            return self.secure_storage.get_credentials('capella') or {}
-
-        if connector_id == 'iceye_stac':
+        if connector_id in ('iceye', 'iceye_stac'):
             token = ''
             if self.secure_storage:
                 iceye_creds = self.secure_storage.get_credentials('iceye') or {}
                 token = (iceye_creds.get('access_token') or '').strip()
 
             settings = QSettings()
-            api_base_url = str(settings.value('altair/iceye_endpoint', 'https://api.iceye.com')).strip()
-            contract_id = str(settings.value('altair/iceye_contract_id', '')).strip()
-            collections = str(settings.value('altair/iceye_collections', '')).strip()
+            api_base_url = str(
+                settings.value(
+                    'AltairEOData/iceye_endpoint',
+                    settings.value('altair/iceye_endpoint', 'https://api.iceye.com')
+                )
+            ).strip()
+            contract_id = str(
+                settings.value(
+                    'AltairEOData/iceye_contract_id',
+                    settings.value('altair/iceye_contract_id', '')
+                )
+            ).strip()
+            collections = str(
+                settings.value(
+                    'AltairEOData/iceye_collections',
+                    settings.value('altair/iceye_collections', '')
+                )
+            ).strip()
 
             if not token:
                 return {}
@@ -893,7 +1312,7 @@ class ArchiveDockWidget(QDockWidget):
                 'collections': collections or None,
             }
 
-        if connector_id == 'umbra_stac':
+        if connector_id in ('umbra', 'umbra_stac'):
             token = ''
             client_id = ''
             client_secret = ''
@@ -904,7 +1323,12 @@ class ArchiveDockWidget(QDockWidget):
                 client_secret = (umbra_creds.get('client_secret') or '').strip()
 
             settings = QSettings()
-            api_base_url = str(settings.value('altair/umbra_api_base_url', 'https://api.canopy.umbra.space')).strip()
+            api_base_url = str(
+                settings.value(
+                    'AltairEOData/umbra_api_base_url',
+                    settings.value('altair/umbra_api_base_url', 'https://api.canopy.umbra.space')
+                )
+            ).strip()
 
             if not token and not (client_id and client_secret):
                 return {}
@@ -960,6 +1384,7 @@ class ArchiveDockWidget(QDockWidget):
                 'username': username or None,
                 'password': password or None,
                 'access_token': access_token or None,
+                'allow_deferred_validation': True,
             }
 
         # swisstopo and JAXA Earth are public — no credentials required
@@ -1052,12 +1477,18 @@ class ArchiveDockWidget(QDockWidget):
 
         self.results_table.setSortingEnabled(True)
         self.clear_btn.setEnabled(count > 0)
+        self.export_csv_btn.setEnabled(count > 0)
+        self.export_geojson_btn.setEnabled(count > 0)
+        self.export_json_btn.setEnabled(count > 0)
+        self.export_stac_btn.setEnabled(count > 0)
+        self.export_bundle_btn.setEnabled(count > 0)
 
         self.status_label.setText(f'Search complete — {count} scene(s)')
         self.status_label.setStyleSheet('color: #00ffbf; font-size: 10px;')
 
         if count > 0:
             self._refresh_footprints_layer()
+            self._filter_result_rows()
 
     # ------------------------------------------------------------------
     # Footprints layer
@@ -1102,13 +1533,13 @@ class ArchiveDockWidget(QDockWidget):
 
             # Normal (unselected) footprints — blue, semi-transparent
             sym_normal = QgsFillSymbol.createSimple({
-                'color':         '0,120,255,60',
+                'color':         '0,120,255,51',
                 'outline_color': '#0078ff',
                 'outline_width': '0.4',
             })
             # Selected footprints — yellow, semi-transparent (map still visible beneath)
             sym_selected = QgsFillSymbol.createSimple({
-                'color':         '255,220,0,120',
+                'color':         '255,220,0,51',
                 'outline_color': '#ffcc00',
                 'outline_width': '0.7',
             })
@@ -1210,6 +1641,10 @@ class ArchiveDockWidget(QDockWidget):
         self.quicklook_btn.setEnabled(has_sel and len(rows) == 1)
         self.load_cog_btn.setEnabled(has_sel)
         self.order_btn.setEnabled(has_sel and len(rows) == 1)
+
+        self.load_cog_btn.setToolTip(
+            'Select a result, then click to load the scene as a COG layer.'
+        )
 
         if len(rows) == 1:
             row = next(iter(rows))
@@ -1708,7 +2143,7 @@ class ArchiveDockWidget(QDockWidget):
                 if not lyr.isValid() and href.startswith('http'):
                     lyr = QgsRasterLayer(href, scene_id)
 
-                if not lyr.isValid() and item.get('_source') == 'copernicus_stac':
+                if not lyr.isValid() and item.get('_source') == 'cdse_sentinel':
                     connector = self._get_connector_instance(item)
                     if connector and hasattr(connector, 'get_s3_credentials'):
                         creds = connector.get_s3_credentials()
@@ -1757,6 +2192,158 @@ class ArchiveDockWidget(QDockWidget):
         if item:
             self.order_requested.emit(item)
 
+    def _filter_result_rows(self):
+        text = self.result_filter_input.text().strip().lower() if hasattr(self, 'result_filter_input') else ''
+        for row in range(self.results_table.rowCount()):
+            if not text:
+                self.results_table.setRowHidden(row, False)
+                continue
+
+            values: List[str] = []
+            for col in range(self.results_table.columnCount()):
+                item = self.results_table.item(row, col)
+                if item is None:
+                    continue
+                values.append(item.text())
+                values.append(item.toolTip())
+            haystack = ' '.join(values).lower()
+            self.results_table.setRowHidden(row, text not in haystack)
+
+    def _export_rows(self) -> List[Dict[str, Any]]:
+        rows: List[Dict[str, Any]] = []
+        for index, item in enumerate(self._search_results or []):
+            props = item.get('properties', {})
+            rows.append({
+                'result_idx': index,
+                'id': item.get('id', ''),
+                'provider': item.get('_provider', props.get('provider', '')),
+                'source': item.get('_source', ''),
+                'datetime': props.get('datetime', ''),
+                'platform': props.get('platform', ''),
+                'cloud_cover': props.get('eo:cloud_cover', props.get('cloud_cover', '')),
+                'gsd': props.get('gsd', props.get('eo:gsd', '')),
+                'bbox': item.get('bbox', None),
+                'assets': item.get('assets', {}),
+                'properties': props,
+                'geometry': item.get('geometry', None),
+            })
+        return rows
+
+    def _export_results(self, export_kind: str):
+        if not self._search_results:
+            QMessageBox.information(self, 'Export Results', 'No search results to export.')
+            return
+
+        workflow_dir = _nasa_workflow_dir(self.settings)
+        workflow_dir.mkdir(parents=True, exist_ok=True)
+
+        if export_kind == 'csv':
+            default_path = str(workflow_dir / 'archive_results.csv')
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                'Export Archive Results CSV',
+                default_path,
+                'CSV Files (*.csv)',
+            )
+        elif export_kind == 'geojson':
+            default_path = str(workflow_dir / 'archive_results.geojson')
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                'Export Archive Results GeoJSON',
+                default_path,
+                'GeoJSON Files (*.geojson *.json)',
+            )
+        elif export_kind == 'json':
+            default_path = str(workflow_dir / 'archive_results.json')
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                'Export Archive Results JSON',
+                default_path,
+                'JSON Files (*.json)',
+            )
+        elif export_kind == 'stac':
+            default_path = str(workflow_dir / 'archive_results_stac.json')
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                'Export Archive Results STAC',
+                default_path,
+                'JSON Files (*.json)',
+            )
+        else:
+            default_path = str(workflow_dir / 'archive_workflow_bundle.json')
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                'Export Archive Workflow Bundle',
+                default_path,
+                'JSON Files (*.json)',
+            )
+
+        if not file_path:
+            return
+
+        rows = self._export_rows()
+
+        try:
+            if export_kind == 'csv':
+                import csv
+                with open(file_path, 'w', encoding='utf-8', newline='') as fout:
+                    writer = csv.DictWriter(
+                        fout,
+                        fieldnames=['result_idx', 'id', 'provider', 'source', 'datetime', 'platform', 'cloud_cover', 'gsd', 'bbox'],
+                    )
+                    writer.writeheader()
+                    for row in rows:
+                        writer.writerow({
+                            'result_idx': row.get('result_idx', ''),
+                            'id': row.get('id', ''),
+                            'provider': row.get('provider', ''),
+                            'source': row.get('source', ''),
+                            'datetime': row.get('datetime', ''),
+                            'platform': row.get('platform', ''),
+                            'cloud_cover': row.get('cloud_cover', ''),
+                            'gsd': row.get('gsd', ''),
+                            'bbox': json.dumps(row.get('bbox', None)),
+                        })
+            elif export_kind == 'geojson':
+                features = []
+                for row in rows:
+                    features.append({
+                        'type': 'Feature',
+                        'geometry': row.get('geometry'),
+                        'properties': {
+                            'id': row.get('id', ''),
+                            'provider': row.get('provider', ''),
+                            'source': row.get('source', ''),
+                            'datetime': row.get('datetime', ''),
+                            'platform': row.get('platform', ''),
+                            'cloud_cover': row.get('cloud_cover', ''),
+                            'gsd': row.get('gsd', ''),
+                        },
+                    })
+                with open(file_path, 'w', encoding='utf-8') as fout:
+                    json.dump({'type': 'FeatureCollection', 'features': features}, fout, indent=2)
+            elif export_kind == 'json':
+                with open(file_path, 'w', encoding='utf-8') as fout:
+                    json.dump(self._search_results, fout, indent=2, default=str)
+            elif export_kind == 'stac':
+                with open(file_path, 'w', encoding='utf-8') as fout:
+                    json.dump({'type': 'FeatureCollection', 'features': self._search_results}, fout, indent=2, default=str)
+            else:
+                bundle = {
+                    'schema_version': 1,
+                    'created_at': datetime.utcnow().isoformat() + 'Z',
+                    'search': self._last_search_params,
+                    'results': rows,
+                    'stac': {'type': 'FeatureCollection', 'features': self._search_results},
+                }
+                with open(file_path, 'w', encoding='utf-8') as fout:
+                    json.dump(bundle, fout, indent=2, default=str)
+
+            self.status_label.setText(f'Export complete: {os.path.basename(file_path)}')
+            self.status_label.setStyleSheet('color: #00aa66; font-size: 10px;')
+        except Exception as exc:
+            QMessageBox.critical(self, 'Export Error', f'Failed to export results:\n{exc}')
+
     # ------------------------------------------------------------------
     # Clear results
     # ------------------------------------------------------------------
@@ -1765,13 +2352,23 @@ class ArchiveDockWidget(QDockWidget):
         self._search_results.clear()
         self.results_table.setRowCount(0)
         self.result_count_label.setText('No search performed')
+        if hasattr(self, 'result_filter_input'):
+            self.result_filter_input.clear()
         self.clear_btn.setEnabled(False)
+        self.export_csv_btn.setEnabled(False)
+        self.export_geojson_btn.setEnabled(False)
+        self.export_json_btn.setEnabled(False)
+        self.export_stac_btn.setEnabled(False)
+        self.export_bundle_btn.setEnabled(False)
         self.select_from_map_btn.setEnabled(False)
         if self.select_from_map_btn.isChecked():
             self.select_from_map_btn.setChecked(False)
         self.zoom_btn.setEnabled(False)
         self.quicklook_btn.setEnabled(False)
         self.load_cog_btn.setEnabled(False)
+        self.load_cog_btn.setToolTip(
+            'Select a result, then click to load the scene as a COG layer.'
+        )
         self.order_btn.setEnabled(False)
         self._feature_id_to_result_index = {}
         self._result_index_to_feature_id = {}

@@ -78,7 +78,7 @@ class SecureStorage:
         Store credential securely
         
         Args:
-            service: Service name (e.g., 'oneatlas', 'planet', 'copernicus')
+            service: Service name (e.g., 'oneatlas', 'planet', 'cdse_sentinel')
             username: Username or API key name
             password: Password or API key value
         """
@@ -219,7 +219,7 @@ class SecureStorage:
         Retrieve all credentials for a service as a dictionary
         
         Args:
-            service: Service name (e.g., 'oneatlas', 'planet', 'copernicus')
+            service: Service name (e.g., 'oneatlas', 'planet', 'cdse_sentinel')
             
         Returns:
             Dictionary of stored credentials, or None if not found
@@ -234,28 +234,32 @@ class SecureStorage:
             if client_id or client_secret:
                 credentials['client_id'] = client_id
                 credentials['client_secret'] = client_secret
-        elif service == 'copernicus':
-            # Copernicus: can store either OAuth2 client credentials (client_id/client_secret)
-            # or user account credentials (username/password) which are required for S3 keys manager
-            client_id = self.retrieve_credential(service, 'client_id')
-            client_secret = self.retrieve_credential(service, 'client_secret')
+        elif service in {'cdse_sentinel', 'copernicus'}:
+            # CDSE Sentinel: can store either OAuth2 client credentials (client_id/client_secret)
+            # or user account credentials (username/password) which are required for S3 keys manager.
+            # Keep compatibility with legacy 'copernicus' service names from older installations.
+            legacy_service = 'copernicus' if service == 'cdse_sentinel' else 'cdse_sentinel'
+            client_id = self.retrieve_credential(service, 'client_id') or self.retrieve_credential(legacy_service, 'client_id')
+            client_secret = self.retrieve_credential(service, 'client_secret') or self.retrieve_credential(legacy_service, 'client_secret')
             if client_id or client_secret:
                 credentials['client_id'] = client_id
                 credentials['client_secret'] = client_secret
 
             # Also check for user account credentials (username/password)
-            username = self.retrieve_credential(service, 'username')
-            password = self.retrieve_credential(service, 'password')
+            username = self.retrieve_credential(service, 'username') or self.retrieve_credential(legacy_service, 'username')
+            password = self.retrieve_credential(service, 'password') or self.retrieve_credential(legacy_service, 'password')
             if username or password:
                 credentials['username'] = username
                 credentials['password'] = password
         elif service == 'planet':
-            access_token = self.retrieve_credential(service, 'access_token')
             api_key = self.retrieve_credential(service, 'api_key')
-            if access_token:
-                credentials['access_token'] = access_token
             if api_key:
                 credentials['api_key'] = api_key
+                credentials['access_token'] = api_key
+            else:
+                access_token = self.retrieve_credential(service, 'access_token')
+                if access_token:
+                    credentials['access_token'] = access_token
         elif service == 'iceye':
             access_token = self.retrieve_credential(service, 'access_token')
             if access_token:

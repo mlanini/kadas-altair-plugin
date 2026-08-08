@@ -1,895 +1,178 @@
 # KADAS Altair - User Guide
 
-**Complete installation and usage guide**
+Guida operativa aggiornata per installazione, configurazione API e utilizzo del plugin.
 
----
+## Indice
 
-## 📋 Table of Contents
+1. Installazione
+2. Primo utilizzo
+3. Connettori e API supportate
+4. Smart Tasking
+5. Autenticazione e impostazioni
+6. Troubleshooting
 
-1. [Installation](#installation)
-2. [First Use](#first-use)
-3. [Data Sources](#data-sources)
-4. [Search & Loading](#search--loading)
-5. [Authentication](#authentication)
-6. [Troubleshooting](#troubleshooting)
+## Installazione
 
----
-
-## 🔧 Installation
-
-Download [kadas_altair_plugin_full_vX.Y.Z.zip](releases/download/v0.4.3/kadas_altair_plugin_full_v0.4.3.zip) and copy manually:
+Scarica il pacchetto plugin e copia la cartella `kadas_altair_plugin` nel profilo KADAS.
 
 ```powershell
-# Windows
-# Check you KADAS flavour first: Mil, Zivil or Light
+# Windows (esempio profilo Zivil)
 Copy-Item -Recurse kadas_altair_plugin "$env:APPDATA\Kadas\KadasZivil\profiles\default\python\plugins\"
-
-# Linux / macOS
-cp -r kadas_altair_plugin ~/.local/share/Kadas/KadasZivil/profiles/default/python/plugins/
 ```
 
-### Requirements
-
-- KADAS Albireo 2.3+ (based on QGIS 3.x)
-- Internet connection
-- ~2 MB disk space
-
----
-
-## 🚀 First Use
-
-### 1. Open Plugin Panel
-
-**Plugins** → **Altair** → **Altair EO Data Panel**
-
-### 2. Select Connector
-
-Choose from dropdown:
-- **ICEYE SAR Open Data** (fastest test - 196 items)
-- **Vantor Open Data** (55+ disaster events)
-- **Umbra SAR Open Data** (high-res radar)
-- **Capella SAR Open Data** (~1000 images)
-- **Copernicus STAC (Dataspace)** (Sentinel constellation)
-
-### 3. Authenticate
-
-Click **Authenticate** button:
-- **ICEYE, Vantor, Umbra, Capella**: No credentials needed
-- **Copernicus STAC**: Requires client_id/client_secret (see [Authentication](#authentication))
-
-### 4. Select Collection
-
-Collections load automatically in dropdown. Select one.
-
-### 5. Define Search Area
-
-**Option A - Draw on Map:**
-1. Click **Draw Bbox** button
-2. Click and drag rectangle on map
-3. Coordinates auto-populate
-
-**Option B - Use Map Extent:**
-1. Zoom to desired area
-2. Click **Use Map Extent** button
-
-**Option C - Manual Entry:**
-1. Enter coordinates: `minX, minY, maxX, maxY`
-2. Format: `7.0, 46.0, 8.0, 47.0` (EPSG:4326)
-
-### 6. Set Filters (Optional)
-
-- **Date Range**: Start/End dates
-- **Cloud Cover**: 0-100% (optical imagery only)
-
-### 7. Search
-
-Click **Search** button → Results appear in table
-
-### 8. Load Imagery
-
-1. Select row(s) in results table
-2. Click **Load Layer** button
-3. Imagery appears in KADAS layers panel
-
----
-
-## 🛰️ Data Sources
-
-### ICEYE SAR Open Data
-
-**Type:** Synthetic Aperture Radar  
-**Collections:** 3 (196 total items)  
-**Resolution:** 1-3 meters  
-**Coverage:** Global  
-**Auth:** None required
-
-**Features:**
-- All-weather acquisition (works through clouds)
-- Day/night imaging
-- Pre-filtered by quality
-
-**Use Cases:** Emergency response, maritime surveillance, flood monitoring
-
-### Umbra SAR Open Data
-
-**Type:** Synthetic Aperture Radar  
-**Collections:** Recursive STAC (year → month → items)  
-**Resolution:** 16-25 cm (world's highest commercial SAR)  
-**Coverage:** Global  
-**Auth:** None required
-
-**Products:** GEC, SICD, SIDD, CPHD  
-**License:** CC BY 4.0
-
-**Use Cases:** Ultra-high resolution monitoring, infrastructure inspection
-
-### Capella SAR Open Data
-
-**Type:** Synthetic Aperture Radar  
-**Collections:** ~1000 images (6 organization types)  
-**Resolution:** ~1 meter  
-**Coverage:** Global  
-**Auth:** None required
-
-**Organizations:** product, mode, use-case, capital, datetime, IEEE  
-**Products:** GEO, GEC, SLC, SICD, SIDD, CPHD
-
-**Use Cases:** Defense, disaster response, commercial analytics
-
-### Vantor Open Data
-
-**Type:** Optical Imagery  
-**Collections:** 55+ disaster events  
-**Resolution:** 0.3-0.5 meters (sub-meter)  
-**Coverage:** Disaster areas worldwide  
-**Auth:** None required
-
-**Satellites:** WorldView, GeoEye, Pléiades  
-**License:** CC BY-NC-SA 4.0
-
-**Use Cases:** Disaster assessment, emergency response, damage mapping
-
-### Copernicus STAC (Dataspace)
-
-**Type:** Multi-sensor (Optical + SAR + Atmospheric)  
-**Collections:** Sentinel-1, 2, 3, 5P  
-**Resolution:** 10m (S2) to 7km (S5P)  
-**Coverage:** Global  
-**Auth:** OAuth2 required
-
-**Free registration:** https://dataspace.copernicus.eu/
-
-**Use Cases:** Environmental monitoring, agriculture, urban planning
-
----
-
-## 🔍 Search & Loading
-
-### Search Parameters
-
-All search filters are **optional** and can be enabled/disabled with checkboxes:
-
-| Parameter | Description | Format | Optional |
-|-----------|-------------|--------|----------|
-| **Search Area** | Bounding box or polygon | `minX, minY, maxX, maxY` (WGS84) | ✓ Use checkbox |
-| **Date Range** | Start and end dates | `YYYY-MM-DD` | ✓ Use checkbox |
-| **Cloud Cover** | Max % clouds | `0-100` (optical only) | ✓ Use checkbox |
-| **Collection** | Data collection | Dropdown selection | ✓ Select "All" |
-
-**Tips:**
-- Uncheck "Use Search Area" to search globally (all available data)
-- Uncheck "Use Date Range" to search all time periods
-- Uncheck "Use Cloud Cover Filter" to include all cloud conditions
-- Without filters, search returns all available data from the connector
-
-### Results Table
-
-Columns vary by connector, typically include:
-- **ID**: Unique identifier
-- **Date**: Acquisition date/time
-- **Platform**: Satellite/sensor
-- **Cloud Cover**: % (optical)
-- **GSD**: Ground sample distance (resolution)
-
-### Loading Imagery
-
-**COG (Cloud-Optimized GeoTIFF):**
-- Loaded via GDAL `/vsicurl/` driver
-- No download needed - streams from cloud
-- Zoom controls detail level
-
-**Supported Formats:**
-- GeoTIFF (.tif)
-- COG (Cloud-Optimized GeoTIFF)
-- JPEG 2000 (.jp2)
-
----
-
-## �️ Smart Tasking
-
-The **Smart Tasking** dock predicts when a satellite's sensor footprint will cross your area of interest, using SGP4 orbital propagation and a bearing-convergence algorithm.
-
-### Opening Smart Tasking
-
-**Plugins** → **Altair** → **Smart Tasking**
-
-### Predicting Overpasses
-
-1. Select one or more constellations from the satellite list
-2. Define your AOI (draw on map, use map extent, or enter coordinates)
-3. Set the prediction time window (start/end date)
-4. Click **Predict** → results appear in the Overpass tab
-
-### Understanding Results
-
-Each predicted overpass shows:
-- **Date/Time (UTC)** — closest approach time
-- **Direction** — Ascending or Descending pass
-- **Max Elevation** — equivalent elevation angle from observer
-- **Off-Nadir (°)** — pointing angle from satellite nadir
-- **Duration** — time the target is within the sensor footprint
-- **Confidence** — `SGP4` (TLE-based) or `Approximate` (analytical model)
-
-### 3D Visualisation
-
-Click any row in the overpass table to render 5 layers in the QGIS 3D view:
-- **Orbit Track** (white) — full orbital period at satellite altitude
-- **Ground Track** (cyan) — sub-satellite trace on the surface
-- **Swath Corridor** (cyan, semi-transparent) — sensor footprint ribbon
-- **Satellite** (red sphere) — position at closest approach
-- **Nadir Axis** (red tube) — vertical line from surface to satellite
-
-### Sensor Models
-
-- **Pushbroom** (e.g. Sentinel-2, Landsat) — target must be within half the swath width
-- **Off-Nadir** (e.g. WorldView, Pléiades) — target within swath AND off-nadir angle ≤ maximum scan angle
-
-### Inspiring Projects
-
-The prediction engine was inspired by [eo-predictor](https://github.com/developmentseed/eo-predictor) and [sat-predict](https://sat-predict.davidhsu.cc/).
-
----
-
-## 🔐 Authentication
-
-### Copernicus STAC (Dataspace)
-
-**Required for:** Sentinel-1, Sentinel-2, Sentinel-3, Sentinel-5P via STAC API
-
-**Get Credentials:**
-1. Register at https://dataspace.copernicus.eu/
-2. Create OAuth2 application
-3. Copy `client_id` and `client_secret`
-
-**Enter Credentials:**
-1. Select "Copernicus STAC (Dataspace)" connector
-2. Click **Settings** (gear icon)
-3. Navigate to **Copernicus STAC (Dataspace)** section
-4. Enter `client_id` and `client_secret`
-5. Click **Save**
-6. Click **Authenticate** in main panel
-
-**Credentials stored securely** in KADAS settings (keyring/encryption fallback).
-
----
-
-### Other Connectors
-
-**ICEYE, Umbra, Capella, Vantor:** No authentication needed (open data)
-
----
-
-### NASA EarthData (Experimental)
-
-**Required for:** restricted datasets and authenticated downloads/streaming through Earthdata Login.
-
-You can authenticate in two ways:
-1. **Username + Password** (Earthdata Login account)
-2. **Access Token** (`EARTHDATA_TOKEN`, Bearer token)
-
-**Get Earthdata Login:**
-1. Register at https://urs.earthdata.nasa.gov/
-2. (Optional) Create user token from EDL profile (Generate Token)
-
-**Enter credentials in plugin:**
-1. Open **Settings** → **NASA EarthData**
-2. Fill either:
-    - `Username` + `Password`, or
-    - `Access Token`
-3. Click **Test Credentials**
-4. Click **Save**
-
-Notes:
-- Dataset catalog loading can work without auth, but many data accesses require EDL auth.
-- `earthaccess` checks `EARTHDATA_TOKEN` / environment / `.netrc` fallback.
-
----
-
-## 🔧 Troubleshooting
-
-### Plugin Not Appearing
-
-**Check:**
-- Plugin is activated: Plugins → Manage and Install Plugins → Installed
-- KADAS version ≥ 2.3 (based on QGIS 3.x)
-- Plugin copied to correct directory
-
-**Fix:**
-```powershell
-# Verify installation directory
-ls "$env:APPDATA\Kadas\Kadas\profiles\default\python\plugins\kadas_altair_plugin"
-```
-
-### Authentication Failed (Copernicus)
-
-**Symptoms:** "Invalid credentials" error
-
-**Solutions:**
-2. Verify `client_id` and `client_secret` are correct
-3. Check no extra whitespace in credentials
-4. Ensure internet connection
-5. Check proxy settings: KADAS → Settings → Options → Network
-6. View logs: Plugins → Altair → View Logs
-
-### No Search Results
-
-**Check:**
-1. **Bbox valid**: minX < maxX, minY < maxY
-2. **Date range**: Start before end date
-3. **Collection selected**: Dropdown not empty
-4. **Area coverage**: Collection covers search area
-5. **Internet connection**: Active
-
-### Layer Not Loading
-
-**Check:**
-1. **GDAL support**: KADAS has GDAL with COG support (inherited from QGIS)
-2. **URL accessible**: Check logs for 404/403 errors
-3. **Firewall**: Allow KADAS internet access
-4. **Proxy**: Configure if behind corporate proxy
-
-### Slow Performance
-
-**Solutions:**
-1. **Reduce bbox size**: Smaller area = fewer results
-2. **Limit date range**: Shorter period = fewer results  
-3. **Increase cloud threshold**: Filters more optical imagery
-4. **Close other apps**: Free memory
-
-### View Logs
-
-**Plugins → Altair → View Logs**
-
-Logs show:
-- Authentication attempts
-- API requests/responses
-- Errors with stack traces
-- Network issues
-
-**Log location:**
-- Windows: `%APPDATA%\.kadas\altair_plugin.log`
-- Linux: `~/.kadas/altair_plugin.log`
-- macOS: `~/.kadas/altair_plugin.log`
-
----
-
-## 📚 Additional Resources
-
-- **[README.md](README.md)**: Overview and features
-- **[ARCHITECTURE.md](ARCHITECTURE.md)**: System architecture, connectors, performance, network stack
-- **[CONTRIBUTING.md](CONTRIBUTING.md)**: Development guidelines, testing
-- **Repository**: https://github.com/mlanini/kadas-altair
-- **Issues**: https://github.com/mlanini/kadas-altair/issues
-
----
-
-**Need Help?** Open an issue on GitHub or email mlanini@proton.me
-- **Python**: 3.12+ (included with KADAS Albireo 2)
-- **Internet**: Required for catalog and imagery access
-
-**No additional Python packages required!** The plugin uses only KADAS built-in libraries (QGIS-based).
-
----
-
-## Available Data Sources
-
-The plugin includes 6 production-ready connectors:
-
-| Connector | Collections | Type | Coverage | Status |
-|-----------|-------------|------|----------|--------|
-| **ICEYE SAR Open Data** | 3 | SAR Imagery | Global | ✅ Ready |
-| **Umbra SAR Open Data** | — | SAR Imagery | Global | ✅ Ready |
-| **Capella SAR Open Data** | — | SAR Imagery | Global | ✅ Ready |
-| **Vantor Open Data** | 55 | Optical | Disaster Events | ✅ Ready |
-| **swisstopo RapidMapping** | 3+ | Emergency Mapping | Switzerland | ✅ Ready |
-| **Copernicus Data Space** | 5+ | Multi-spectral | Global | ✅ Ready |
-
-### ICEYE SAR Open Data
-
-- **Type**: Synthetic Aperture Radar (SAR)
-- **Collections**: 3 (196 total items)
-- **Resolution**: Various
-- **Coverage**: Global sample areas
-- **Use Cases**: All-weather imaging, change detection
-- **Features**: Cloud-independent, day/night acquisition
-
-### Vantor Open Data
-
-- **Type**: High-resolution optical imagery
-- **Collections**: 55 disaster/emergency events
-- **Resolution**: Sub-meter
-- **Coverage**: Disaster response areas worldwide
-- **Use Cases**: Emergency response, damage assessment
-- **Features**: Very high resolution, recent events
-
-### swisstopo RapidMapping
-
-- **Type**: Emergency mapping products
-- **Collections**: BLATTEN and other Swiss events
-- **Coverage**: Switzerland
-- **Use Cases**: Rapid disaster response, emergency planning
-- **Features**: Localized, time-critical mapping
-
----
-
-## Configuration
-
-### AWS STAC Settings
-
-Access: `Plugins` → `Altair` → `Settings` → `AWS STAC` tab
-
-**Configurable Options**:
-
-| Setting | Default | Range | Description |
-|---------|---------|-------|-------------|
-| **Catalog URL** | AWS Open Data STAC | Any valid URL | Source of STAC endpoint catalog |
-| **Catalog Timeout** | 30 seconds | 5-120s | Timeout for loading catalog |
-| **Search Timeout** | 20 seconds | 5-120s | Timeout for search requests |
-| **Rate Limit Delay** | 1 second | 0-10s | Delay between pagination requests |
-
-**Restore Defaults**: Click "Ripristina URL Predefinito" button to reset catalog URL.
-
-### Display Settings
-
-Access: `Plugins` → `Altair` → `Settings` → `Visualizzazione` tab
-
-- **Auto-zoom su risultati**: Automatically zoom to search results
-- **Risultati massimi**: Maximum number of results to display (10-1000)
-
-### Network Configuration
-
-The plugin **automatically inherits** QGIS network settings:
-
-- **Proxy**: `Settings` → `Options` → `Network` → Configure proxy in QGIS
-- **SSL**: Uses QGIS SSL certificate configuration
-- **Authentication**: No authentication required for AWS Open Data
-
-**No plugin-specific network configuration needed!**
-
----
-
-## Using the Plugin
-
-### Main Workflow
-
-```
-1. Open Panel → 2. Load Catalog → 3. Select Endpoint → 4. Choose Collection
-                                                              ↓
-8. Load Imagery ← 7. Select Results ← 6. Review Results ← 5. Search
-```
-
-### Step-by-Step Guide
-
-#### 1. Open the Panel
-
-`Plugins` → `Altair` → `Altair EO Data Panel`
-
-#### 2. Load AWS Catalog
-
-Click **"Carica Catalogo"** button
-
-- Downloads catalog from GitHub
-- Discovers 50+ STAC endpoints
-- Populates endpoint dropdown
-
-#### 3. Select STAC Endpoint
-
-Choose from dropdown (e.g.):
-- Sentinel-2 Cloud-Optimized GeoTIFFs
-- Landsat Collection 2 Level-2
-- Vantor Open Data
-- CBERS-4 AWS
-
-#### 4. Collection Auto-Population
-
-**Automatic**: Collections load when endpoint selected
-
-Shows:
-- "Tutte le Collections STAC" (search all)
-- Individual collections (e.g., "sentinel-2-l2a")
-
-#### 5. Set Search Parameters
-
-**Area** (4 methods):
-- Use current map extent
-- Draw on map (rectangle/polygon)
-- Select from existing layer
-- Manual coordinates entry
-
-**Date Range**:
-- Start date (Data Inizio)
-- End date (Data Fine)
-
-**Cloud Cover**:
-- Slider: 0-100%
-- Only applies to optical imagery
-
-**Collection** (optional):
-- "All" searches all collections
-- Select specific collection for focused search
-
-#### 6. Execute Search
-
-Click **"Cerca"** button
-
-Results display:
-- **Table**: Date, Satellite, Cloud%, GSD, Collection
-- **Map**: Footprints as colored polygons
-
-#### 7. Interactive Selection
-
-**Select from Table**:
-- Click row → Highlights on map
-- Multiple selection: Ctrl+Click
-
-**Select from Map**:
-- Click "Seleziona dalla Mappa" button
-- Click footprint on map → Selects in table
-- Ctrl+Click to toggle selection
-
-**Bidirectional Sync**: Table ↔ Map selection always synchronized
-
-#### 8. Load Imagery
-
-**Preview**:
-- Select results → Click "Anteprima"
-- Opens thumbnail or quicklook
-
-**Load COG**:
-- Select results → Click "Carica Layer"
-- Loads Cloud-Optimized GeoTIFF
-- Uses GDAL vsicurl (no download needed)
-- Priority: visual → data → rendered_preview → thumbnail
-
-**Zoom to Selection**:
-- Click "Zoom su Selezione"
-- Map zooms to selected footprints
-
----
+Requisiti:
+- KADAS Albireo 2.3+
+- Connessione internet
+
+## Primo utilizzo
+
+1. Apri **Plugins -> Altair -> Altair EO Data Panel**.
+2. Seleziona un connettore dal menu.
+3. Apri **Settings** per inserire credenziali/endpoints.
+4. Esegui **Authenticate** (quando richiesto).
+5. Definisci AOI (Draw Bbox / Map Extent / input manuale).
+6. Imposta filtri (data, cloud cover, collection).
+7. Clicca **Search** e poi **Load Layer** sui risultati.
+
+## Connettori e API supportate
+
+### Planet
+
+- Catalog API: Data API (`/data/v1/item-types`, `/data/v1/quick-search`)
+- Tasking API: `tasking/v2` (`/orders/`, `/pricing/`, `/captures/`)
+- Auth: API key (Basic auth)
+- Impostazioni principali:
+  - `Planet API Base URL`
+  - `Tasking Base URL`
+  - `Orders Path`
+  - `Pricing Path`
+
+Riferimenti:
+- https://docs.planet.com/develop/apis/data/
+- https://docs.planet.com/develop/apis/tasking/
+
+### Vantor / Maxar
+
+- Catalog API: Discovery v1 (`https://api.maxar.com/discovery/v1`)
+- Ricerca imagery consigliata: `/catalogs/imagery/search`
+- Tasking API: Tasking v2 (`/tasking/v2/...`, endpoint tenant/account dipendenti)
+- Auth:
+  - Catalog: `maxar-api-key` e/o Bearer token (opzionali, dipende dal tenant)
+  - Tasking: token/API key secondo contratto
+- Impostazioni principali:
+  - Discovery base/search path + timeout
+  - Tasking base/create/list path + timeout
+
+Riferimenti:
+- https://developers.maxar.com/docs/discovery/guides/discovery-guide
+- https://developers.maxar.com/docs/tasking/
+
+### Jilin-1 Gaofen
+
+- Catalog API: endpoint STAC compatibile tenant-specific
+- Tasking API: endpoint configurabile tenant-specific
+- Auth: token/API key opzionale (catalog e/o tasking)
+- Impostazioni principali:
+  - `Catalog Base URL`
+  - `Default Collection`
+  - `Catalog Token`
+  - `Tasking Base URL`, `Create Path`, `List Path`, `Tasking Token`
+
+### JAXA Earth
+
+- Catalog API: STAC/COG pubblico (default)
+  - Catalog: `https://data.earth.jaxa.jp/stac/cog/v1/catalog.json`
+  - Search: `https://data.earth.jaxa.jp/stac/cog/v1/search`
+- Tasking API: opzionale/configurabile (solo se usi broker/partner esterni)
+- Auth catalog: non richiesta
+- Impostazioni principali:
+  - `Catalog URL`
+  - `Search URL`
+  - campi tasking opzionali (`base/create/list/token`)
+
+### ICEYE, Umbra, Capella, CDSE Sentinel, NASA EarthData
+
+Restano supportati con configurazione API-first nei rispettivi tab Settings.
+
+## Smart Tasking
+
+Il dock **Smart Tasking** usa previsione orbite (SGP4) e ricerca archive per suggerire immagini/passaggi.
+
+Workflow rapido:
+1. Apri **Plugins -> Altair -> Smart Tasking**
+2. Seleziona satelliti/constellation
+3. Definisci AOI e finestra temporale
+4. Esegui predizione o archive search
+5. Invia prefill al pannello Tasking Order
+
+Nota: il pannello **Tasking Order** resta in modalità DEMO (compose email) e non invia ancora ordini live direttamente da UI.
+
+## Autenticazione e impostazioni
+
+Apri **Plugins -> Altair -> Settings**.
+
+Best practice:
+- Salva token/secret nel secure storage del plugin.
+- Usa i pulsanti **Test ... Connection** dopo ogni modifica endpoint.
+- Mantieni endpoint di default salvo esigenze tenant-specific.
 
 ## Troubleshooting
 
-### Common Issues
-
-#### "Failed to fetch AWS catalog"
-
-**Causes**:
-- No internet connection
-- Firewall blocking GitHub
-- Catalog URL changed
-
-**Solutions**:
-1. Check internet connection
-2. Test URL in browser: https://raw.githubusercontent.com/opengeos/aws-open-data-stac/refs/heads/master/aws_stac_catalogs.json
-3. Configure proxy in QGIS if behind corporate firewall
-4. Restore default URL: `Settings` → `AWS STAC` → "Ripristina URL Predefinito"
-
-#### "No collections found"
-
-**Causes**:
-- Selected endpoint doesn't have `/collections` route
-- Endpoint temporarily unavailable
-- Network timeout
-
-**Solutions**:
-1. Try different endpoint
-2. Increase timeout: `Settings` → `AWS STAC` → Catalog Timeout
-3. Check endpoint URL in browser
-
-#### "Search returned no results"
-
-**Causes**:
-- No imagery in selected area/date range
-- Cloud cover filter too strict
-- Wrong collection selected
-
-**Solutions**:
-1. Expand date range
-2. Increase cloud cover threshold
-3. Try "Tutte le Collections STAC"
-4. Verify area is correct (zoom to see red bbox)
-
-#### "Failed to load COG layer"
-
-**Causes**:
-- GDAL vsicurl not available
-- Asset URL requires authentication
-- Network issues
-
-**Solutions**:
-1. Check GDAL version: `Processing` → `Toolbox` → Search "gdal"
-2. Try direct URL (without vsicurl)
-3. Check asset type (COG, GeoTIFF, etc.)
-
-#### "Proxy authentication required"
-
-**Causes**:
-- Corporate proxy needs credentials
-- QGIS proxy not configured
-
-**Solutions**:
-1. Configure proxy in QGIS: `Settings` → `Options` → `Network`
-2. Enter credentials in QGIS proxy settings
-3. Restart QGIS after changing proxy
-
-### Logging
-
-**View Logs**: `Plugins` → `Altair` → `📋 Visualizza Log`
-
-**Log Location**:
-- Windows: `C:\Users\<username>\.kadas\altair_plugin.log`
-- Linux: `~/.kadas/altair_plugin.log`
-- macOS: `~/.kadas/altair_plugin.log`
-
-**Log Levels**:
-- **INFO**: Normal operations
-- **WARNING**: Non-critical issues
-- **ERROR**: Failed operations
-- **DEBUG**: Detailed diagnostic info
-
----
-
-## Project Structure
-
-```
-kadas-altair/
-├── README.md                      # Project overview
-├── GUIDE.md                       # This user guide
-├── ARCHITECTURE.md                # System architecture & technical reference
-├── CONTRIBUTING.md                # Development guidelines
-├── LICENSE                        # GPL-2.0 License
-├── package_plugin_full.py         # Build script (full)
-├── package_plugin_lite.py         # Build script (lite)
-└── kadas_altair_plugin/          # Plugin source
-    ├── README.md                  # Plugin info
-    ├── metadata.txt               # Plugin metadata
-    ├── __init__.py                # Plugin entry point
-    ├── plugin.py                  # Main plugin class
-    ├── logger.py                  # Logging system
-    ├── connectors/                # Data source connectors
-    │   ├── iceye_stac.py         # ICEYE SAR connector
-    │   ├── vantor.py             # Vantor Open Data connector
-    │   ├── umbra_stac.py         # Umbra SAR connector
-    │   ├── capella_stac.py       # Capella SAR connector
-    │   ├── copernicus.py         # Copernicus Dataspace
-    │   ├── connector_manager.py  # Connector registry
-    │   └── ...                    # Other connectors
-    ├── gui/                       # User interface
-    │   ├── dock.py               # Main dock widget
-    │   ├── settings_dock.py      # Settings dialog
-    │   └── ...                    # UI components
-    ├── utilities/                 # Helper modules
-    │   └── proxy_handler.py
-    ├── secrets/                   # Credential management
-    │   └── secure_storage.py
-    └── test/                      # Test scripts
-        ├── test_connectors.py    # Connector tests
-        └── ...                    # Other tests
-```
-
----
-
-## Advanced Features
-
-### Custom Catalog URL
-
-Use your own STAC catalog:
-
-1. `Settings` → `AWS STAC`
-2. Enter custom URL in "Catalog URL" field
-3. Click "Salva Impostazioni"
-4. Reload panel
-
-**Requirements**:
-- URL must return JSON array of datasets
-- Each dataset must have `Explore` links with STAC URLs
-
-### Footprint Layer Styling
-
-Customize footprint appearance:
-
-1. Right-click footprints layer in Layers panel
-2. `Properties` → `Symbology`
-3. Change:
-   - Fill color/opacity
-   - Border color/width
-   - Label expression
-
-### Batch Processing
-
-Load multiple images at once:
-
-1. Search for imagery
-2. Select multiple results (Ctrl+Click)
-3. Click "Carica Layer"
-4. All selected images load as separate layers
-
-### Export Search Results
-
-Save search results for later:
-
-1. Execute search
-2. Right-click footprints layer
-3. `Export` → `Save Features As...`
-4. Choose format (GeoJSON, Shapefile, etc.)
-
-### Keyboard Shortcuts
-
-| Action | Shortcut |
-|--------|----------|
-| Toggle Panel | *(not assigned)* |
-| Search | Enter (in search form) |
-| Select All Results | Ctrl+A (in table) |
-| Copy Selection | Ctrl+C (in table) |
-| Zoom to Selected | Double-click row |
-
-### API Integration
-
-Access connector programmatically:
-
-```python
-from kadas_altair_plugin.connectors.aws_stac import AwsStacConnector
-
-# Create connector
-connector = AwsStacConnector()
-
-# Authenticate (load catalog)
-connector.authenticate()
-
-# Get endpoints
-endpoints = connector.get_stac_endpoints()
-
-# Set endpoint
-connector.set_endpoint(endpoints[0]['url'])
-
-# Get collections
-collections = connector.get_collections()
-
-# Search
-results, next_link = connector.search(
-    bbox=[7.0, 46.0, 8.0, 47.0],
-    start_date='2024-01-01',
-    end_date='2024-01-31',
-    max_cloud_cover=20,
-    collection='sentinel-2-l2a'
-)
-```
-
----
-
-## Supported Datasets
-
-### Optical Imagery
-
-- **Sentinel-2**: L1C (TOA), L2A (BOA)
-- **Landsat**: Collection 2 Level-1, Level-2
-- **CBERS-4**: MUX, AWFI, PAN5M, PAN10M
-- **NAIP**: National Agriculture Imagery Program
-- **Vantor Open Data**: Disaster response imagery
-
-### SAR Imagery
-
-- **Sentinel-1**: GRD, SLC
-- **ALOS PALSAR**: Global forest/non-forest maps
-
-### Other Datasets
-
-- **USGS 3DEP**: Digital Elevation Models
-- **NOAA**: Climate data, sea surface temperature
-- **ASTER**: GDEM, L1T
-
-**Total**: 50+ datasets accessible through AWS Open Data STAC catalog
-
----
-
-## Tips & Best Practices
-
-### Performance
-
-✅ **DO**:
-- Use collection filter for faster searches
-- Limit search area to region of interest
-- Set reasonable date ranges
-- Use cloud cover filter for optical imagery
-
-❌ **DON'T**:
-- Search entire world at once
-- Use very long date ranges (years)
-- Load too many layers simultaneously (>10)
-
-### Data Selection
-
-✅ **Best for Different Use Cases**:
-
-| Use Case | Dataset | Collection |
-|----------|---------|------------|
-| **Multispectral Analysis** | Sentinel-2 | sentinel-2-l2a |
-| **Large Area Mapping** | Landsat | landsat-c2-l2 |
-| **High-Res Basemaps** | Vantor | maxar-open-data |
-| **Disaster Response** | Vantor Open Data | Event-specific |
-| **Change Detection** | Sentinel-2 + Landsat | Both |
-| **Forest Monitoring** | ALOS PALSAR | palsar-global |
-
-### COG Loading
-
-- **Visual assets**: Best for display/basemaps
-- **Data assets**: Best for analysis (full spectral bands)
-- **Thumbnails**: Fast preview, low quality
-
-**Tip**: Start with thumbnail/preview, then load data asset if needed.
-
----
-
-## Getting Help
-
-### Resources
-
-- **[README.md](README.md)**: Overview and features
-- **[ARCHITECTURE.md](ARCHITECTURE.md)**: System architecture, connectors, performance, network stack
-- **[CONTRIBUTING.md](CONTRIBUTING.md)**: Development guidelines, testing
-- **Repository**: https://github.com/mlanini/kadas-altair
-- **Issues**: https://github.com/mlanini/kadas-altair/issues
-- **In-App Help**: `Plugins` → `Altair` → `Help`
-
-### Support
-
-**Before Reporting Issues**:
-1. Check logs: `📋 Visualizza Log`
-2. Try with different endpoint
-3. Verify internet connection
-4. Update to latest version
-
-**Issue Report Should Include**:
-- QGIS/KADAS version
-- Plugin version
-- Error message (copy from logs)
-- Steps to reproduce
-- Expected vs actual behavior
-
-### Contributing
-
-Found a bug? Have a feature request?
-
-1. Check existing issues
-2. Create new issue with details
-3. Include logs and screenshots
-4. Be specific and constructive
-
----
-
-## License & Credits
-
-**License**: GNU GPL v2 or later
-
-**Author**: Michael Lanini (michael@intelligeo.ch)
-
-**Built With**:
-- QGIS/KADAS API
-- AWS Open Data STAC Catalog
-- GDAL vsicurl
-
-**Inspired By**:
-- kadas-vantor-plugin (footprint interaction patterns)
-- opengeos/aws-open-data-stac (catalog source)
-
-**© 2026 Michael Lanini** - Open Source Software
+### Nessun risultato
+
+Controlla:
+1. AOI valido (`minX < maxX`, `minY < maxY`)
+2. Date range coerente
+3. Collection corretta
+4. Credenziali/endpoint nel tab provider
+
+### Errori di autenticazione
+
+1. Rigenera API key/token
+2. Verifica spazi extra in input
+3. Verifica proxy KADAS (`Settings -> Options -> Network`)
+
+### Layer non caricati
+
+1. Verifica URL asset nel log
+2. Verifica connettività/firewall
+3. Verifica supporto GDAL/COG nel runtime KADAS
+
+### Log
+
+Apri **Plugins -> Altair -> View Logs** per dettagli su:
+- auth
+- request/response API
+- errori di rete/proxy
+
+## Risorse
+
+- README: `README.md`
+- Architettura: `ARCHITECTURE.md`
+- Contributi: `CONTRIBUTING.md`
+- Issues: https://github.com/mlanini/kadas-altair/issues
+
+## Licenze Dati E Attribuzioni
+
+Il plugin è software MIT, ma i dati imagery non lo sono: ogni provider applica
+la propria licenza/contratto.
+
+Checklist prima della pubblicazione di mappe, report o export:
+1. Verifica termini del dataset/contratto del provider.
+2. Inserisci attribuzione provider + dataset/collection + ID scena/ordine.
+3. Conserva eventuali note copyright/usage richieste dal provider.
+
+Riepilogo operativo per provider:
+- ICEYE, Umbra, Capella, Planet, Vantor/Maxar Tasking: licenza commerciale, seguire il contratto cliente.
+- Vantor Open Data: seguire i termini pubblicati per evento/dataset e citare Maxar/Vantor Open Data.
+- Jilin-1 Gaofen: termini tenant/provider specifici.
+- JAXA Earth: dati pubblici con termini JAXA dataset-specifici.
+- CDSE Sentinel: policy Copernicus free and open data con attribuzione EU/Copernicus Sentinel quando richiesta.
+- swisstopo: citare swisstopo e identificativo dataset/evento.
+- NASA EarthData: citare NASA + DAAC + collection identifier.
+
+Formato minimo consigliato di attribuzione:
+- Provider: <nome provider>
+- Dataset/Collection: <id o nome>
+- Scene/Order ID: <id>
+- Acquisition Date (UTC): <yyyy-mm-ddThh:mm:ssZ>

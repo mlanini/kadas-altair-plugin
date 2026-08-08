@@ -9,6 +9,7 @@ KADAS Altair EO Data Plugin - Minimal Production Version
 # This is required for KADAS Albireo 2 with OpenSSL 3.0
 import os
 import sys
+from pathlib import Path
 
 # Configure OpenSSL to load legacy provider (for old crypto algorithms)
 # This must happen BEFORE any SSL/crypto library imports
@@ -18,12 +19,10 @@ if os.path.exists(_openssl_conf_path):
     if not os.environ.get('OPENSSL_CONF'):
         os.environ['OPENSSL_CONF'] = _openssl_conf_path
 
-# Configure cryptography library to work without legacy algorithms if OpenSSL config fails
-# This prevents fatal errors when legacy provider is not available
+# Configure cryptography to avoid fatal OpenSSL 3 startup failures.
+# The fallback must be set before any requests/cryptography import happens.
 if not os.environ.get('CRYPTOGRAPHY_OPENSSL_NO_LEGACY'):
-    # Try with legacy first, fall back to no-legacy if needed
-    # This will be caught by cryptography and handled gracefully
-    pass  # Don't set NO_LEGACY by default, let openssl.cnf handle it
+    os.environ['CRYPTOGRAPHY_OPENSSL_NO_LEGACY'] = '1'
 
 # Alternative: Try to configure OpenSSL programmatically
 try:
@@ -38,8 +37,6 @@ except ImportError:
 # ============================================================================
 # Load Bundled Dependencies
 # ============================================================================
-from pathlib import Path
-
 _lib_dir = Path(__file__).parent / "lib"
 if _lib_dir.exists():
     # Insert at the beginning to prioritize bundled dependencies
@@ -51,7 +48,10 @@ else:
     # Production package must have lib/ directory
     import logging
     logger = logging.getLogger('kadas_altair')
-    logger.warning("Bundled dependencies not found - plugin may not work correctly")
+    logger.warning(
+        "Bundled dependencies not found - plugin may not work correctly"
+    )
+
 
 def classFactory(iface):
     """Load KadasAltair class from plugin.py"""

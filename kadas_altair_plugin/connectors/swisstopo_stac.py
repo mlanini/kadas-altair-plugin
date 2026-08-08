@@ -11,6 +11,11 @@ import json
 from typing import Any, Dict, List, Optional, Tuple
 
 try:
+    import requests
+except ImportError:  # pragma: no cover - dependency may be absent in trimmed envs
+    requests = None
+
+try:
     from qgis.PyQt.QtCore import QEventLoop, QTimer, QUrl
     from qgis.PyQt.QtNetwork import QNetworkRequest
     from qgis.core import QgsNetworkAccessManager
@@ -44,47 +49,70 @@ class SwisstopoStacConnector(ConnectorBase):
         return True
 
     def _http_get_json(self, url: str, timeout: float = 30.0) -> Optional[Dict[str, Any]]:
-        if not QGIS_AVAILABLE:
-            logger.error('QGIS network manager not available for swisstopo STAC request')
+        if QGIS_AVAILABLE:
+            try:
+                request = QNetworkRequest(QUrl(url))
+                request.setRawHeader(b'Accept', b'application/geo+json,application/json')
+
+                nam = QgsNetworkAccessManager.instance()
+                reply = nam.get(request)
+
+                loop = QEventLoop()
+                reply.finished.connect(loop.quit)
+
+                timer = QTimer()
+                timer.setSingleShot(True)
+                timer.timeout.connect(loop.quit)
+                timer.start(int(timeout * 1000))
+
+                loop.exec_()
+
+                if not reply.isFinished():
+                    reply.abort()
+                    logger.warning(f'swisstopo STAC timeout after {timeout}s: {url}')
+                    return None
+
+                status_code = reply.attribute(QNetworkRequest.HttpStatusCodeAttribute)
+                if reply.error() or (status_code and int(status_code) >= 400):
+                    logger.warning(
+                        f'swisstopo STAC request failed: HTTP {status_code}, error={reply.errorString()} url={url}'
+                    )
+                    reply.deleteLater()
+                    return None
+
+                payload = reply.readAll().data().decode('utf-8', errors='ignore')
+                reply.deleteLater()
+                if not payload.strip():
+                    return None
+                return json.loads(payload)
+            except Exception as exc:
+                logger.warning(f'swisstopo STAC GET via QGIS failed: {exc}')
+
+        if requests is None:
+            logger.error('QGIS network manager unavailable and requests is not installed for swisstopo STAC request')
             return None
 
         try:
-            request = QNetworkRequest(QUrl(url))
-            request.setRawHeader(b'Accept', b'application/geo+json,application/json')
-
-            nam = QgsNetworkAccessManager.instance()
-            reply = nam.get(request)
-
-            loop = QEventLoop()
-            reply.finished.connect(loop.quit)
-
-            timer = QTimer()
-            timer.setSingleShot(True)
-            timer.timeout.connect(loop.quit)
-            timer.start(int(timeout * 1000))
-
-            loop.exec_()
-
-            if not reply.isFinished():
-                reply.abort()
-                logger.warning(f'swisstopo STAC timeout after {timeout}s: {url}')
+            response = requests.get(
+                url,
+                headers={'Accept': 'application/geo+json,application/json'},
+                timeout=timeout,
+            )
+            if response is None:
                 return None
-
-            status_code = reply.attribute(QNetworkRequest.HttpStatusCodeAttribute)
-            if reply.error() or (status_code and int(status_code) >= 400):
+            if getattr(response, 'status_code', 0) >= 400:
                 logger.warning(
-                    f'swisstopo STAC request failed: HTTP {status_code}, error={reply.errorString()} url={url}'
+                    'swisstopo STAC request failed via requests: HTTP %s url=%s',
+                    getattr(response, 'status_code', None),
+                    url,
                 )
-                reply.deleteLater()
                 return None
-
-            payload = reply.readAll().data().decode('utf-8', errors='ignore')
-            reply.deleteLater()
+            payload = getattr(response, 'text', '') or ''
             if not payload.strip():
                 return None
             return json.loads(payload)
         except Exception as exc:
-            logger.warning(f'swisstopo STAC GET failed: {exc}')
+            logger.warning(f'swisstopo STAC GET via requests failed: {exc}')
             return None
 
     @staticmethod

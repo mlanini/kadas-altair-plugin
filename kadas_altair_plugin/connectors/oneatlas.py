@@ -32,6 +32,7 @@ class OneAtlasConnector(ConnectorBase):
     """
 
     TOKEN_URL = 'https://authentication.oneatlas.airbus.com/oauth/token'
+    IS_STUB = True
     timeout_auth: float = 10.0
 
     def __init__(self):
@@ -195,38 +196,8 @@ class OneAtlasConnector(ConnectorBase):
         """
         if not self.authenticated:
             return [], None
-        
-        # In a full implementation, call OneAtlas search API using self.token
-        # This is a stub returning sample data
-        results = [{
-            'id': f'oneatlas-{collection or "default"}-1',
-            'type': 'Feature',
-            'geometry': {
-                'type': 'Polygon',
-                'coordinates': [[
-                    [bbox[0] if bbox else 0, bbox[1] if bbox else 0],
-                    [bbox[2] if bbox else 1, bbox[1] if bbox else 0],
-                    [bbox[2] if bbox else 1, bbox[3] if bbox else 1],
-                    [bbox[0] if bbox else 0, bbox[3] if bbox else 1],
-                    [bbox[0] if bbox else 0, bbox[1] if bbox else 0]
-                ]]
-            } if bbox else None,
-            'bbox': bbox,
-            'properties': {
-                'datetime': start_date or '2024-01-01T00:00:00Z',
-                'platform': collection or 'OneAtlas',
-                'constellation': 'oneatlas',
-                'eo:cloud_cover': 10,
-                'gsd': 0.5,
-                'collection': collection or 'pleiades'
-            },
-            'assets': {
-                'thumbnail': {'href': f'https://oneatlas.example.com/thumb/{collection or "default"}.jpg', 'type': 'image/jpeg'},
-                'visual': {'href': f'https://oneatlas.example.com/visual/{collection or "default"}.tif', 'type': 'image/tiff'}
-            }
-        }]
-        
-        return results, None
+        logger.warning('OneAtlas search is not implemented in this connector stub; returning no items')
+        return [], None
 
     def get_tile_url(self, result: dict, z: int, x: int, y: int) -> str:
         return f'https://oneatlas.example.com/tiles/{result.get("id")}/{z}/{x}/{y}.png'

@@ -1,10 +1,2 @@
-PyQt5
-requests
-urllib3
-keyring
-cryptography
-pystac-client>=0.7.0
-earthaccess
-pandas
-hda>=0.3.0
-owslib>=0.31.0
+requests-oauthlib>=2.0.0
+oauthlib>=3.2.2

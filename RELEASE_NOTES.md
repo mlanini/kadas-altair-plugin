@@ -1,3 +1,41 @@
+# Release Notes - KADAS Altair Plugin v0.5.0
+
+## Activation Disclaimer + Smart Tasking CRS Reliability + Planetary Computer Scope Hardening
+
+v0.5.0 focuses on release hardening and operational safety: a mandatory startup disclaimer, deterministic CRS handling for Smart Tasking geometry layers, and stricter Microsoft Planetary Computer result filtering.
+
+---
+
+## Highlights
+
+### Startup Disclaimer (Activation Gate)
+- New disclaimer dialog shown at plugin activation, modeled for operational/legal clarity.
+- User must explicitly accept:
+  - limitation of liability / misuse disclaimer
+  - MIT license terms
+- Optional "remember" behavior persists acceptance in settings (`AltairEOData/disclaimer_accepted`).
+- If not accepted, plugin UI actions are not initialized.
+
+### Smart Tasking Geometry CRS Fix
+- Smart Tasking memory layers are now explicitly assigned `EPSG:4326` during generation/render refresh.
+- This prevents geometric distortion and offset when project/map CRS differs from WGS84 (for example `EPSG:2056` or `EPSG:3857`) and relies on robust on-the-fly reprojection.
+
+### Planetary Computer Connector Tightening
+- Collection scope is restricted to product families marked as **Imagery** or **Fire**.
+- Item acceptance now requires real raster/COG asset evidence instead of permissive generic-role fallback.
+- Added dedicated regression tests for:
+  - collection eligibility filtering
+  - COG/raster asset validation path
+
+---
+
+## Packaging
+
+- Full package command: `KADAS_SKIP_PIP=1 python package_plugin_full.py`
+- Expected output filename: `kadas_altair_plugin_full_v0.5.0.zip`
+
+---
+
 # Release Notes - KADAS Altair Plugin v0.4.3
 
 ## 🛰️ Jilin-1 Gaofen Connector + AOI Crash Fix
@@ -431,7 +469,7 @@ Separate authentication modes:
 from ..connectors.copernicus import CopernicusConnector
 
 # New imports
-from ..connectors.copernicus_stac import CopernicusStacConnector
+from ..connectors.cdse_sentinel import CopernicusStacConnector
 from ..connectors.copernicus_hda import CopernicusHdaConnector
 ```
 
