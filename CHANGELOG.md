@@ -5,6 +5,23 @@ All notable changes to KADAS Altair Plugin will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-08-08
+
+### Added
+- **swisstopo Special flights collection** support in the swisstopo STAC connector:
+  - Collection ID: `ch.swisstopo.spezialbefliegungen`
+  - Exposed via `get_collections()` for UI collection selectors
+
+### Changed
+- **swisstopo connector** (`connectors/swisstopo_stac.py`) now supports multi-collection search:
+  - Uses selected collection when provided
+  - Searches all supported swisstopo collections when no collection is specified
+  - Preserves `collection` field in normalized items and avoids duplicate features across merged responses
+- **Archive Search wiring** (`gui/archive_dock.py`) now forwards the selected swisstopo collection and registers the provider with `COLLECTIONS`, so the UI dropdown and query path stay aligned.
+
+### Documentation
+- Release documentation updated to version `0.5.1` (`README.md`, `RELEASE_NOTES.md`, `SHA256SUMS.md`).
+
 ## [0.5.0] - 2026-08-08
 
 ### Added

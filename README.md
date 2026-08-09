@@ -3,7 +3,7 @@
 **Multi-source satellite imagery browser for KADAS Albireo 2**
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/Version-0.5.0-success.svg)](https://github.com/mlanini/kadas-altair-plugin)
+[![Version](https://img.shields.io/badge/Version-0.5.1-success.svg)](https://github.com/mlanini/kadas-altair-plugin)
 [![Status](https://img.shields.io/badge/Status-Production-success.svg)](https://github.com/mlanini/kadas-altair-plugin)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/mlanini/kadas-altair-plugin)
 
@@ -28,7 +28,7 @@
 
 ### Installation
 
-Download [kadas_altair_plugin_full_vX.Y.Z.zip](releases/download/v0.5.0/kadas_altair_plugin_full_v0.5.0.zip) and copy manually:
+Download [kadas_altair_plugin_full_vX.Y.Z.zip](releases/download/v0.5.1/kadas_altair_plugin_full_v0.5.1.zip) and copy manually:
 
 ```powershell
 # Windows
@@ -41,7 +41,7 @@ cp -r kadas_altair_plugin ~/.local/share/Kadas/KadasZivil/profiles/default/pytho
 
 ### First Use
 
-1. Activate **KADAS Albireo** → `Settings` → `Plugins Manager` → `KADAS Altair v0.5.0` 
+1. Activate **KADAS Albireo** → `Settings` → `Plugins Manager` → `KADAS Altair v0.5.1` 
 2. Go to "EO" menu tab
 3. Choose **Altair Open Data Panel** from Altair menu button
 4. Select a connector (e.g. *Vantor Open Data*)
@@ -64,7 +64,7 @@ cp -r kadas_altair_plugin ~/.local/share/Kadas/KadasZivil/profiles/default/pytho
 | 2 | **Umbra SAR** | Radar | Recursive STAC · 16–25 cm · GEC/SICD/SIDD/CPHD | Production |
 | 3 | **Capella SAR** | Radar | ~1 000 images · X-band · ~1 m | Production |
 | 4 | **Vantor Open Data** | Optical | 55+ disaster events · 0.3–0.5 m (Vantor STAC) | Production |
-| 5 | **swisstopo RapidMapping** | Optical | Swiss emergency events · sub-meter | Production |
+| 5 | **swisstopo STAC** | Optical | SWISSEO S2-SR + Special flights collections | Production |
 | 6 | **Copernicus Data Space** | Multi | Sentinel-1/2/3/5P · OAuth2 · 10 m–7 km | Production |
 | 7 | **NASA EarthData** | Multi | CMR granule search · STAC catalog | Experimental |
 | 8 | **Planet** | Optical | PSScene, SkySatScene · 0.5–3 m | Stub |
@@ -150,7 +150,7 @@ Contributions welcome via pull request and issue discussion on GitHub.
 
 **Before submitting issues:**
 - Check logs: `Plugins` → `Altair` → `View Log`
-- Include KADAS version, plugin version (`0.5.0`), and steps to reproduce
+- Include KADAS version, plugin version (`0.5.1`), and steps to reproduce
 
 ---
 

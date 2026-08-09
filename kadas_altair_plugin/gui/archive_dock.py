@@ -176,6 +176,7 @@ class ArchiveSearchTask(QgsTask if QGIS_AVAILABLE else object):  # type: ignore
                     start_date=start_date,
                     end_date=end_date,
                     max_cloud_cover=max_cloud_cover,
+                    collection=self.search_params.get('collection'),
                     limit=limit,
                     connector_id=connector_id,
                     text_query=self.search_params.get('text_query'),
@@ -604,7 +605,7 @@ class ArchiveDockWidget(QDockWidget):
                 from ..connectors.planet import PlanetConnector
                 planet = PlanetConnector()
                 self._connector_manager.register_connector(
-                    'planet', planet, 'Planet Labs',
+                        'planet', planet, 'Planet Labs',
                     capabilities=[
                         ConnectorCapability.BBOX_SEARCH,
                         ConnectorCapability.DATE_RANGE,
@@ -622,7 +623,7 @@ class ArchiveDockWidget(QDockWidget):
                 from ..connectors.oneatlas import OneAtlasConnector
                 oneatlas = OneAtlasConnector()
                 self._connector_manager.register_connector(
-                    'oneatlas', oneatlas, 'OneAtlas (Airbus)',
+                        'oneatlas', oneatlas, 'OneAtlas (Airbus)',
                     capabilities=[
                         ConnectorCapability.BBOX_SEARCH,
                         ConnectorCapability.DATE_RANGE,
@@ -640,7 +641,7 @@ class ArchiveDockWidget(QDockWidget):
                 from ..connectors.iceye import IceyeConnector
                 iceye_api = IceyeConnector()
                 self._connector_manager.register_connector(
-                    'iceye', iceye_api, 'ICEYE SAR',
+                        'iceye', iceye_api, 'ICEYE SAR',
                     capabilities=[
                         ConnectorCapability.BBOX_SEARCH,
                         ConnectorCapability.DATE_RANGE,
@@ -658,7 +659,7 @@ class ArchiveDockWidget(QDockWidget):
                 from ..connectors.umbra import UmbraConnector
                 umbra_api = UmbraConnector()
                 self._connector_manager.register_connector(
-                    'umbra', umbra_api, 'Umbra SAR',
+                        'umbra', umbra_api, 'Umbra SAR',
                     capabilities=[
                         ConnectorCapability.BBOX_SEARCH,
                         ConnectorCapability.DATE_RANGE,
@@ -676,7 +677,7 @@ class ArchiveDockWidget(QDockWidget):
                 from ..connectors.capella import CapellaConnector
                 capella_api = CapellaConnector()
                 self._connector_manager.register_connector(
-                    'capella', capella_api, 'Capella Space',
+                        'capella', capella_api, 'Capella Space',
                     capabilities=[
                         ConnectorCapability.BBOX_SEARCH,
                         ConnectorCapability.DATE_RANGE,
@@ -695,7 +696,7 @@ class ArchiveDockWidget(QDockWidget):
                 from ..connectors.vantor import VantorConnector
                 vantor = VantorConnector()
                 self._connector_manager.register_connector(
-                    'vantor', vantor, 'Vantor Hub Discovery',
+                        'vantor', vantor, 'Vantor Hub Discovery',
                     capabilities=[
                         ConnectorCapability.BBOX_SEARCH,
                         ConnectorCapability.DATE_RANGE,
@@ -711,7 +712,7 @@ class ArchiveDockWidget(QDockWidget):
                 from ..connectors.element84_stac import Element84StacConnector
                 element84_stac = Element84StacConnector()
                 self._connector_manager.register_connector(
-                    'element84_stac', element84_stac, 'Earth Search (Element84)',
+                        'element84_stac', element84_stac, 'Earth Search (Element84)',
                     capabilities=[
                         ConnectorCapability.BBOX_SEARCH,
                         ConnectorCapability.DATE_RANGE,
@@ -729,7 +730,7 @@ class ArchiveDockWidget(QDockWidget):
                 from ..connectors.planetary_computer_stac import PlanetaryComputerStacConnector
                 planetary_computer_stac = PlanetaryComputerStacConnector()
                 self._connector_manager.register_connector(
-                    'planetary_computer_stac',
+                        'planetary_computer_stac',
                     planetary_computer_stac,
                     'Microsoft Planetary Computer',
                     capabilities=[
@@ -749,7 +750,7 @@ class ArchiveDockWidget(QDockWidget):
                 from ..connectors.nasa_earthdata import NasaEarthdataConnector
                 nasa = NasaEarthdataConnector()
                 self._connector_manager.register_connector(
-                    'nasa_earthdata', nasa, 'NASA EarthData',
+                        'nasa_earthdata', nasa, 'NASA EarthData',
                     capabilities=[
                         ConnectorCapability.BBOX_SEARCH,
                         ConnectorCapability.DATE_RANGE,
@@ -767,11 +768,12 @@ class ArchiveDockWidget(QDockWidget):
                 from ..connectors.swisstopo_stac import SwisstopoStacConnector
                 swisstopo = SwisstopoStacConnector()
                 self._connector_manager.register_connector(
-                    'swisstopo_stac', swisstopo, 'swisstopo S2-SR',
+                    'swisstopo_stac', swisstopo, 'swisstopo STAC',
                     capabilities=[
                         ConnectorCapability.BBOX_SEARCH,
                         ConnectorCapability.DATE_RANGE,
                         ConnectorCapability.CLOUD_COVER,
+                        ConnectorCapability.COLLECTIONS,
                         ConnectorCapability.COG_SUPPORT,
                     ]
                 )
@@ -784,7 +786,7 @@ class ArchiveDockWidget(QDockWidget):
                 from ..connectors.jilin_gaofen_stac import JilinGaofenStacConnector
                 jilin = JilinGaofenStacConnector()
                 self._connector_manager.register_connector(
-                    'jilin_gaofen_stac', jilin, 'Jilin-1 Gaofen',
+                        'jilin_gaofen_stac', jilin, 'Jilin-1 Gaofen',
                     capabilities=[
                         ConnectorCapability.BBOX_SEARCH,
                         ConnectorCapability.DATE_RANGE,
@@ -803,7 +805,7 @@ class ArchiveDockWidget(QDockWidget):
                 from ..connectors.jaxa_earth_stac import JaxaEarthStacConnector
                 jaxa = JaxaEarthStacConnector()
                 self._connector_manager.register_connector(
-                    'jaxa_earth_stac', jaxa, 'JAXA Earth',
+                        'jaxa_earth_stac', jaxa, 'JAXA Earth',
                     capabilities=[
                         ConnectorCapability.BBOX_SEARCH,
                         ConnectorCapability.DATE_RANGE,
@@ -949,6 +951,7 @@ class ArchiveDockWidget(QDockWidget):
             'start_date':    date_from,
             'end_date':      date_to,
             'max_cloud_cover': cloud_max,
+            'collection':    self.collections_combo.currentData(),
             'limit':         limit,
             'sensor_type':   sensor,
             'connector_ids': ready_providers,

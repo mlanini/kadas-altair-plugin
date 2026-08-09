@@ -1,3 +1,35 @@
+# Release Notes - KADAS Altair Plugin v0.5.1
+
+## swisstopo STAC Extension: Special flights Collection + Archive Search Fix
+
+v0.5.1 extends the swisstopo STAC integration with support for the **Special flights** collection, and fixes Archive Search wiring so the selected swisstopo collection is actually passed into search queries.
+
+---
+
+## Highlights
+
+### New swisstopo Collection
+- Added support for collection: `ch.swisstopo.spezialbefliegungen`
+- The collection is now exposed in collection selectors through `get_collections()`
+
+### Collection-aware swisstopo Search
+- The connector now supports multi-collection search routing:
+  - if a collection is selected, search is executed against that collection
+  - if no collection is selected, search spans all supported swisstopo collections
+- Normalized features retain `collection` metadata and deduplicate merged responses.
+
+### Archive Search Wiring
+- Archive Search now forwards the selected collection into the swisstopo query path and registers the connector with `COLLECTIONS`, so the dropdown and search flow stay aligned.
+
+---
+
+## Packaging
+
+- Full package command: `KADAS_SKIP_PIP=1 python package_plugin_full.py`
+- Expected output filename: `kadas_altair_plugin_full_v0.5.1.zip`
+
+---
+
 # Release Notes - KADAS Altair Plugin v0.5.0
 
 ## Activation Disclaimer + Smart Tasking CRS Reliability + Planetary Computer Scope Hardening
