@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Searches all supported swisstopo collections when no collection is specified
   - Preserves `collection` field in normalized items and avoids duplicate features across merged responses
 - **Archive Search wiring** (`gui/archive_dock.py`) now forwards the selected swisstopo collection and registers the provider with `COLLECTIONS`, so the UI dropdown and query path stay aligned.
+- **Smart Tasking archive search** (`gui/smart_tasking_dock.py`) now normalizes the selected dates to explicit UTC day boundaries before dispatching connector queries, so the selected end day is included consistently across STAC backends.
 
 ### Documentation
 - Release documentation updated to version `0.5.1` (`README.md`, `RELEASE_NOTES.md`, `SHA256SUMS.md`).

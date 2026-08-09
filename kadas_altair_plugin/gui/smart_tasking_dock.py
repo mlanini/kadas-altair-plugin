@@ -1932,6 +1932,18 @@ class SmartTaskingDockWidget(QDockWidget):
             self.mode_label.setStyleSheet('color: #e65100; font-weight: bold; font-size: 10px;')
             self.go_btn.setText('🔍 Search + Predict')
 
+    @staticmethod
+    def _archive_day_start(day: date) -> str:
+        return datetime(day.year, day.month, day.day, tzinfo=timezone.utc).strftime(
+            '%Y-%m-%dT%H:%M:%SZ'
+        )
+
+    @staticmethod
+    def _archive_day_end(day: date) -> str:
+        return datetime(
+            day.year, day.month, day.day, 23, 59, 59, tzinfo=timezone.utc
+        ).strftime('%Y-%m-%dT%H:%M:%SZ')
+
     # ------------------------------------------------------------------
     # AOI helpers
     # ------------------------------------------------------------------
@@ -2069,8 +2081,8 @@ class SmartTaskingDockWidget(QDockWidget):
 
         params = {
             'bbox': list(bbox),
-            'start_date': str(start_d),
-            'end_date': str(end_d),
+            'start_date': self._archive_day_start(start_d),
+            'end_date': self._archive_day_end(end_d),
             'max_cloud_cover': float(self.cloud_spin.value()) / 100.0,
             'limit': limit_per_connector,
             'connector_ids': ready_ids,

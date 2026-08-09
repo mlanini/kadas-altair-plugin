@@ -21,6 +21,10 @@ v0.5.1 extends the swisstopo STAC integration with support for the **Special fli
 ### Archive Search Wiring
 - Archive Search now forwards the selected collection into the swisstopo query path and registers the connector with `COLLECTIONS`, so the dropdown and search flow stay aligned.
 
+### Smart Tasking Time-Range Normalization
+- Archive searches now normalize the selected dates to explicit UTC day boundaries before dispatching connector queries.
+- This keeps the selected end day included consistently across backends that interpret STAC datetime intervals differently.
+
 ---
 
 ## Packaging

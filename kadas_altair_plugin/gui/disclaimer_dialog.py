@@ -41,8 +41,9 @@ _DISCLAIMER_TEXT = (
 )
 
 _LICENSE_TEXT = """\
-KADAS Altair EO Data Plugin
-Copyright (C) 2026 Michael Lanini
+MIT License
+
+Copyright (c) 2026 Michael Lanini
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -61,6 +62,58 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+---
+
+THIRD-PARTY NOTICES
+
+This software makes use of the following open-source projects:
+
+1. QGIS (GPL v2+)
+     - https://qgis.org
+     - Geographic Information System framework
+
+2. KADAS Albireo (GPL v2+)
+     - https://github.com/kadas-albireo/kadas-albireo2
+     - Swiss military GIS application based on QGIS
+
+3. GDAL (MIT/X)
+     - https://gdal.org
+     - Geospatial Data Abstraction Library
+
+IMAGERY DATA LICENSES
+
+Satellite imagery accessed through this plugin is provided by various sources
+under the AWS Open Data Program. Each dataset has its own license terms:
+
+- Sentinel-2: Copernicus Sentinel Data (European Space Agency)
+    Terms:
+    https://scihub.copernicus.eu/twiki/do/view/SciHubWebPortal/TermsConditions
+
+- Landsat: USGS/NASA (Public Domain)
+    Terms:
+    https://www.usgs.gov/information-policies-and-instructions/copyrights-and-credits
+
+- Vantor Open Data Program: Creative Commons BY-NC-SA 4.0
+    Terms: https://vantor.com/company/open-data-program/
+
+- Other datasets: See individual STAC metadata for license information
+
+ATTRIBUTION
+
+This plugin was inspired by and builds upon concepts from:
+
+- qgis-maxar-plugin by Qiusheng Wu (MIT License)
+    https://github.com/opengeos/qgis-maxar-plugin
+
+- kadas-vantor-plugin by Michael Lanini (MIT License)
+    https://github.com/mlanini/kadas-vantor-plugin
+
+DISCLAIMER
+
+THE IMAGERY DATA IS PROVIDED BY THIRD PARTIES. THE AUTHORS OF THIS SOFTWARE
+MAKE NO REPRESENTATIONS OR WARRANTIES REGARDING THE ACCURACY, COMPLETENESS,
+OR SUITABILITY OF ANY IMAGERY DATA ACCESSED THROUGH THIS PLUGIN.
 """
 
 
@@ -88,7 +141,9 @@ class DisclaimerDialog(QDialog):
         root = QVBoxLayout(self)
         root.setSpacing(10)
 
-        title = QLabel("Please read and accept the following before continuing")
+        title = QLabel(
+            "Please read and accept the following before continuing"
+        )
         title_font = QFont()
         title_font.setPointSize(10)
         title_font.setBold(True)
@@ -125,8 +180,10 @@ class DisclaimerDialog(QDialog):
         license_edit.setPlainText(_LICENSE_TEXT)
         license_edit.setFixedHeight(140)
         license_edit.setStyleSheet(
-            "QTextEdit { background:#f0f4f8; font-family: Consolas, monospace; "
-            "font-size: 10px; border:1px solid #ccc; border-radius:4px; }"
+            "QTextEdit { background:#f0f4f8; font-family: Consolas, "
+            "monospace; "
+            "font-size: 10px; border:1px solid #ccc; "
+            "border-radius:4px; }"
         )
         root.addWidget(license_edit)
 
@@ -168,7 +225,9 @@ class DisclaimerDialog(QDialog):
         return label
 
     def _update_ok_button(self) -> None:
-        accepted = self._cb_disclaimer.isChecked() and self._cb_license.isChecked()
+        accepted = (
+            self._cb_disclaimer.isChecked() and self._cb_license.isChecked()
+        )
         self._ok_btn.setEnabled(accepted)
 
     def _on_accept(self) -> None:
