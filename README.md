@@ -1,6 +1,7 @@
 # KADAS Altaír — Satellite Imagery Browser Plugin
 
 **Multi-source satellite imagery browser for KADAS Albireo 2**
+[KADAS Albireo 2](https://www.kadas-albireo.ch) is an open-source GIS platform for geospatial planning, analysis and sharing. It is used to visualise maps and satellite data, manage operational scenarios and support rapid decision-making in the civil and security sectors.
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/Version-0.5.1-success.svg)](https://github.com/mlanini/kadas-altair-plugin)
@@ -10,7 +11,10 @@
 ## Screenshots
 
 ![Archive Search](screenshots/screenshot01_archive.png)
-![Smart Tasking Prediction](screenshots/screenshot02_predict.png)
+*Archive Search panel with search results and footprint selection.*
+
+![Overpass Prediction](screenshots/screenshot02_predict.png)
+*Smart overpass prediction with orbit and footprint visualization.*
 
 ---
 
@@ -28,27 +32,43 @@
 
 ### Installation
 
-Download [kadas_altair_plugin_full_vX.Y.Z.zip](releases/download/v0.5.1/kadas_altair_plugin_full_v0.5.1.zip) and copy manually:
+1. Download the packaged plugin archive from the GitHub release page.
+2. Extract it and place the plugin folder in the KADAS Python plugins directory.
+3. Restart KADAS and enable the plugin from the Plugins Manager.
+
+Example for Windows:
 
 ```powershell
-# Windows
-# Check you KADAS flavour first: Mil, Zivil or Light
-Copy-Item -Recurse kadas_altair_plugin "$env:APPDATA\Kadas\KadasZivil\profiles\default\python\plugins\"
+Copy-Item -Recurse kadas_altair_plugin "$env:APPDATA\Kadas\KadasZivil\profiles\default\python\plugins"
+```
 
-# Linux / macOS
+Example for Linux / macOS:
+
+```bash
 cp -r kadas_altair_plugin ~/.local/share/Kadas/KadasZivil/profiles/default/python/plugins/
 ```
 
+> Make sure the plugin folder is named `kadas_altair_plugin`. The plugin is designed for KADAS Albireo 2.3+ and works best with an active internet connection.
+
 ### First Use
 
-1. Activate **KADAS Albireo** → `Settings` → `Plugins Manager` → `KADAS Altair v0.5.1` 
-2. Go to "EO" menu tab
-3. Choose **Altair Open Data Panel** from Altair menu button
-4. Select a connector (e.g. *Vantor Open Data*)
-5. Pick a collection from the dropdown
-6. Draw a search area or use the map extent
-7. Click **Search** — results appear in the table
-8. Select a scene → **Load COG** → done
+1. Open KADAS and enable **KADAS Altair** from the Plugins Manager.
+2. Start a **new** KADAS 'World (online)' project (EPSG:3857).
+3. Open the **Search and Predict** panel from the **ALTAIR** menu.
+4. Define an AOI by drawing on the map or using the current view.
+5. Set date range, cloud-cover limits and optionally a collection.
+6. Click **Search** to retrieve results.
+7. Select a result and use **Preview** or **Load COG** to inspect or stream the scene.
+
+### Optional Credentials
+
+Some providers require authentication or tokens:
+- **Copernicus Data Space**: OAuth2 client credentials
+- **NASA EarthData**: token or username/password
+- **Jilin-1 Gaofen**: bearer token
+- **Commercial providers**: credentials configured in the plugin settings
+
+Public connectors such as **ICEYE**, **Umbra**, **Capella**, **Vantor Open Data**, **JAXA Earth**, and **swisstopo** can often be used without signing in.
 
 ---
 
@@ -56,54 +76,51 @@ cp -r kadas_altair_plugin ~/.local/share/Kadas/KadasZivil/profiles/default/pytho
 
 ### Connectors
 
-6 production-ready connectors, 1 experimental, 2 stubs:
+The plugin currently supports 8 production-ready connectors, 1 experimental connector and 2 stub connectors:
 
-| # | Connector | Type | Highlights | Status |
-|---|-----------|------|------------|--------|
-| 1 | **ICEYE SAR** | Radar | 3 collections · 196 items · 1–3 m | Production |
-| 2 | **Umbra SAR** | Radar | Recursive STAC · 16–25 cm · GEC/SICD/SIDD/CPHD | Production |
-| 3 | **Capella SAR** | Radar | ~1 000 images · X-band · ~1 m | Production |
-| 4 | **Vantor Open Data** | Optical | 55+ disaster events · 0.3–0.5 m (Vantor STAC) | Production |
-| 5 | **swisstopo STAC** | Optical | SWISSEO S2-SR + Special flights collections | Production |
-| 6 | **Copernicus Data Space** | Multi | Sentinel-1/2/3/5P · OAuth2 · 10 m–7 km | Production |
-| 7 | **NASA EarthData** | Multi | CMR granule search · STAC catalog | Experimental |
-| 8 | **Planet** | Optical | PSScene, SkySatScene · 0.5–3 m | Stub |
-| 9 | **OneAtlas** | Optical | Airbus imagery · 0.5 m | Stub |
+| # | Connector | Type | Notes |
+|---|-----------|------|-------|
+| 1 | **ICEYE SAR** | Radar | Open-data SAR search with STAC access |
+| 2 | **Umbra SAR** | Radar | High-resolution SAR imagery and STAC support |
+| 3 | **Capella SAR** | Radar | X-band SAR archive access |
+| 4 | **Vantor Open Data** | Optical | Disaster-event imagery and open-data access |
+| 5 | **swisstopo STAC** | Optical | Swiss national imagery collections, including Special flights |
+| 6 | **JAXA Earth STAC** | Multi | Public COG-STAC catalog with no credentials required |
+| 7 | **Copernicus Data Space** | Multi | Sentinel-1/2/3/5P access with OAuth2 |
+| 8 | **Jilin-1 Gaofen** | Optical | Commercial STAC connector with bearer-token support |
+| 9 | **NASA EarthData** | Multi | Experimental connector for CMR/earthdata workflows |
+| 10 | **Planet** | Optical | Stub connector for future integration |
+| 11 | **OneAtlas** | Optical | Stub connector for future integration |
 
-### Search & Visualization
+### Search and Visualization
 
-- **Unified search** — spatial (bbox / polygon), temporal, cloud-cover filters
-- **"All Sources" mode** — query every connector in parallel (ThreadPoolExecutor, 5 workers)
-- **Interactive footprints** — bidirectional map ↔ table selection with click-on-canvas
-- **Quicklook preview** — georeferenced thumbnail overlay (WGS 84)
-- **COG loading** — Cloud-Optimized GeoTIFF streaming via GDAL vsicurl (no download)
-- **5-minute cache** — collection metadata cached for fast repeated queries
+- **Unified search** across spatial, temporal and cloud-cover dimensions
+- **All Sources mode** to query multiple connectors in parallel
+- **Interactive footprints** with map/table synchronisation
+- **Quicklook preview** for rapid scene inspection
+- **COG loading** via GDAL/virtual file access for streaming without full download
+- **Collection-aware search** and metadata normalization for consistent results
 
 ### Smart Tasking
 
-- **Satellite catalogue** — 22 EO satellites with TLE, sensor model, off-nadir limits
-- **Overpass prediction** — SGP4 bearing-convergence algorithm (sensor footprint × AOI)
-- **3D orbit visualisation** — orbit track, ground track, swath corridor, satellite marker, nadir axis
-- **Archive search** — per-satellite historical scene lookup across all STAC connectors
-- **Send to Tasking** — one-click prefill of Tasking Order form (provider, sensor, GSD, AOI, dates, SAR mode, notes)
+- **Satellite catalogue** covering a broad set of EO and SAR constellations
+- **Overpass prediction** using a bearing-convergence workflow tailored to sensor footprint and AOI
+- **3D orbit visualisation** with orbit track, ground track, swath corridor and satellite marker
+- **Archive search** for historical scenes by satellite and provider
+- **Tasking prefill** to move selected results into the tasking workflow quickly
 
 ### Tasking Orders
 
-- **Guided form** — provider, sensor, priority, AOI, resolution, cloud cover, SAR parameters
-- **Mailto workflow** — generates pre-filled email to the selected provider
-- **Smart prefill** — auto-populates from Smart Tasking archive or overpass results
+- **Guided tasking form** for provider, sensor, AOI, resolution and acquisition constraints
+- **Mailto workflow** that generates a pre-filled request for the selected provider
+- **Smart prefill** from Smart Tasking and archive results to reduce manual entry
 
-### Network & Security
+### Settings and Security
 
-- **QgsNetworkAccessManager** — inherits KADAS proxy, SSL, and timeout settings automatically
-- **OAuth2** — secure token-based authentication for Copernicus Data Space
-- **No API keys** — most open-data sources work without credentials
-- **OpenSSL 3.0** — legacy provider auto-configured by the plugin
-
-### Logging
-
-- Built-in log viewer (`Plugins` → `Altair` → `View Log`)
-- Per-connector debug and error tracking
+- **Proxy and SSL handling** inherited from KADAS network settings
+- **OAuth2 and token-based authentication** for selected providers
+- **Secure storage** for credentials where supported
+- **Logging and diagnostics** through the built-in log viewer
 
 ---
 
@@ -125,7 +142,7 @@ $env:KADAS_SKIP_PIP = "1"; python package_plugin_full.py
 
 - **KADAS Albireo 2.3+** (QGIS 3.x based)
 - Internet connection
-- Full package bundles required Python dependencies; lightweight installs only need separate OAuth libraries for CDSE Sentinel
+- Full package bundles required Python dependencies
 
 ---
 
@@ -146,7 +163,7 @@ Full troubleshooting: [GUIDE.md](GUIDE.md)
 
 ## Contributing
 
-Contributions welcome via pull request and issue discussion on GitHub.
+Contributions welcome via issue discussion on GitHub.
 
 **Before submitting issues:**
 - Check logs: `Plugins` → `Altair` → `View Log`
@@ -165,7 +182,7 @@ Contributions welcome via pull request and issue discussion on GitHub.
 **Author:** Michael Lanini — mlanini@proton.me
 
 **Built with:**
-[KADAS Albireo 2](https://www.kadas.org/) · [STAC Specification](https://stacspec.org/) · [GDAL vsicurl](https://gdal.org/user/virtual_file_systems.html) · [SGP4](https://pypi.org/project/sgp4/)
+[KADAS Albireo 2](https://www.kadas-albireo.ch/) · [STAC Specification](https://stacspec.org/) · [GDAL vsicurl](https://gdal.org/user/virtual_file_systems.html) · [SGP4](https://pypi.org/project/sgp4/)
 
 **Inspired by:**
 [eo-predictor](https://github.com/developmentseed/eo-predictor) · [sat-predict](https://sat-predict.davidhsu.cc/) · [kadas-vantor-plugin](https://github.com/mlanini/kadas-vantor-plugin) · [qgis-maxar-plugin](https://github.com/opengeos/qgis-maxar-plugin)
