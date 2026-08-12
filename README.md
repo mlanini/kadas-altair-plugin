@@ -1,7 +1,8 @@
 # KADAS Altaír — Satellite Imagery Browser Plugin
 
 **Multi-source satellite imagery browser for KADAS Albireo 2**
-[KADAS Albireo 2](https://www.kadas-albireo.ch) is an open-source GIS platform for geospatial planning, analysis and sharing. It is used to visualise maps and satellite data, manage operational scenarios and support rapid decision-making in the civil and security sectors.
+
+[KADAS Albireo 2](https://www.kadas-albireo.ch) is an open-source GIS platform for geospatial planning, analysis and sharing. It is used to visualise maps and satellite data, manage operational scenarios and support rapid decision-making in the defense and security sectors.
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/Version-0.5.2-success.svg)](https://github.com/mlanini/kadas-altair-plugin)
