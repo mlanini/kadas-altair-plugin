@@ -48,7 +48,7 @@ class CapellaSTACConnector(ConnectorBase):
     - COG format available
     """
     
-    timeout_auth: float = 5.0      # Not used (no auth required)
+    timeout_auth: float = 10.0      # Not used (no auth required)
     timeout_catalog: float = 30.0  # Root catalog load
     timeout_search: float = 60.0   # Full hierarchy traversal
     timeout_item: float = 15.0     # Individual item fetch

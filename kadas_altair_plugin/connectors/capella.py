@@ -18,8 +18,8 @@ class CapellaConnector(ConnectorBase):
     COLLECTIONS_PATH = "/stac/collections"
     SEARCH_PATH = "/stac/search"
 
-    timeout_auth: float = 12.0
-    timeout_search: float = 45.0
+    timeout_auth: float = 10.0
+    timeout_search: float = 60.0
 
     def __init__(self) -> None:
         super().__init__()

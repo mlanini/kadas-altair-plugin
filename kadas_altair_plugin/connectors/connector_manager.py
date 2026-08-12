@@ -29,7 +29,6 @@ class ConnectorType(Enum):
     AWS_STAC = "aws_stac"
     ELEMENT84_STAC = "element84_stac"
     PLANETARY_COMPUTER_STAC = "planetary_computer_stac"
-    COPERNICUS = "copernicus"
     ONEATLAS = "oneatlas"
     PLANET = "planet"
     VANTOR = "vantor"
@@ -296,6 +295,17 @@ class ConnectorManager:
                 pass
         
         try:
+            # Safety-net: swap dates if caller passed an inverted range.
+            if start_date and end_date:
+                s_day = str(start_date)[:10]
+                e_day = str(end_date)[:10]
+                if s_day > e_day:
+                    start_date, end_date = end_date, start_date
+                    logger.warning(
+                        f"Date range was inverted for {target_connector}, swapped: "
+                        f"{start_date} to {end_date}"
+                    )
+
             logger.info(f"Executing search on connector: {target_connector}")
             logger.debug(f"Search params: bbox={bbox}, dates={start_date} to {end_date}, "
                         f"cloud={max_cloud_cover}, collection={collection}, limit={limit}")

@@ -1140,7 +1140,7 @@ class ArchiveDockWidget(QDockWidget):
                 'timeout': int(
                     settings.value(
                         'AltairEOData/element84_stac_timeout',
-                        30,
+                        60,
                         type=int,
                     )
                 ),
@@ -1158,7 +1158,7 @@ class ArchiveDockWidget(QDockWidget):
                 'timeout': int(
                     settings.value(
                         'AltairEOData/planetary_computer_stac_timeout',
-                        30,
+                        60,
                         type=int,
                     )
                 ),
@@ -1240,9 +1240,6 @@ class ArchiveDockWidget(QDockWidget):
 
         if connector_id == 'oneatlas' and self.secure_storage:
             return self.secure_storage.get_credentials('oneatlas')
-
-        if connector_id == 'cdse_sentinel' and self.secure_storage:
-            return self.secure_storage.get_credentials('cdse_sentinel')
 
         if connector_id in ('capella', 'capella_stac'):
             creds = self.secure_storage.get_credentials('capella') if self.secure_storage else {}
@@ -2145,27 +2142,6 @@ class ArchiveDockWidget(QDockWidget):
                 lyr = QgsRasterLayer(uri, scene_id)
                 if not lyr.isValid() and href.startswith('http'):
                     lyr = QgsRasterLayer(href, scene_id)
-
-                if not lyr.isValid() and item.get('_source') == 'cdse_sentinel':
-                    connector = self._get_connector_instance(item)
-                    if connector and hasattr(connector, 'get_s3_credentials'):
-                        creds = connector.get_s3_credentials()
-                        access_id = (creds or {}).get('access_id') if isinstance(creds, dict) else None
-                        secret = (creds or {}).get('secret') if isinstance(creds, dict) else None
-                        s3_uri = self._build_copernicus_vsis3_uri(href)
-
-                        if access_id and secret and s3_uri:
-                            self._gdal_set_aws_s3(access_id, secret)
-                            try:
-                                lyr = QgsRasterLayer(s3_uri, scene_id)
-                            finally:
-                                self._gdal_clear_aws_s3()
-
-                            if hasattr(connector, 'delete_s3_credentials'):
-                                try:
-                                    connector.delete_s3_credentials(access_id)
-                                except Exception as exc:
-                                    logger.debug(f'Copernicus S3 credentials cleanup failed: {exc}')
 
                 if lyr.isValid():
                     QgsProject.instance().addMapLayer(lyr)

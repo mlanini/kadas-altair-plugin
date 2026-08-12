@@ -46,7 +46,7 @@ class PlanetConnector(ConnectorBase):
     TASKING_URL = 'https://api.planet.com/tasking/v2/orders/'
 
     timeout_auth: float = 10.0
-    timeout_search: float = 30.0
+    timeout_search: float = 60.0
 
     def __init__(self):
         super().__init__()

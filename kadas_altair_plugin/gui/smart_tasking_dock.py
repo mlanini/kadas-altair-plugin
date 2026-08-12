@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import math
 import os
+import re
 import tempfile
 import urllib.request
 import inspect
@@ -28,7 +29,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
-from qgis.PyQt.QtCore import QDate, QItemSelectionModel, Qt, QSettings, QUrl, QVariant, pyqtSignal
+from qgis.PyQt.QtCore import QDate, QItemSelectionModel, Qt, QSettings, QTimer, QUrl, QVariant, pyqtSignal
 from qgis.PyQt.QtGui import QColor, QFont, QPixmap
 from qgis.PyQt.QtNetwork import QNetworkRequest
 from qgis.PyQt.QtWidgets import (
@@ -74,6 +75,7 @@ try:
         QgsRectangle,
         QgsTask,
         QgsVectorLayer,
+        QgsWkbTypes,
     )
     QGIS_AVAILABLE = True
 except ImportError:
@@ -253,6 +255,22 @@ SATELLITE_CATALOGUE: List[Dict] = [
         'sensor_model': 'pushbroom', 'max_off_nadir_deg': 0.0,
     },
     {
+        'id': 'usgs_landsat8', 'operator': 'USGS / NASA',
+        'constellation': 'Landsat 8', 'sensor': 'Optical',
+        'gsd_m': 15.0, 'access': 'Free', 'daylight': 'Day',
+        'fun_fact': 'Still flying, still mapping, still refusing to retire.',
+        'norad_id': 39084,
+        'connector_ids': [
+            'element84_stac',
+            'planetary_computer_stac',
+            'nasa_earthdata',
+        ],
+        'orbit_alt_km': 705, 'orbit_inc_deg': 98.2,
+        'orbit_period_min': 98.9, 'swath_km': 185.0,
+        'revisit_days': 16.0, 'ltan_hour': 10.0,
+        'sensor_model': 'pushbroom', 'max_off_nadir_deg': 0.0,
+    },
+    {
         'id': 'usgs_landsat9', 'operator': 'USGS / NASA',
         'constellation': 'Landsat 9', 'sensor': 'Optical',
         'gsd_m': 15.0, 'access': 'Free', 'daylight': 'Day',
@@ -288,6 +306,17 @@ SATELLITE_CATALOGUE: List[Dict] = [
         'orbit_alt_km': 705, 'orbit_inc_deg': 98.2,
         'orbit_period_min': 98.9, 'swath_km': 2330.0,
         'revisit_days': 1.0, 'ltan_hour': 10.5,
+        'sensor_model': 'pushbroom', 'max_off_nadir_deg': 0.0,
+    },
+    {
+        'id': 'nasa_modis_fire', 'operator': 'NASA',
+        'constellation': 'MODIS Active Fire (Terra/Aqua)', 'sensor': 'Optical/Thermal',
+        'gsd_m': 1000.0, 'access': 'Free', 'daylight': 'Both',
+        'fun_fact': 'MOD14/MYD14/MCD14. Active fires from 1 km, day and night.',
+        'norad_id': 25994, 'connector_ids': ['nasa_earthdata'],
+        'orbit_alt_km': 705, 'orbit_inc_deg': 98.2,
+        'orbit_period_min': 98.9, 'swath_km': 2330.0,
+        'revisit_days': 0.5, 'ltan_hour': 10.5,
         'sensor_model': 'pushbroom', 'max_off_nadir_deg': 0.0,
     },
     # --- SAR / Paid ----------------------------------------------------
@@ -430,6 +459,139 @@ def _destination_point(lat: float, lon: float, bearing_deg: float,
     return math.degrees(lat2), ((math.degrees(lon2) + 540.0) % 360.0) - 180.0
 
 
+def _wrap_longitude(lon: float) -> float:
+    """Wrap longitude to [-180, 180] for stable WGS84 geometries."""
+    return ((float(lon) + 180.0) % 360.0) - 180.0
+
+
+def _clamp_latitude(lat: float) -> float:
+    """Clamp latitude to valid geographic bounds."""
+    return max(-90.0, min(90.0, float(lat)))
+
+
+def _normalize_wgs84_lonlat(lon: float, lat: float) -> Tuple[float, float]:
+    """Return (lon, lat) normalized for WGS84 storage/reprojection."""
+    return _wrap_longitude(lon), _clamp_latitude(lat)
+
+
+def _normalize_bbox_wgs84(
+    bbox: Tuple[float, float, float, float],
+) -> Tuple[float, float, float, float]:
+    """Return bbox as (min_lon, min_lat, max_lon, max_lat) in WGS84."""
+    min_lon, min_lat, max_lon, max_lat = bbox
+    min_lon, min_lat = _normalize_wgs84_lonlat(min_lon, min_lat)
+    max_lon, max_lat = _normalize_wgs84_lonlat(max_lon, max_lat)
+    if min_lon > max_lon:
+        min_lon, max_lon = max_lon, min_lon
+    if min_lat > max_lat:
+        min_lat, max_lat = max_lat, min_lat
+    return min_lon, min_lat, max_lon, max_lat
+
+
+def _point_in_bbox(lon: float, lat: float,
+                   bbox: Tuple[float, float, float, float]) -> bool:
+    min_lon, min_lat, max_lon, max_lat = bbox
+    return min_lon <= lon <= max_lon and min_lat <= lat <= max_lat
+
+
+def _point_in_ring(lon: float, lat: float,
+                   ring: List[Tuple[float, float]]) -> bool:
+    """Return True when point lies inside a simple lon/lat ring."""
+    inside = False
+    if len(ring) < 3:
+        return False
+    j = len(ring) - 1
+    for i in range(len(ring)):
+        xi, yi = ring[i]
+        xj, yj = ring[j]
+        intersects = ((yi > lat) != (yj > lat)) and (
+            lon < (xj - xi) * (lat - yi) / ((yj - yi) or 1e-12) + xi
+        )
+        if intersects:
+            inside = not inside
+        j = i
+    return inside
+
+
+def _segments_intersect(
+    a1: Tuple[float, float],
+    a2: Tuple[float, float],
+    b1: Tuple[float, float],
+    b2: Tuple[float, float],
+) -> bool:
+    """Return True when two 2D segments intersect."""
+    def _orient(p, q, r):
+        return ((q[1] - p[1]) * (r[0] - q[0])
+                - (q[0] - p[0]) * (r[1] - q[1]))
+
+    def _on_segment(p, q, r):
+        return (min(p[0], r[0]) <= q[0] <= max(p[0], r[0])
+                and min(p[1], r[1]) <= q[1] <= max(p[1], r[1]))
+
+    o1 = _orient(a1, a2, b1)
+    o2 = _orient(a1, a2, b2)
+    o3 = _orient(b1, b2, a1)
+    o4 = _orient(b1, b2, a2)
+
+    if ((o1 > 0 > o2) or (o1 < 0 < o2)) and ((o3 > 0 > o4) or (o3 < 0 < o4)):
+        return True
+    if abs(o1) < 1e-12 and _on_segment(a1, b1, a2):
+        return True
+    if abs(o2) < 1e-12 and _on_segment(a1, b2, a2):
+        return True
+    if abs(o3) < 1e-12 and _on_segment(b1, a1, b2):
+        return True
+    if abs(o4) < 1e-12 and _on_segment(b1, a2, b2):
+        return True
+    return False
+
+
+def _swath_intersects_aoi(
+    swath_ribbon: List[Tuple[float, float]],
+    aoi_bbox: Optional[Tuple[float, float, float, float]],
+) -> bool:
+    """Return True when the swath polygon intersects the AOI bbox."""
+    if not aoi_bbox:
+        return True
+    ring = [
+        _normalize_wgs84_lonlat(lon, lat)
+        for lon, lat in (swath_ribbon or [])
+    ]
+    if len(ring) < 3:
+        return False
+
+    bbox = _normalize_bbox_wgs84(aoi_bbox)
+    min_lon, min_lat, max_lon, max_lat = bbox
+    bbox_corners = [
+        (min_lon, min_lat),
+        (max_lon, min_lat),
+        (max_lon, max_lat),
+        (min_lon, max_lat),
+    ]
+    bbox_edges = [
+        (bbox_corners[0], bbox_corners[1]),
+        (bbox_corners[1], bbox_corners[2]),
+        (bbox_corners[2], bbox_corners[3]),
+        (bbox_corners[3], bbox_corners[0]),
+    ]
+
+    for lon, lat in ring:
+        if _point_in_bbox(lon, lat, bbox):
+            return True
+
+    for lon, lat in bbox_corners:
+        if _point_in_ring(lon, lat, ring):
+            return True
+
+    for i in range(len(ring) - 1):
+        seg = (ring[i], ring[i + 1])
+        for edge in bbox_edges:
+            if _segments_intersect(seg[0], seg[1], edge[0], edge[1]):
+                return True
+
+    return False
+
+
 def _track_bearing_for_direction(inc_deg: float, direction: str) -> float:
     """Approximate ground-track bearing for a sun-synchronous pass direction."""
     if direction == 'Descending':
@@ -485,6 +647,7 @@ class _OverpassEngine:
         sat: Dict,
         aoi_lat: float,
         aoi_lon: float,
+        aoi_bbox: Optional[Tuple[float, float, float, float]],
         start_dt: datetime,
         end_dt: datetime,
     ) -> List[Dict]:
@@ -507,14 +670,16 @@ class _OverpassEngine:
                 if tle:
                     try:
                         return self._sgp4_predict(sat, tle, aoi_lat, aoi_lon,
-                                                  start_dt, end_dt)
+                                                  aoi_bbox, start_dt, end_dt)
                     except Exception as exc:
                         logger.warning(
                             f'SGP4 prediction failed for {sat["constellation"]}: '
                             f'{exc}; falling back to analytical model'
                         )
 
-        return self._analytical_predict(sat, aoi_lat, aoi_lon, start_dt, end_dt)
+        return self._analytical_predict(
+            sat, aoi_lat, aoi_lon, aoi_bbox, start_dt, end_dt,
+        )
 
     # ----- TLE fetching -----------------------------------------------
 
@@ -595,6 +760,7 @@ class _OverpassEngine:
     def _sgp4_predict(
         self, sat: Dict, tle: Tuple[str, str],
         tgt_lat: float, tgt_lon: float,
+        aoi_bbox: Optional[Tuple[float, float, float, float]],
         start_dt: datetime, end_dt: datetime,
     ) -> List[Dict]:
         satrec = Satrec.twoline2rv(tle[0], tle[1])
@@ -670,7 +836,7 @@ class _OverpassEngine:
                 # Evaluate sensor constraints at converged time
                 pass_result = self._evaluate_pass(
                     satrec, sat, converged_dt, tgt_lat, tgt_lon,
-                    swath_km, max_ona, model, alt_km, period_s,
+                    aoi_bbox, swath_km, max_ona, model, alt_km, period_s,
                 )
                 if pass_result:
                     overpasses.append(pass_result)
@@ -687,6 +853,7 @@ class _OverpassEngine:
     def _evaluate_pass(
         self, satrec, sat: Dict, dt: datetime,
         tgt_lat: float, tgt_lon: float,
+        aoi_bbox: Optional[Tuple[float, float, float, float]],
         swath_km: float, max_ona: float, model: str,
         alt_km: float, period_s: float,
     ) -> Optional[Dict]:
@@ -728,6 +895,8 @@ class _OverpassEngine:
         orbit_track, ground_track, swath_ribbon = self._build_tracks(
             satrec, dt, period_s, swath_km, actual_alt,
         )
+        if not _swath_intersects_aoi(swath_ribbon, aoi_bbox):
+            return None
 
         return {
             'satellite': sat['constellation'],
@@ -781,6 +950,7 @@ class _OverpassEngine:
                 continue
 
             slat, slon = ss
+            slon, slat = _normalize_wgs84_lonlat(slon, slat)
             alt_m = (math.sqrt(pos[0] ** 2 + pos[1] ** 2 + pos[2] ** 2)
                      - _R_EARTH_KM) * 1000.0
 
@@ -794,8 +964,10 @@ class _OverpassEngine:
                 right_brg = (vb + 90.0) % 360.0
                 lp = _destination_point(slat, slon, left_brg, half_swath)
                 rp = _destination_point(slat, slon, right_brg, half_swath)
-                left_edge.append((lp[1], lp[0]))   # (lon, lat)
-                right_edge.append((rp[1], rp[0]))
+                llon, llat = _normalize_wgs84_lonlat(lp[1], lp[0])
+                rlon, rlat = _normalize_wgs84_lonlat(rp[1], rp[0])
+                left_edge.append((llon, llat))   # (lon, lat)
+                right_edge.append((rlon, rlat))
 
         # Swath ribbon = left edge forward + right edge reversed -> closed
         swath_ribbon = left_edge + list(reversed(right_edge))
@@ -809,6 +981,7 @@ class _OverpassEngine:
     def _analytical_predict(
         self, sat: Dict,
         lat: float, lon: float,
+        aoi_bbox: Optional[Tuple[float, float, float, float]],
         start_dt: datetime, end_dt: datetime,
     ) -> List[Dict]:
         """Estimate sensor crossings using a deterministic sun-synchronous model."""
@@ -849,17 +1022,23 @@ class _OverpassEngine:
 
         overpasses: List[Dict] = []
         current_day = start_dt.replace(hour=0, minute=0, second=0, microsecond=0)
-        phase_origin = 0.618033988749895
+        phase_seed_raw = sat.get('norad_id') or sat.get('id') or sat.get('constellation', '')
+        try:
+            phase_seed = (int(phase_seed_raw) % 997) / 997.0
+        except Exception:
+            phase_seed = (sum(ord(ch) for ch in str(phase_seed_raw)) % 997) / 997.0
 
         def _phase_from_time(pass_time: datetime, dir_shift: float) -> float:
             """Return a deterministic pseudo-phase from absolute pass time.
 
-            Using absolute orbital progress avoids sparse day-stepping artefacts
-            that can miss all accesses in short windows.
+            Keep the phase tied to real orbital progress and add only a stable
+            per-satellite seed. This avoids near-integer daily phase steps for
+            some periods (notably Landsat-class ~98.9 min orbits), which could
+            otherwise suppress all predicted accesses in short windows.
             """
             elapsed_days = max(0.0, (pass_time - start_dt).total_seconds() / 86400.0)
             orbit_progress = elapsed_days * orbits_per_day
-            return (orbit_progress * phase_origin + dir_shift) % 1.0
+            return (orbit_progress + phase_seed + dir_shift) % 1.0
 
         while current_day <= end_dt:
             for direction, utc_hour, t_offset in (
@@ -916,6 +1095,8 @@ class _OverpassEngine:
                     sub_sat_lat, sub_sat_lon, sat.get('orbit_inc_deg', 98.0), alt_km,
                     swath_km, period, direction,
                 )
+                if not _swath_intersects_aoi(swath_ribbon, aoi_bbox):
+                    continue
 
                 overpasses.append({
                     'satellite': sat['constellation'],
@@ -971,13 +1152,16 @@ def _analytical_tracks(
     for i in range(n_points + 1):
         d = -half_len_km + i * step_km
         pt = _destination_point(center_lat, center_lon, track_bearing, d)
-        orbit_pts.append((pt[1], pt[0], alt_m))
-        ground_pts.append((pt[1], pt[0]))
+        plon, plat = _normalize_wgs84_lonlat(pt[1], pt[0])
+        orbit_pts.append((plon, plat, alt_m))
+        ground_pts.append((plon, plat))
 
-        lp = _destination_point(pt[0], pt[1], (track_bearing - 90) % 360, half_swath)
-        rp = _destination_point(pt[0], pt[1], (track_bearing + 90) % 360, half_swath)
-        left_edge.append((lp[1], lp[0]))
-        right_edge.append((rp[1], rp[0]))
+        lp = _destination_point(plat, plon, (track_bearing - 90) % 360, half_swath)
+        rp = _destination_point(plat, plon, (track_bearing + 90) % 360, half_swath)
+        llon, llat = _normalize_wgs84_lonlat(lp[1], lp[0])
+        rlon, rlat = _normalize_wgs84_lonlat(rp[1], rp[0])
+        left_edge.append((llon, llat))
+        right_edge.append((rlon, rlat))
 
     swath_ribbon = left_edge + list(reversed(right_edge))
     if swath_ribbon:
@@ -997,6 +1181,7 @@ class _SmartSearchTask(QgsTask if QGIS_AVAILABLE else object):  # type: ignore
             super().__init__('Altair Tasking — Archive Search', QgsTask.CanCancel)
         self.connector_manager = connector_manager
         self.search_params = search_params
+        self.selected_satellites = list(search_params.get('selected_satellites', []) or [])
         self.results: List[Dict] = []
         self.error_message: Optional[str] = None
 
@@ -1009,10 +1194,15 @@ class _SmartSearchTask(QgsTask if QGIS_AVAILABLE else object):  # type: ignore
             max_cloud_cover = self.search_params.get('max_cloud_cover')
             limit = int(self.search_params.get('limit', 50))
             connector_ids = list(self.search_params.get('connector_ids', []))
-            connector_timeout = float(self.search_params.get('connector_timeout', 20.0) or 20.0)
+            connector_timeout = float(
+                self.search_params.get('connector_timeout', 60.0) or 60.0
+            )
             connector_timeout = max(5.0, min(60.0, connector_timeout))
             connector_timeouts = self.search_params.get('connector_timeouts', {}) or {}
             auth_payloads = self.search_params.get('auth_payloads', {}) or {}
+            connector_search_hints = (
+                self.search_params.get('connector_search_hints', {}) or {}
+            )
             max_total_results = int(self.search_params.get('max_total_results', 120) or 120)
             max_total_results = max(20, min(2000, max_total_results))
             search_parallelism = int(self.search_params.get('search_parallelism', 3) or 3)
@@ -1087,6 +1277,7 @@ class _SmartSearchTask(QgsTask if QGIS_AVAILABLE else object):  # type: ignore
                     limit=limit,
                     connector_id=cid,
                     timeout=timeout_for_connector,
+                    text_query=connector_search_hints.get(cid) or None,
                 )
                 return cid, (items or []), (time.perf_counter() - t0), None
 
@@ -1188,6 +1379,7 @@ class _SmartSearchTask(QgsTask if QGIS_AVAILABLE else object):  # type: ignore
 class _OverpassTask(QgsTask if QGIS_AVAILABLE else object):  # type: ignore
 
     def __init__(self, satellites: List[Dict], lat: float, lon: float,
+                 aoi_bbox: Optional[Tuple[float, float, float, float]],
                  start_dt: datetime, end_dt: datetime,
                  max_results: int = 500, max_workers: int = 4):
         if QGIS_AVAILABLE:
@@ -1195,6 +1387,7 @@ class _OverpassTask(QgsTask if QGIS_AVAILABLE else object):  # type: ignore
         self.satellites = satellites
         self.lat = lat
         self.lon = lon
+        self.aoi_bbox = aoi_bbox
         self.start_dt = start_dt
         self.end_dt = end_dt
         self.max_results = max(50, min(5000, int(max_results or 500)))
@@ -1216,7 +1409,10 @@ class _OverpassTask(QgsTask if QGIS_AVAILABLE else object):  # type: ignore
             def _predict_one(sat: Dict[str, Any]):
                 t0 = time.perf_counter()
                 engine = _OverpassEngine()
-                passes = engine.predict(sat, self.lat, self.lon, self.start_dt, self.end_dt)
+                passes = engine.predict(
+                    sat, self.lat, self.lon, self.aoi_bbox,
+                    self.start_dt, self.end_dt,
+                )
                 return sat, (passes or []), (time.perf_counter() - t0)
 
             executor = ThreadPoolExecutor(
@@ -1341,6 +1537,10 @@ class SmartTaskingDockWidget(QDockWidget):
         self._3d_swath_layer = None
         self._3d_sat_layer = None
         self._3d_nadir_layer = None
+        self._busy_timer: Optional[QTimer] = None
+        self._busy_state = 0
+        self._busy_frames = ['⏳', '⌛']
+        self._busy_text = 'Altair sta cercando...'
 
         self._init_connector_manager()
         self._setup_ui()
@@ -1401,10 +1601,6 @@ class SmartTaskingDockWidget(QDockWidget):
                  [ConnectorCapability.BBOX_SEARCH, ConnectorCapability.DATE_RANGE,
                   ConnectorCapability.CLOUD_COVER,
                   ConnectorCapability.PREVIEW]),
-                                ('cdse_sentinel', '..connectors.cdse_sentinel', 'CdseSentinelConnector',  'CDSE Sentinel',
-                 [ConnectorCapability.BBOX_SEARCH, ConnectorCapability.DATE_RANGE,
-                  ConnectorCapability.CLOUD_COVER, ConnectorCapability.AUTHENTICATION,
-                  ConnectorCapability.COG_SUPPORT, ConnectorCapability.PREVIEW]),
                 ('nasa_earthdata',  '..connectors.nasa_earthdata',  'NasaEarthdataConnector',   'NASA EarthData',
                  [ConnectorCapability.BBOX_SEARCH, ConnectorCapability.DATE_RANGE,
                   ConnectorCapability.AUTHENTICATION, ConnectorCapability.COG_SUPPORT,
@@ -1658,6 +1854,11 @@ class SmartTaskingDockWidget(QDockWidget):
         buttons.addWidget(self.reset_btn)
 
         layout.addLayout(buttons)
+
+        self.busy_label = QLabel('')
+        self.busy_label.setStyleSheet('color: #b26a00; font-size: 10px; font-weight: bold;')
+        self.busy_label.hide()
+        layout.addWidget(self.busy_label)
 
         # --- Results tabs ---
         self.results_tabs = QTabWidget()
@@ -2000,6 +2201,35 @@ class SmartTaskingDockWidget(QDockWidget):
         """Enable the action button only when no background task is active."""
         self.go_btn.setEnabled(not self._has_active_tasks())
 
+    def _start_busy_indicator(self, text: Optional[str] = None):
+        if text:
+            self._busy_text = text
+        self._busy_state = 0
+        self._tick_busy_indicator()
+        self.busy_label.show()
+        if self._busy_timer:
+            self._busy_timer.stop()
+        self._busy_timer = QTimer(self)
+        self._busy_timer.timeout.connect(self._tick_busy_indicator)
+        self._busy_timer.start(350)
+
+    def _tick_busy_indicator(self):
+        frame = self._busy_frames[self._busy_state % len(self._busy_frames)]
+        self.busy_label.setText(f'{frame} {self._busy_text}')
+        self._busy_state += 1
+
+    def _stop_busy_indicator(self):
+        if self._busy_timer:
+            self._busy_timer.stop()
+            self._busy_timer = None
+        self.busy_label.hide()
+
+    def _sync_busy_indicator(self):
+        if self._has_active_tasks():
+            self._start_busy_indicator(self._busy_text)
+        else:
+            self._stop_busy_indicator()
+
     def _on_go_clicked(self):
         """Central dispatch — detect mode and launch appropriate task(s)."""
         if self._has_active_tasks():
@@ -2025,11 +2255,15 @@ class SmartTaskingDockWidget(QDockWidget):
         do_tasking = end_py > today
 
         if do_archive:
-            self._launch_archive_search(selected, bbox, start_py, min(end_py, today))
+            # Normalize archive date range: ensure start <= end; cap end to today.
+            arch_start = min(start_py, end_py)
+            arch_end = min(max(start_py, end_py), today)
+            self._launch_archive_search(selected, bbox, arch_start, arch_end)
 
         if do_tasking:
             tasking_start = max(start_py, today + timedelta(days=1))
-            self._launch_overpass_prediction(selected, bbox, tasking_start, end_py)
+            tasking_end = max(end_py, tasking_start)
+            self._launch_overpass_prediction(selected, bbox, tasking_start, tasking_end)
 
         # Always generate text summary
         self._generate_summary(selected, bbox)
@@ -2038,6 +2272,43 @@ class SmartTaskingDockWidget(QDockWidget):
     # Archive search
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _archive_search_keyword_for_satellite(sat: Dict[str, Any]) -> str:
+        """Derive a CMR-friendly keyword from a satellite's constellation.
+
+        Example: 'MODIS (Terra/Aqua)' -> 'MODIS'. Used to scope broad,
+        multi-mission connectors (e.g. NASA EarthData) to the selected
+        constellation so results actually match the selection filter.
+        """
+        constellation = str(sat.get('constellation', '')).strip()
+        if not constellation:
+            return ''
+        primary = re.split(r'[\(/]', constellation)[0].strip()
+        return primary or constellation
+
+    def _build_connector_search_hints(
+        self,
+        satellites: List[Dict[str, Any]],
+    ) -> Dict[str, str]:
+        """Build per-connector keyword hints for broad multi-mission connectors.
+
+        Only ``nasa_earthdata`` is scoped this way: its connector serves many
+        missions and, without a keyword, CMR returns arbitrary collections that
+        the selection filter then discards. Scoping to the selected
+        constellation keyword keeps NASA results aligned with the selection.
+        """
+        hints: Dict[str, str] = {}
+        nasa_keywords: List[str] = []
+        for sat in satellites:
+            cids = sat.get('connector_ids', []) or []
+            if 'nasa_earthdata' in cids:
+                keyword = self._archive_search_keyword_for_satellite(sat)
+                if keyword:
+                    nasa_keywords.append(keyword)
+        if nasa_keywords:
+            hints['nasa_earthdata'] = ' '.join(dict.fromkeys(nasa_keywords))
+        return hints
+
     def _launch_archive_search(self, satellites: List[Dict], bbox, start_d, end_d):
         """Launch a background archive search using the connector framework."""
         connector_ids = set()
@@ -2045,15 +2316,9 @@ class SmartTaskingDockWidget(QDockWidget):
             for cid in sat.get('connector_ids', []):
                 connector_ids.add(cid)
 
-        # Smart archive mode should rely on the new open STAC backends.
-        # Keep CDSE for service/overpass workflows, not archive catalogue search.
-        connector_ids.discard('cdse_sentinel')
-        connector_ids.update({'element84_stac', 'planetary_computer_stac'})
-
         if not connector_ids:
             self.archive_count_label.setText('No archive connectors for selected satellites.')
             return
-
         if not self._connector_manager:
             self.archive_count_label.setText('Connector manager unavailable.')
             return
@@ -2066,11 +2331,13 @@ class SmartTaskingDockWidget(QDockWidget):
             )
             return
 
-        base_timeout = float(self.settings.value('AltairEOData/smart_archive_connector_timeout', 20.0))
+        base_timeout = float(
+            self.settings.value('AltairEOData/smart_archive_connector_timeout', 60.0)
+        )
         base_timeout = max(5.0, min(60.0, base_timeout))
-        jaxa_timeout = float(self.settings.value('AltairEOData/jaxa_search_timeout', min(base_timeout, 15.0)))
+        jaxa_timeout = float(self.settings.value('AltairEOData/jaxa_search_timeout', base_timeout))
         jaxa_timeout = max(5.0, min(60.0, jaxa_timeout))
-        vantor_timeout = float(self.settings.value('AltairEOData/vantor_discovery_timeout', min(base_timeout, 12.0)))
+        vantor_timeout = float(self.settings.value('AltairEOData/vantor_discovery_timeout', 60.0))
         vantor_timeout = max(5.0, min(60.0, vantor_timeout))
         limit_per_connector = int(self.settings.value('AltairEOData/smart_archive_limit_per_connector', 20))
         limit_per_connector = max(5, min(100, limit_per_connector))
@@ -2079,6 +2346,8 @@ class SmartTaskingDockWidget(QDockWidget):
         search_parallelism = int(self.settings.value('AltairEOData/smart_archive_parallelism', 3))
         search_parallelism = max(1, min(8, search_parallelism))
 
+        connector_search_hints = self._build_connector_search_hints(satellites)
+
         params = {
             'bbox': list(bbox),
             'start_date': self._archive_day_start(start_d),
@@ -2086,6 +2355,7 @@ class SmartTaskingDockWidget(QDockWidget):
             'max_cloud_cover': float(self.cloud_spin.value()) / 100.0,
             'limit': limit_per_connector,
             'connector_ids': ready_ids,
+            'selected_satellites': [dict(sat) for sat in satellites],
             'connector_timeout': base_timeout,
             'auth_payloads': auth_payloads,
             'max_total_results': max_total_results,
@@ -2094,10 +2364,11 @@ class SmartTaskingDockWidget(QDockWidget):
                 'jaxa_earth_stac': jaxa_timeout,
                 'vantor': vantor_timeout,
             },
+            'connector_search_hints': connector_search_hints,
         }
-
         self.status_label.setText('Searching archives …')
         self.status_label.setStyleSheet('color: #88ccff; font-size: 10px;')
+        self._start_busy_indicator('Ricerca archivio in corso...')
 
         if QGIS_AVAILABLE and hasattr(QgsApplication, 'taskManager'):
             task = _SmartSearchTask(self._connector_manager, params)
@@ -2120,13 +2391,131 @@ class SmartTaskingDockWidget(QDockWidget):
             return
 
         self._active_search_task = None
-        self._search_results = task.results or []
+        raw_results = task.results or []
+        selected_satellites = getattr(task, 'selected_satellites', []) or []
+        self._search_results = self._filter_archive_results_by_selection(
+            raw_results,
+            selected_satellites,
+        )
+        if len(self._search_results) != len(raw_results):
+            logger.info(
+                'SmartTasking archive selection filter kept %d/%d result(s)',
+                len(self._search_results),
+                len(raw_results),
+            )
         self._populate_archive_table()
         self.results_tabs.setCurrentIndex(0)
         n = len(self._search_results)
         self.status_label.setText(f'Archive search complete — {n} scene(s)')
         self.status_label.setStyleSheet('color: #00ffbf; font-size: 10px;')
         self._update_go_button_state()
+        self._sync_busy_indicator()
+
+    @staticmethod
+    def _constellation_patterns(constellation: str) -> List[str]:
+        """Return regex patterns used to match connector item metadata."""
+        c = str(constellation or '').strip().lower()
+        aliases = {
+            'worldview-3': [r'worldview[-\s]?3', r'\bwv0?3\b', r'\bwv3\b'],
+            'worldview-2': [r'worldview[-\s]?2', r'\bwv0?2\b', r'\bwv2\b'],
+            'worldview legion': [r'worldview\s+legion', r'\blegion\b', r'\blg0?[1-9]\b'],
+            'pléiades neo': [r'pl[eé]iades\s+neo', r'\bpleiades\b'],
+            'spot 6/7': [r'\bspot\s*6\b', r'\bspot\s*7\b', r'\bspot\b'],
+            'skysat': [r'\bskysat\b'],
+            'planetscope (dove)': [r'\bplanetscope\b', r'\bdove\b'],
+            'blacksky gen-3': [r'\bblacksky\b', r'\bgen[-\s]?3\b'],
+            'jilin-1 gaofen': [r'\bjilin\b', r'\bgaofen\b'],
+            'alos-2 (palsar-2)': [r'\balos[-\s]?2\b', r'\bpalsar[-\s]?2\b'],
+            'sentinel-2': [r'\bsentinel[-\s]?2\b', r'\bs2[a-b]?\b'],
+            'landsat 8': [r'\blandsat[-\s]?8\b', r'\blc08\b'],
+            'landsat 9': [r'\blandsat[-\s]?9\b', r'\blc09\b'],
+            'modis (terra/aqua)': [r'\bmodis\b', r'\bterra\b', r'\baqua\b'],
+            'modis active fire (terra/aqua)': [
+                r'\bfire\b', r'thermal.anomal',
+                r'\bmod14[a-z0-9]*\b', r'\bmyd14[a-z0-9]*\b', r'\bmcd14[a-z0-9]*\b',
+                r'\bfirms\b',
+            ],
+            'iceye x-band': [r'\biceye\b'],
+            'capella sar': [r'\bcapella\b'],
+            'umbra sar': [r'\bumbra\b'],
+            'terrasar-x / paz': [r'\bterrasar\b', r'\bpaz\b'],
+            'sentinel-1': [r'\bsentinel[-\s]?1\b', r'\bs1[a-b]?\b'],
+            'nisar': [r'\bnisar\b'],
+        }
+        if c in aliases:
+            return aliases[c]
+
+        tokens = [t for t in re.split(r'[^a-z0-9]+', c) if len(t) >= 3]
+        return [rf'\b{re.escape(t)}\b' for t in tokens]
+
+    def _item_matches_satellite_selection(
+        self,
+        item: Dict[str, Any],
+        selected_satellites: List[Dict[str, Any]],
+    ) -> bool:
+        """Return True when an archive item is compatible with selected satellites."""
+        if not selected_satellites:
+            return True
+
+        source = str(item.get('_source', '')).strip()
+        if not source:
+            return False
+
+        source_sats = []
+        for sat in selected_satellites:
+            cids = sat.get('connector_ids', []) or []
+            if source in cids:
+                source_sats.append(sat)
+
+        if not source_sats:
+            return False
+
+        props = item.get('properties', {}) if isinstance(item, dict) else {}
+        props = props if isinstance(props, dict) else {}
+        text_parts = [
+            item.get('id', ''),
+            item.get('collection', ''),
+            item.get('constellation', ''),
+            props.get('platform', ''),
+            props.get('constellation', ''),
+            props.get('satellite', ''),
+            props.get('mission', ''),
+            props.get('vehicle_name', ''),
+            props.get('dataset_id', ''),
+            props.get('short_name', ''),
+            props.get('entry_title', ''),
+            props.get('title', ''),
+            props.get('description', ''),
+        ]
+        haystack = ' '.join(str(p) for p in text_parts if p is not None).lower()
+
+        for sat in source_sats:
+            constellation = str(sat.get('constellation', '')).strip()
+            if not constellation:
+                continue
+            for pattern in self._constellation_patterns(constellation):
+                try:
+                    if re.search(pattern, haystack, flags=re.IGNORECASE):
+                        return True
+                except re.error:
+                    continue
+
+        return False
+
+    def _filter_archive_results_by_selection(
+        self,
+        items: List[Dict[str, Any]],
+        selected_satellites: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Filter archive results to selected operator/constellation context."""
+        if not selected_satellites:
+            return list(items or [])
+
+        filtered: List[Dict[str, Any]] = []
+        for item in items or []:
+            if self._item_matches_satellite_selection(item, selected_satellites):
+                filtered.append(item)
+        return filtered
 
     def _on_search_error(self, task: _SmartSearchTask):
         if task is not self._active_search_task:
@@ -2138,6 +2527,7 @@ class SmartTaskingDockWidget(QDockWidget):
         self.status_label.setText(f'Archive search failed: {msg}')
         self.status_label.setStyleSheet('color: #ff6b6b; font-size: 10px;')
         self._update_go_button_state()
+        self._sync_busy_indicator()
 
     def _populate_archive_table(self):
         self._updating_archive_table = True
@@ -3033,11 +3423,11 @@ class SmartTaskingDockWidget(QDockWidget):
     def _visualize_overpass_3d(self, op: Dict):
         """Create five memory layers for a single satellite overpass.
 
-        • **SmartTasking Orbit Track** — LineStringZ full orbit at altitude (white)
-        • **SmartTasking Ground Track** — LineString on the surface (cyan)
-        • **SmartTasking Swath**        — Polygon swath corridor (cyan, semi-transparent)
-        • **SmartTasking Satellite**    — PointZ at orbital altitude (red)
-        • **SmartTasking Nadir Axis**   — LineStringZ surface → satellite (red)
+        • **Predicted Orbit Track** — LineStringZ full orbit at altitude (white)
+        • **Predicted Ground Track** — LineString on the surface (cyan)
+        • **Predicted Swath**        — Polygon swath corridor (cyan, semi-transparent)
+        • **Predicted Satellite**    — PointZ at orbital altitude (red)
+        • **Predicted Nadir Axis**   — LineStringZ surface → satellite (red)
 
         Layers get proper 2D symbology (always works) **plus** QGIS-native 3D
         renderers when the ``qgis._3d`` module is available.
@@ -3053,6 +3443,8 @@ class SmartTaskingDockWidget(QDockWidget):
         if lat is None or lon is None:
             logger.debug('Overpass has no sub-satellite coords — skipping 3D')
             return
+
+        lon, lat = _normalize_wgs84_lonlat(lon, lat)
 
         alt_m = alt_km * 1000.0
         orbit_track = op.get('orbit_track', [])
@@ -3070,7 +3462,7 @@ class SmartTaskingDockWidget(QDockWidget):
         orbit_layer = None
         if len(orbit_track) >= 2:
             orbit_layer = QgsVectorLayer(
-                'LineStringZ?crs=EPSG:4326', 'SmartTasking Orbit Track', 'memory',
+                'LineStringZ?crs=EPSG:4326', 'Search and Predict Orbit Track', 'memory',
             )
             orbit_layer.setCrs(QgsCoordinateReferenceSystem('EPSG:4326'))
             op_ = orbit_layer.dataProvider()
@@ -3090,7 +3482,9 @@ class SmartTaskingDockWidget(QDockWidget):
                 segments.append(seg)
 
             for seg in segments:
-                coords = ', '.join(f'{p[0]} {p[1]} {p[2]}' for p in seg)
+                coords = ', '.join(
+                    f'{_wrap_longitude(p[0])} {_clamp_latitude(p[1])} {p[2]}' for p in seg
+                )
                 feat = QgsFeature(orbit_layer.fields())
                 feat.setGeometry(QgsGeometry.fromWkt(f'LINESTRINGZ({coords})'))
                 feat.setAttribute('name', 'Orbit')
@@ -3105,7 +3499,7 @@ class SmartTaskingDockWidget(QDockWidget):
         ground_layer = None
         if len(ground_track) >= 2:
             ground_layer = QgsVectorLayer(
-                'LineString?crs=EPSG:4326', 'SmartTasking Ground Track', 'memory',
+                'LineString?crs=EPSG:4326', 'Search and Predict Ground Track', 'memory',
             )
             ground_layer.setCrs(QgsCoordinateReferenceSystem('EPSG:4326'))
             gp = ground_layer.dataProvider()
@@ -3124,7 +3518,9 @@ class SmartTaskingDockWidget(QDockWidget):
                 segments.append(seg)
 
             for seg in segments:
-                coords = ', '.join(f'{p[0]} {p[1]}' for p in seg)
+                coords = ', '.join(
+                    f'{_wrap_longitude(p[0])} {_clamp_latitude(p[1])}' for p in seg
+                )
                 feat = QgsFeature(ground_layer.fields())
                 feat.setGeometry(QgsGeometry.fromWkt(f'LINESTRING({coords})'))
                 feat.setAttribute('name', 'Ground')
@@ -3139,25 +3535,53 @@ class SmartTaskingDockWidget(QDockWidget):
         swath_layer = None
         if len(swath_ribbon) >= 4:
             swath_layer = QgsVectorLayer(
-                'Polygon?crs=EPSG:4326', 'SmartTasking Swath', 'memory',
+                'MultiPolygon?crs=EPSG:4326', 'Search and Predict Swath', 'memory',
             )
             swath_layer.setCrs(QgsCoordinateReferenceSystem('EPSG:4326'))
             swp = swath_layer.dataProvider()
             swp.addAttributes(fld)
             swath_layer.updateFields()
 
-            # Clamp coordinates to valid geographic range
+            # Standardize ring to strict WGS84 bounds before geometry creation.
             clamped = []
             for pt in swath_ribbon:
-                clon = max(-180.0, min(180.0, pt[0]))
-                clat = max(-90.0, min(90.0, pt[1]))
+                clon, clat = _normalize_wgs84_lonlat(pt[0], pt[1])
                 clamped.append((clon, clat))
 
+            if clamped and clamped[0] != clamped[-1]:
+                clamped.append(clamped[0])
+
             coords = ', '.join(f'{p[0]} {p[1]}' for p in clamped)
-            feat = QgsFeature(swath_layer.fields())
-            feat.setGeometry(QgsGeometry.fromWkt(f'POLYGON(({coords}))'))
-            feat.setAttribute('name', 'Swath')
-            swp.addFeatures([feat])
+            raw_geom = QgsGeometry.fromWkt(f'POLYGON(({coords}))')
+            swath_geoms: List[QgsGeometry] = []
+
+            if raw_geom is not None and not raw_geom.isEmpty():
+                fixed_geom = raw_geom
+                try:
+                    candidate = raw_geom.makeValid()
+                    if candidate is not None and not candidate.isEmpty():
+                        fixed_geom = candidate
+                except Exception as exc:
+                    logger.debug(f'Swath makeValid skipped: {exc}')
+
+                if QgsWkbTypes.geometryType(fixed_geom.wkbType()) == QgsWkbTypes.PolygonGeometry:
+                    swath_geoms.append(fixed_geom)
+                else:
+                    try:
+                        for part in fixed_geom.asGeometryCollection():
+                            if part is None or part.isEmpty():
+                                continue
+                            if QgsWkbTypes.geometryType(part.wkbType()) == QgsWkbTypes.PolygonGeometry:
+                                swath_geoms.append(part)
+                    except Exception:
+                        pass
+
+            for geom in swath_geoms:
+                feat = QgsFeature(swath_layer.fields())
+                feat.setGeometry(geom)
+                feat.setAttribute('name', 'Swath')
+                swp.addFeatures([feat])
+
             swath_layer.updateExtents()
 
             swath_layer.renderer().setSymbol(QgsFillSymbol.createSimple({
@@ -3168,7 +3592,7 @@ class SmartTaskingDockWidget(QDockWidget):
 
         # ---- 4. Satellite position (PointZ) --------------------------
         sat_layer = QgsVectorLayer(
-            'PointZ?crs=EPSG:4326', 'SmartTasking Satellite', 'memory',
+            'PointZ?crs=EPSG:4326', 'Search and Predict Satellite', 'memory',
         )
         sat_layer.setCrs(QgsCoordinateReferenceSystem('EPSG:4326'))
         sp = sat_layer.dataProvider()
@@ -3190,7 +3614,7 @@ class SmartTaskingDockWidget(QDockWidget):
 
         # ---- 5. Nadir axis (LineStringZ) -----------------------------
         nadir_layer = QgsVectorLayer(
-            'LineStringZ?crs=EPSG:4326', 'SmartTasking Nadir Axis', 'memory',
+            'LineStringZ?crs=EPSG:4326', 'Search and Predict Nadir Axis', 'memory',
         )
         nadir_layer.setCrs(QgsCoordinateReferenceSystem('EPSG:4326'))
         np_ = nadir_layer.dataProvider()
@@ -3390,7 +3814,7 @@ class SmartTaskingDockWidget(QDockWidget):
                     pass
 
             # Defensive cleanup of any leftover layers with same display name
-            for leftover in project.mapLayersByName('SmartTasking Footprints'):
+            for leftover in project.mapLayersByName('Search and Predict Footprints'):
                 try:
                     project.removeMapLayer(leftover.id())
                 except Exception:
@@ -3407,7 +3831,7 @@ class SmartTaskingDockWidget(QDockWidget):
         try:
             self._clear_footprints_layer()
 
-            layer = QgsVectorLayer('Polygon?crs=EPSG:4326', 'SmartTasking Footprints', 'memory')
+            layer = QgsVectorLayer('Polygon?crs=EPSG:4326', 'Search and Predict Footprints', 'memory')
             layer.setCrs(QgsCoordinateReferenceSystem('EPSG:4326'))
             pr = layer.dataProvider()
 
@@ -3531,6 +3955,7 @@ class SmartTaskingDockWidget(QDockWidget):
 
         self.status_label.setText('Predicting overpasses …')
         self.status_label.setStyleSheet('color: #88ccff; font-size: 10px;')
+        self._start_busy_indicator('Predizione overpass in corso...')
         if horizon_clipped:
             logger.info(
                 'Overpass horizon clipped from %d to %d day(s) for performance',
@@ -3543,6 +3968,7 @@ class SmartTaskingDockWidget(QDockWidget):
                 satellites,
                 lat,
                 lon,
+                tuple(bbox),
                 start_dt,
                 end_dt,
                 max_results=max_overpasses,
@@ -3559,6 +3985,7 @@ class SmartTaskingDockWidget(QDockWidget):
                 satellites,
                 lat,
                 lon,
+                tuple(bbox),
                 start_dt,
                 end_dt,
                 max_results=max_overpasses,
@@ -3584,6 +4011,7 @@ class SmartTaskingDockWidget(QDockWidget):
         self.status_label.setText(f'Prediction complete — {n} overpass(es) ({method}){suffix}')
         self.status_label.setStyleSheet('color: #00e5ff; font-size: 10px;')
         self._update_go_button_state()
+        self._sync_busy_indicator()
 
     def _on_overpass_error(self, task: _OverpassTask):
         if task is not self._active_overpass_task:
@@ -3595,6 +4023,7 @@ class SmartTaskingDockWidget(QDockWidget):
         self.status_label.setText(f'Overpass prediction failed: {msg}')
         self.status_label.setStyleSheet('color: #ff6b6b; font-size: 10px;')
         self._update_go_button_state()
+        self._sync_busy_indicator()
 
     def _populate_overpass_table(self):
         self.overpass_table.blockSignals(True)
@@ -3712,7 +4141,7 @@ class SmartTaskingDockWidget(QDockWidget):
 
         lines = [
             '═══════════════════════════════════════',
-            '         SMART TASKING SUMMARY',
+            '         SEARCH AND PREDICT SUMMARY',
             '═══════════════════════════════════════',
             '',
             f'  Mode          : {mode}',
@@ -4066,7 +4495,7 @@ class SmartTaskingDockWidget(QDockWidget):
                 'discovery_timeout': int(
                     s.value(
                         'AltairEOData/vantor_discovery_timeout',
-                        s.value('AltairEOData/vantor_search_timeout', 30),
+                        s.value('AltairEOData/vantor_search_timeout', 60),
                         type=int,
                     )
                 ),
@@ -4174,7 +4603,7 @@ class SmartTaskingDockWidget(QDockWidget):
                     )
                 ).strip() or 'https://earth-search.aws.element84.com/v1',
                 'timeout': int(
-                    s.value('AltairEOData/element84_stac_timeout', 30, type=int)
+                    s.value('AltairEOData/element84_stac_timeout', 60, type=int)
                 ),
             }
 
@@ -4189,14 +4618,11 @@ class SmartTaskingDockWidget(QDockWidget):
                 'timeout': int(
                     s.value(
                         'AltairEOData/planetary_computer_stac_timeout',
-                        30,
+                        60,
                         type=int,
                     )
                 ),
             }
-
-        if connector_id == 'cdse_sentinel':
-            return (ss.get_credentials('cdse_sentinel') if ss else {}) or {}
 
         if connector_id in ('iceye', 'iceye_stac'):
             creds = (ss.get_credentials('iceye') if ss else {}) or {}
@@ -4352,6 +4778,7 @@ class SmartTaskingDockWidget(QDockWidget):
         self._update_quicklook_preview(None)
         self.status_label.setText('Reset complete — switches back to default. Go again!')
         self.status_label.setStyleSheet(f'color: {self._LABEL_COLOR}; font-size: 10px;')
+        self._stop_busy_indicator()
         self._update_go_button_state()
 
     def resizeEvent(self, event):
@@ -4359,6 +4786,7 @@ class SmartTaskingDockWidget(QDockWidget):
         self._refresh_quicklook_preview_pixmap()
 
     def closeEvent(self, event):
+        self._stop_busy_indicator()
         if self.select_from_map_btn.isChecked():
             self._deactivate_selection_mode()
         super().closeEvent(event)

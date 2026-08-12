@@ -6,6 +6,11 @@ This panel does not submit orders to providers directly; it prepares a
 structured email draft to the configured recipient.
 """
 
+import json
+import random
+import string
+from datetime import datetime, timezone
+from pathlib import Path
 from urllib.parse import quote
 
 from qgis.PyQt.QtCore import QDate, Qt, QUrl
@@ -20,6 +25,7 @@ from qgis.PyQt.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QFileDialog,
     QMessageBox,
     QPushButton,
     QScrollArea,
@@ -43,6 +49,7 @@ class TaskingDockWidget(QDockWidget):
     """Dock widget with a generic satellite tasking order form."""
 
     TARGET_EMAIL = 'test_recipient@example.com'
+    _ORDER_COUNTER = 0
 
     PROVIDERS = [
         'Vantor',
@@ -60,7 +67,7 @@ class TaskingDockWidget(QDockWidget):
     ]
 
     def __init__(self, iface, parent=None):
-        super().__init__('Tasking Order', parent)
+        super().__init__('Order', parent)
         logger.info('Initializing Tasking Order dock widget')
 
         self.iface = iface
@@ -233,7 +240,7 @@ class TaskingDockWidget(QDockWidget):
 
         layout.addWidget(acquisition_group)
 
-        product_group = QGroupBox('Delivery & Product')
+        product_group = QGroupBox('Delivery - Product')
         product_form = QFormLayout(product_group)
 
         self.product_level = QComboBox()
@@ -241,7 +248,7 @@ class TaskingDockWidget(QDockWidget):
         product_form.addRow('Product Level:', self.product_level)
 
         self.format_combo = QComboBox()
-        self.format_combo.addItems(['GeoTIFF/COG', 'NITF', 'JPEG2000', 'NetCDF', 'Other'])
+        self.format_combo.addItems(['GeoTIFF/COG', 'NITF', 'JPEG2000', 'NetCDF', 'Other (specify in notes)'])
         product_form.addRow('Preferred Format:', self.format_combo)
 
         self.delivery_method = QComboBox()
@@ -259,6 +266,10 @@ class TaskingDockWidget(QDockWidget):
         self.send_btn = QPushButton('Compose Email Order (DEMO ONLY)')
         self.send_btn.clicked.connect(self._compose_email_order)
         buttons.addWidget(self.send_btn)
+
+        self.export_json_btn = QPushButton('Export as JSON')
+        self.export_json_btn.clicked.connect(self._export_as_geojson)
+        buttons.addWidget(self.export_json_btn)
 
         self.clear_btn = QPushButton('Clear Form')
         self.clear_btn.clicked.connect(self._clear_form)
@@ -437,6 +448,156 @@ class TaskingDockWidget(QDockWidget):
                 f'Please send manually to: {self.TARGET_EMAIL}'
             )
 
+    def _build_order_geojson(self) -> dict:
+        """Return a GeoJSON Feature with the AOI as geometry and all order
+        parameters as properties.
+        """
+        bbox = self._get_aoi_bbox_wgs84()
+        if bbox:
+            min_lon, min_lat, max_lon, max_lat = bbox
+            geometry = {
+                'type': 'Polygon',
+                'coordinates': [[
+                    [min_lon, min_lat],
+                    [max_lon, min_lat],
+                    [max_lon, max_lat],
+                    [min_lon, max_lat],
+                    [min_lon, min_lat],
+                ]],
+            }
+        else:
+            geometry = None
+
+        sensor_type = self.sensor_type_combo.currentText()
+        order_uid = self._next_order_uid()
+        properties = {
+            'order_uid': order_uid,
+            'created_at_utc': datetime.now(timezone.utc).isoformat(),
+            'kadas_version': self._get_kadas_version(),
+            'altair_plugin_version': self._get_altair_plugin_version(),
+            'requester_name': self.requester_name.text().strip() or None,
+            'requester_email': self.requester_email.text().strip() or None,
+            'requester_org': self.requester_org.text().strip() or None,
+            'preferred_provider': self.provider_combo.currentText(),
+            'sensor_type': sensor_type,
+            'priority': self.priority_combo.currentText(),
+            'desired_delivery_date': self.delivery_date.date().toString('yyyy-MM-dd'),
+            'aoi_name': self.aoi_name.text().strip() or None,
+            'bbox_wgs84': list(bbox) if bbox else None,
+            'acquisition_window_start': self.start_date.date().toString('yyyy-MM-dd'),
+            'acquisition_window_end': self.end_date.date().toString('yyyy-MM-dd'),
+            'max_gsd_m': self.resolution_m.value(),
+            'desired_revisit_h': self.revisit_hours.value(),
+            'max_cloud_cover_pct': (
+                self.max_cloud_cover.value()
+                if 'optical' in sensor_type.lower()
+                else None
+            ),
+            'optical_bands': (
+                self.optical_bands.text().strip() or None
+                if 'optical' in sensor_type.lower()
+                else None
+            ),
+            'sar_mode': (
+                self.sar_mode.currentText()
+                if 'sar' in sensor_type.lower()
+                else None
+            ),
+            'sar_polarization': (
+                self.sar_polarization.currentText()
+                if 'sar' in sensor_type.lower()
+                else None
+            ),
+            'day_night': self.day_night_combo.currentText(),
+            'product_level': self.product_level.currentText(),
+            'preferred_format': self.format_combo.currentText(),
+            'delivery_method': self.delivery_method.currentText(),
+            'notes': self.notes.toPlainText().strip() or None,
+        }
+
+        return {
+            'type': 'FeatureCollection',
+            'features': [
+                {
+                    'type': 'Feature',
+                    'geometry': geometry,
+                    'properties': properties,
+                }
+            ],
+        }
+
+    def _get_kadas_version(self) -> str:
+        """Get KADAS/QGIS version from runtime APIs when available."""
+        try:
+            from qgis.core import Qgis  # Imported lazily for runtime safety.
+
+            v = str(getattr(Qgis, 'QGIS_VERSION', '') or '').strip()
+            if v:
+                return v
+        except Exception:
+            pass
+
+        return 'unknown'
+
+    def _get_altair_plugin_version(self) -> str:
+        """Read plugin version from metadata.txt."""
+        try:
+            metadata_path = Path(__file__).resolve().parents[1] / 'metadata.txt'
+            if not metadata_path.exists():
+                return 'unknown'
+
+            for line in metadata_path.read_text(encoding='utf-8').splitlines():
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                if line.lower().startswith('version='):
+                    return line.split('=', 1)[1].strip() or 'unknown'
+        except Exception as exc:
+            logger.debug('Unable to read plugin version from metadata.txt: %s', exc)
+
+        return 'unknown'
+
+    @classmethod
+    def _next_order_uid(cls) -> str:
+        """Generate order UID as ALTAIR.{YYYY}.{4 random chars}.{counter}."""
+        cls._ORDER_COUNTER += 1
+        year = QDate.currentDate().toString('yyyy')
+        alphabet = string.ascii_uppercase + string.digits
+        rand4 = ''.join(random.choice(alphabet) for _ in range(4))
+        return f'ALTAIR.{year}.{rand4}.{cls._ORDER_COUNTER:04d}'
+
+    def _export_as_geojson(self):
+        if not self._validate_form():
+            return
+
+        default_name = (
+            self.aoi_name.text().strip().replace(' ', '_')
+            or 'tasking_order'
+        )
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            'Export Order as GeoJSON',
+            str(Path.home() / f'{default_name}.geojson'),
+            'GeoJSON (*.geojson);;JSON (*.json)',
+        )
+        if not path:
+            return
+
+        try:
+            geojson = self._build_order_geojson()
+            Path(path).write_text(
+                json.dumps(geojson, indent=2, ensure_ascii=False),
+                encoding='utf-8',
+            )
+            self.status_label.setText(f'Exported to {path}')
+            self.status_label.setStyleSheet('color: #00ffbf; font-size: 10px;')
+            logger.info('Tasking order exported to %s', path)
+        except Exception as exc:
+            logger.error('Failed to export GeoJSON: %s', exc, exc_info=True)
+            self.status_label.setText(f'Export failed: {exc}')
+            self.status_label.setStyleSheet('color: #ff6b6b; font-size: 10px;')
+            QMessageBox.critical(self, 'Export Error', f'Could not save file:\n{exc}')
+
     def _clear_form(self):
         self.requester_name.clear()
         self.requester_email.clear()
@@ -476,11 +637,11 @@ class TaskingDockWidget(QDockWidget):
         self.status_label.setStyleSheet(f'color: {self._LABEL_COLOR}; font-size: 10px;')
 
     # ------------------------------------------------------------------
-    # Pre-fill from Smart Tasking dock
+    # Pre-fill from Search and Predict dock
     # ------------------------------------------------------------------
 
     def prefill_from_smart_tasking(self, data: dict):
-        """Populate the form with fields derived by the Smart Tasking dock.
+        """Populate the form with fields derived by the Search and Predict dock.
 
         *data* is a dict that may contain any subset of:
             _source       – 'archive' or 'overpass'
@@ -576,11 +737,11 @@ class TaskingDockWidget(QDockWidget):
         if notes:
             existing = self.notes.toPlainText().strip()
             if existing:
-                self.notes.setPlainText(f'{existing}\n\n--- Smart Tasking ---\n{notes}')
+                self.notes.setPlainText(f'{existing}\n\n--- Search and Predict ---\n{notes}')
             else:
                 self.notes.setPlainText(notes)
 
-        source = data.get('_source', 'Smart Tasking')
+        source = data.get('_source', 'Search and Predict')
         sat = data.get('satellite', '')
         self.status_label.setText(
             f'Pre-filled from {source}: {sat or data.get("_provider", "?")}')

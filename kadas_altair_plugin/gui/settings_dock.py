@@ -102,7 +102,6 @@ class SettingsDockWidget(QDockWidget):
                 "Planetary Computer",
                 self._create_planetary_computer_stac_tab,
             ),
-            ("cdse_sentinel", "CDSE Sentinel", self._create_cdse_sentinel_tab),
             ("nasa_earthdata", "NASA EarthData", self._create_nasa_tab),
             ("capella", "Capella Space", self._create_capella_tab),
             ("jilin_gaofen_stac", "Jilin-1 Gaofen", self._create_jilin_tab),
@@ -160,7 +159,6 @@ class SettingsDockWidget(QDockWidget):
                 "..connectors.planetary_computer_stac",
                 "PlanetaryComputerStacConnector",
             ),
-            "cdse_sentinel": ("..connectors.cdse_sentinel", "CdseSentinelConnector"),
             "nasa_earthdata": ("..connectors.nasa_earthdata", "NasaEarthdataConnector"),
             "capella": ("..connectors.capella", "CapellaConnector"),
             "jilin_gaofen_stac": ("..connectors.jilin_gaofen_stac", "JilinGaofenStacConnector"),
@@ -353,7 +351,7 @@ class SettingsDockWidget(QDockWidget):
         # Timeout settings
         self.vantor_discovery_timeout = QSpinBox()
         self.vantor_discovery_timeout.setRange(5, 120)
-        self.vantor_discovery_timeout.setValue(30)
+        self.vantor_discovery_timeout.setValue(60)
         self.vantor_discovery_timeout.setSuffix(" sec")
         vantor_layout.addRow("Request Timeout:", self.vantor_discovery_timeout)
 
@@ -458,13 +456,13 @@ class SettingsDockWidget(QDockWidget):
         # Timeout settings
         self.iceye_catalog_timeout = QSpinBox()
         self.iceye_catalog_timeout.setRange(5, 60)
-        self.iceye_catalog_timeout.setValue(12)
+        self.iceye_catalog_timeout.setValue(10)
         self.iceye_catalog_timeout.setSuffix(" sec")
         iceye_layout.addRow("Catalog Timeout:", self.iceye_catalog_timeout)
         
         self.iceye_search_timeout = QSpinBox()
         self.iceye_search_timeout.setRange(5, 60)
-        self.iceye_search_timeout.setValue(15)
+        self.iceye_search_timeout.setValue(60)
         self.iceye_search_timeout.setSuffix(" sec")
         iceye_layout.addRow("Search Timeout:", self.iceye_search_timeout)
         
@@ -527,13 +525,13 @@ class SettingsDockWidget(QDockWidget):
 
         self.umbra_catalog_timeout = QSpinBox()
         self.umbra_catalog_timeout.setRange(5, 60)
-        self.umbra_catalog_timeout.setValue(12)
+        self.umbra_catalog_timeout.setValue(10)
         self.umbra_catalog_timeout.setSuffix(" sec")
         umbra_layout.addRow("Catalog Timeout:", self.umbra_catalog_timeout)
 
         self.umbra_search_timeout = QSpinBox()
         self.umbra_search_timeout.setRange(5, 60)
-        self.umbra_search_timeout.setValue(15)
+        self.umbra_search_timeout.setValue(60)
         self.umbra_search_timeout.setSuffix(" sec")
         umbra_layout.addRow("Search Timeout:", self.umbra_search_timeout)
 
@@ -588,7 +586,7 @@ class SettingsDockWidget(QDockWidget):
 
         self.element84_stac_timeout = QSpinBox()
         self.element84_stac_timeout.setRange(5, 120)
-        self.element84_stac_timeout.setValue(30)
+        self.element84_stac_timeout.setValue(60)
         self.element84_stac_timeout.setSuffix(" sec")
         form.addRow("Request Timeout:", self.element84_stac_timeout)
 
@@ -643,7 +641,7 @@ class SettingsDockWidget(QDockWidget):
 
         self.planetary_computer_stac_timeout = QSpinBox()
         self.planetary_computer_stac_timeout.setRange(5, 120)
-        self.planetary_computer_stac_timeout.setValue(30)
+        self.planetary_computer_stac_timeout.setValue(60)
         self.planetary_computer_stac_timeout.setSuffix(" sec")
         form.addRow("Request Timeout:", self.planetary_computer_stac_timeout)
 
@@ -666,109 +664,6 @@ class SettingsDockWidget(QDockWidget):
         layout.addStretch()
         return widget
     
-    def _create_cdse_sentinel_tab(self):
-        """Create CDSE Sentinel settings tab"""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-
-        # === CDSE Sentinel CATALOG API (OAuth2 Authentication) ===
-        cdse_sentinel_group = QGroupBox("Copernicus CDSE Sentinel Catalog API")
-        cdse_sentinel_layout = QFormLayout(cdse_sentinel_group)
-
-        # Info label
-        info_label = QLabel(
-            "Use OAuth2 client credentials for Copernicus CDSE Sentinel Catalog API "
-            "access and Sentinel service workflows.\n\n"
-            "In this plugin, archive search is now handled by Earth Search (Element84). "
-            "Keep CDSE credentials here for CDSE-specific service and overpass features."
-        )
-        info_label.setWordWrap(True)
-        info_label.setStyleSheet("color: #404040; font-size: 9px;")
-        cdse_sentinel_layout.addRow("", info_label)
-
-        # Client ID (NOT secret - should be visible)
-        self.copernicus_client_id = QLineEdit()
-        self.copernicus_client_id.setPlaceholderText(
-            "Enter OAuth2 client ID"
-        )
-        # Client ID is NOT secret - do not mask it
-        cdse_sentinel_layout.addRow("Client ID:", self.copernicus_client_id)
-
-        # Client Secret (this IS secret - mask it)
-        self.copernicus_client_secret = QLineEdit()
-        self.copernicus_client_secret.setPlaceholderText(
-            "Enter OAuth2 client secret"
-        )
-        self.copernicus_client_secret.setEchoMode(QLineEdit.Password)
-        cdse_sentinel_layout.addRow("Client Secret:", self.copernicus_client_secret)
-
-        catalog_endpoint = QLabel(
-            "Token endpoint: https://identity.dataspace.copernicus.eu/.../token\n"
-            "Catalog endpoint: https://sh.dataspace.copernicus.eu/catalog/v1/search"
-        )
-        catalog_endpoint.setStyleSheet("color: #404040; font-size: 9px;")
-        catalog_endpoint.setWordWrap(True)
-        cdse_sentinel_layout.addRow("Endpoints:", catalog_endpoint)
-
-        # Timeout settings
-        self.cdse_sentinel_timeout = QSpinBox()
-        self.cdse_sentinel_timeout.setRange(5, 60)
-        self.cdse_sentinel_timeout.setValue(15)
-        self.cdse_sentinel_timeout.setSuffix(" sec")
-        cdse_sentinel_layout.addRow("Request Timeout:", self.cdse_sentinel_timeout)
-
-        # Default button
-        default_btn = QPushButton("Restore Defaults")
-        default_btn.clicked.connect(self._restore_default_cdse_sentinel)
-        cdse_sentinel_layout.addRow("", default_btn)
-
-        # Test connection button
-        test_btn = QPushButton("Test OAuth2 + Catalog Access")
-        test_btn.clicked.connect(self._test_cdse_sentinel_connection)
-        cdse_sentinel_layout.addRow("", test_btn)
-
-        # Results display
-        self.cdse_sentinel_results = QLabel("")
-        self.cdse_sentinel_results.setWordWrap(True)
-        self.cdse_sentinel_results.setStyleSheet(
-            "color: #404040; font-size: 9px; font-family: monospace;"
-        )
-        cdse_sentinel_layout.addRow("", self.cdse_sentinel_results)
-
-        layout.addWidget(cdse_sentinel_group)
-
-        # === AVAILABLE SENTINEL DATA ===
-        sentinel_data_group = QGroupBox("Available Sentinel Data")
-        sentinel_data_layout = QVBoxLayout(sentinel_data_group)
-
-        sentinel_info = QLabel(
-            "Sentinel-1 GRD\n"
-            "  Synthetic Aperture Radar (SAR) ground range detected imagery\n"
-            "  Resolution: 10m | Coverage: Global | No cloud cover impact\n\n"
-            "Sentinel-2 L1C\n"
-            "  Multispectral optical imagery - Top of Atmosphere reflectance\n"
-            "  Resolution: 10m | Coverage: Global | Cloud dependent\n\n"
-            "Sentinel-2 L2A\n"
-            "  Multispectral optical imagery - Surface reflectance\n"
-            "  Resolution: 10m | Coverage: Global | Cloud dependent\n\n"
-            "Sentinel-5P\n"
-            "  Atmospheric data (O₃, NO₂, SO₂, CO, CH₄, HCHO)\n"
-            "  Resolution: 5.5km | Global atmospheric monitoring"
-        )
-        sentinel_info.setStyleSheet("color: #404040; font-size: 9px;")
-        sentinel_data_layout.addWidget(sentinel_info)
-
-        layout.addWidget(sentinel_data_group)
-
-        layout.addStretch()
-
-        return widget
-
-    def _restore_default_cdse_sentinel(self):
-        """Restore default CDSE Sentinel settings"""
-        # Catalog API endpoints are fixed by connector defaults.
-        self.cdse_sentinel_timeout.setValue(15)
-
     def _create_capella_tab(self):
         """Create Capella API settings tab."""
         widget = QWidget()
@@ -1335,7 +1230,7 @@ class SettingsDockWidget(QDockWidget):
             )
         )
         self.vantor_discovery_timeout.setValue(
-            self.settings.value(f"{self.SETTINGS_PREFIX}vantor_discovery_timeout", 30, type=int)
+            self.settings.value(f"{self.SETTINGS_PREFIX}vantor_discovery_timeout", 60, type=int)
         )
         self.vantor_discovery_collections.setText(
             self.settings.value(f"{self.SETTINGS_PREFIX}vantor_discovery_collections", '')
@@ -1393,10 +1288,10 @@ class SettingsDockWidget(QDockWidget):
                 self.iceye_access_token.setText(iceye_creds.get('access_token', ''))
 
         self.iceye_catalog_timeout.setValue(
-            self.settings.value(f"{self.SETTINGS_PREFIX}iceye_catalog_timeout", 12, type=int)
+            self.settings.value(f"{self.SETTINGS_PREFIX}iceye_catalog_timeout", 10, type=int)
         )
         self.iceye_search_timeout.setValue(
-            self.settings.value(f"{self.SETTINGS_PREFIX}iceye_search_timeout", 15, type=int)
+            self.settings.value(f"{self.SETTINGS_PREFIX}iceye_search_timeout", 60, type=int)
         )
 
         # Umbra
@@ -1413,10 +1308,10 @@ class SettingsDockWidget(QDockWidget):
                 self.umbra_client_secret.setText(umbra_creds.get('client_secret', ''))
 
         self.umbra_catalog_timeout.setValue(
-            self.settings.value(f"{self.SETTINGS_PREFIX}umbra_catalog_timeout", 12, type=int)
+            self.settings.value(f"{self.SETTINGS_PREFIX}umbra_catalog_timeout", 10, type=int)
         )
         self.umbra_search_timeout.setValue(
-            self.settings.value(f"{self.SETTINGS_PREFIX}umbra_search_timeout", 15, type=int)
+            self.settings.value(f"{self.SETTINGS_PREFIX}umbra_search_timeout", 60, type=int)
         )
 
         # Earth Search (Element84 STAC)
@@ -1430,7 +1325,7 @@ class SettingsDockWidget(QDockWidget):
             self.element84_stac_timeout.setValue(
                 self.settings.value(
                     f"{self.SETTINGS_PREFIX}element84_stac_timeout",
-                    30,
+                    60,
                     type=int,
                 )
             )
@@ -1445,30 +1340,10 @@ class SettingsDockWidget(QDockWidget):
             self.planetary_computer_stac_timeout.setValue(
                 self.settings.value(
                     f"{self.SETTINGS_PREFIX}planetary_computer_stac_timeout",
-                    30,
+                    60,
                     type=int,
                 )
             )
-        
-        # CDSE Sentinel credentials from secure storage
-        if self.secure_storage:
-            cdse_sentinel_creds = self.secure_storage.get_credentials('cdse_sentinel')
-            logger.debug(
-                f"Loading CDSE Sentinel credentials from secure storage: {cdse_sentinel_creds is not None}"
-            )
-            if cdse_sentinel_creds:
-                client_id = cdse_sentinel_creds.get('client_id', '')
-                client_secret = cdse_sentinel_creds.get('client_secret', '')
-                logger.debug(
-                    f"CDSE Sentinel client_id length: {len(client_id)}, "
-                    f"client_secret length: {len(client_secret)}"
-                )
-                self.copernicus_client_id.setText(client_id)
-                self.copernicus_client_secret.setText(client_secret)
-        
-        self.cdse_sentinel_timeout.setValue(
-            self.settings.value(f"{self.SETTINGS_PREFIX}cdse_sentinel_timeout", 15, type=int)
-        )
         
         # NASA EarthData
         nasa_username = self.settings.value("altair/nasa_username", "")
@@ -1803,27 +1678,6 @@ class SettingsDockWidget(QDockWidget):
                 self.planetary_computer_stac_timeout.value()
             )
         
-        # CDSE Sentinel credentials in secure storage
-        if self.secure_storage:
-            cdse_sentinel_client_id = self.copernicus_client_id.text().strip()
-            cdse_sentinel_client_secret = self.copernicus_client_secret.text().strip()
-            if cdse_sentinel_client_id and cdse_sentinel_client_secret:
-                logger.info(
-                    f"Saving CDSE Sentinel credentials - client_id length: {len(cdse_sentinel_client_id)}"
-                )
-                self.secure_storage.store_credentials('cdse_sentinel', {
-                    'client_id': cdse_sentinel_client_id,
-                    'client_secret': cdse_sentinel_client_secret
-                })
-                logger.info("CDSE Sentinel credentials saved to secure storage")
-            else:
-                logger.debug("CDSE Sentinel credentials empty, not saving")
-        
-        self.settings.setValue(
-            f"{self.SETTINGS_PREFIX}cdse_sentinel_timeout",
-            self.cdse_sentinel_timeout.value()
-        )
-        
         # NASA EarthData
         nasa_username = self.nasa_username.text().strip()
         nasa_password = self.nasa_password.text().strip()
@@ -2053,7 +1907,7 @@ class SettingsDockWidget(QDockWidget):
         self.vantor_discovery_enabled.setChecked(True)
         self.vantor_discovery_base_url.setText('https://api.maxar.com/discovery/v1')
         self.vantor_discovery_search_path.setText('/catalogs/imagery/search')
-        self.vantor_discovery_timeout.setValue(30)
+        self.vantor_discovery_timeout.setValue(60)
         self.vantor_discovery_collections.clear()
         self.vantor_discovery_sortby.clear()
         self.vantor_discovery_area_based_calc.setChecked(False)
@@ -2258,8 +2112,8 @@ class SettingsDockWidget(QDockWidget):
         self.iceye_access_token.clear()
         self.iceye_contract_id.clear()
         self.iceye_collections.setText('public')
-        self.iceye_catalog_timeout.setValue(12)
-        self.iceye_search_timeout.setValue(15)
+        self.iceye_catalog_timeout.setValue(10)
+        self.iceye_search_timeout.setValue(60)
         self.iceye_results.clear()
         logger.info("Restored default ICEYE settings")
 
@@ -2269,8 +2123,8 @@ class SettingsDockWidget(QDockWidget):
         self.umbra_access_token.clear()
         self.umbra_client_id.clear()
         self.umbra_client_secret.clear()
-        self.umbra_catalog_timeout.setValue(12)
-        self.umbra_search_timeout.setValue(15)
+        self.umbra_catalog_timeout.setValue(10)
+        self.umbra_search_timeout.setValue(60)
         logger.info("Restored default Umbra settings")
 
     def _restore_default_capella(self):
@@ -2288,7 +2142,7 @@ class SettingsDockWidget(QDockWidget):
             self.element84_stac_api_url.setText(
                 'https://earth-search.aws.element84.com/v1'
             )
-            self.element84_stac_timeout.setValue(30)
+            self.element84_stac_timeout.setValue(60)
             self.element84_stac_results.clear()
         logger.info("Restored default Earth Search STAC settings")
 
@@ -2298,7 +2152,7 @@ class SettingsDockWidget(QDockWidget):
             self.planetary_computer_stac_api_url.setText(
                 'https://planetarycomputer.microsoft.com/api/stac/v1'
             )
-            self.planetary_computer_stac_timeout.setValue(30)
+            self.planetary_computer_stac_timeout.setValue(60)
             self.planetary_computer_stac_results.clear()
         logger.info("Restored default Planetary Computer STAC settings")
 
@@ -2324,21 +2178,6 @@ class SettingsDockWidget(QDockWidget):
         self.jaxa_tasking_access_token.clear()
         self.jaxa_status_label.clear()
         logger.info("Restored default JAXA API settings")
-    
-    def _restore_default_copernicus(self):
-        """Restore default Copernicus settings (DEPRECATED - redirects to STAC)"""
-        # This function is deprecated but kept for backward compatibility
-        # HDA connector has been removed, only STAC remains
-        logger.warning("_restore_default_copernicus() is deprecated, redirecting to STAC")
-        self._restore_default_cdse_sentinel()
-    
-    def _restore_default_cdse_sentinel(self):
-        """Restore default CDSE Sentinel settings"""
-        self.copernicus_client_id.clear()
-        self.copernicus_client_secret.clear()
-        self.cdse_sentinel_timeout.setValue(15)
-        self.cdse_sentinel_results.clear()
-        logger.info("Restored default Sentinel Catalog API settings")
     
     def _test_iceye_connection(self):
         """Test ICEYE Catalog API v2 connection and credentials"""
@@ -2677,126 +2516,6 @@ class SettingsDockWidget(QDockWidget):
             self.planetary_computer_stac_results.setStyleSheet(
                 "color: #ff6666; font-size: 9px; font-family: monospace;"
             )
-    
-    def _test_copernicus_connection(self):
-        """Test Copernicus connection (DEPRECATED - redirects to STAC test)"""
-        # This function is deprecated but kept for backward compatibility
-        # Redirect to the new STAC-specific test
-        logger.warning("_test_copernicus_connection() is deprecated, redirecting to _test_cdse_sentinel_connection()")
-        self._test_cdse_sentinel_connection()
-    
-    def _test_cdse_sentinel_connection(self):
-        """Test CDSE Sentinel OAuth2 authentication and API access"""
-        import time
-        
-        client_id = self.copernicus_client_id.text().strip()
-        client_secret = self.copernicus_client_secret.text().strip()
-        timeout = self.cdse_sentinel_timeout.value()
-        
-        if not client_id or not client_secret:
-            QMessageBox.warning(
-                self, 
-                "Missing Credentials", 
-                "Please enter both client ID and client secret."
-            )
-            return
-        
-        self.cdse_sentinel_results.setText("Testing authentication...")
-        QApplication.processEvents()
-        
-        try:
-            # Import CDSE Sentinel connector
-            from ..connectors.cdse_sentinel import CdseSentinelConnector
-            
-            connector = CdseSentinelConnector()
-            
-            # Test authentication
-            start_time = time.time()
-            
-            success = connector.authenticate({
-                'client_id': client_id,
-                'client_secret': client_secret
-            }, timeout=timeout)
-            
-            auth_time_ms = int((time.time() - start_time) * 1000)
-            
-            if not success:
-                failure_hint = ""
-                if hasattr(connector, "get_auth_failure_hint"):
-                    try:
-                        failure_hint = connector.get_auth_failure_hint()
-                    except Exception:
-                        failure_hint = ""
-
-                if not failure_hint:
-                    failure_hint = "Check credentials and network/proxy settings."
-
-                self.cdse_sentinel_results.setText(
-                    f"❌ Authentication failed\n"
-                    f"{failure_hint}"
-                )
-                self.cdse_sentinel_results.setStyleSheet("color: #ff6666; font-size: 9px; font-family: monospace;")
-                return
-
-            # Verify access against official CDSE Sentinel Catalog endpoint
-            catalog_ok, catalog_msg, catalog_items = connector.verify_catalog_access(
-                timeout=timeout,
-                collection='sentinel-2-l2a',
-            )
-            if not catalog_ok:
-                self.cdse_sentinel_results.setText(
-                    f"❌ Catalog access failed\n"
-                    f"{catalog_msg}"
-                )
-                self.cdse_sentinel_results.setStyleSheet("color: #ff6666; font-size: 9px; font-family: monospace;")
-                return
-            
-            # Get available Sentinel data sources
-            datasources = [
-                ('Sentinel-1 GRD', 'S1GRD', 'SAR Ground Range Detected'),
-                ('Sentinel-2 L2A', 'S2L2A', 'Surface Reflectance'),
-                ('Sentinel-2 L1C', 'S2L1C', 'Top-of-Atmosphere'),
-                ('Sentinel-5P', 'S5P', 'Atmospheric Data')
-            ]
-            
-            # Build result text
-            result_text = (
-                f"✅ CDSE Sentinel authentication successful\n"
-                f"Auth time: {auth_time_ms} ms\n"
-                f"Catalog check: OK (items returned: {catalog_items})\n"
-                f"─────────────────────\n"
-                f"Available Sentinel Data:\n"
-            )
-            
-            for name, source_id, description in datasources:
-                result_text += f"  • {name}\n    ({description})\n"
-            
-            result_text += (
-                f"─────────────────────\n"
-                f"Token Endpoint: identity.dataspace.copernicus.eu\n"
-                f"Catalog Endpoint: sh.dataspace.copernicus.eu/catalog/v1/search\n"
-                f"Coverage: 2014-present (global)"
-            )
-            
-            self.cdse_sentinel_results.setText(result_text)
-            self.cdse_sentinel_results.setStyleSheet("color: #226633; font-size: 9px; font-family: monospace;")
-            
-            logger.info(f"CDSE Sentinel test: authenticated in {auth_time_ms}ms")
-            
-        except ImportError as e:
-            logger.error(f"CDSE Sentinel connector not available: {e}")
-            self.cdse_sentinel_results.setText(
-                f"❌ CDSE Sentinel connector not available\n"
-                f"Error: {str(e)}"
-            )
-            self.cdse_sentinel_results.setStyleSheet("color: #ff6666; font-size: 9px; font-family: monospace;")
-        except Exception as e:
-            logger.error(f"CDSE Sentinel connection test error: {e}")
-            self.cdse_sentinel_results.setText(
-                f"❌ Test failed\n"
-                f"Error: {str(e)}"
-            )
-            self.cdse_sentinel_results.setStyleSheet("color: #ff6666; font-size: 9px; font-family: monospace;")
     
     def _check_nasa_auth_status(self):
         """Check NASA EarthData authentication status"""

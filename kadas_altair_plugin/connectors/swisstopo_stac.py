@@ -56,7 +56,7 @@ class SwisstopoStacConnector(ConnectorBase):
         },
     ]
 
-    timeout_search = 30.0
+    timeout_search = 60.0
 
     def __init__(self):
         super().__init__()
@@ -70,7 +70,7 @@ class SwisstopoStacConnector(ConnectorBase):
         self.authenticated = True
         return True
 
-    def _http_get_json(self, url: str, timeout: float = 30.0) -> Optional[Dict[str, Any]]:
+    def _http_get_json(self, url: str, timeout: float = 60.0) -> Optional[Dict[str, Any]]:
         if QGIS_AVAILABLE:
             try:
                 request = QNetworkRequest(QUrl(url))

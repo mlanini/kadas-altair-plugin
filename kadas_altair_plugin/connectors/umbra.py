@@ -21,8 +21,8 @@ class UmbraConnector(ConnectorBase):
     SEARCH_PATH = "/v2/stac/search"
     AUTH_TOKEN_URL = "https://auth.canopy.umbra.space/oauth/token"
 
-    timeout_auth: float = 12.0
-    timeout_search: float = 45.0
+    timeout_auth: float = 10.0
+    timeout_search: float = 60.0
 
     def __init__(self) -> None:
         super().__init__()

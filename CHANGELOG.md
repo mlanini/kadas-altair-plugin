@@ -5,6 +5,27 @@ All notable changes to KADAS Altair Plugin will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.2] - 2026-08-12
+
+### Added
+- **Search and Predict busy hourglass indicator** (`gui/smart_tasking_dock.py`):
+  - Added a dedicated animated hourglass UI element to signal active background work.
+  - Shows during archive search and overpass prediction dispatch.
+  
+### Changed
+- **CDSE Sentinel connector decommissioned**: removed the provider from the active connector registry, Settings UI, Open Data / Archive / Search and Predict flows, and secure-storage handling. Public Sentinel archive discovery is now documented through **Earth Search (Element84)** and **Microsoft Planetary Computer** instead.
+- **Task lifecycle UX wiring** (`gui/smart_tasking_dock.py`):
+  - Busy indicator now follows task lifecycle (start, completion, error, reset, close).
+  - In mixed `Search + Predict` mode, indicator stays visible until both tasks finish.
+
+### Fixed
+- **Search and Predict swath geometry** (`gui/smart_tasking_dock.py`) now uses MultiPolygon swaths, wraps longitudes to `[-180, 180]`, closes rings explicitly, and validates geometry before display to reduce distortion and overlap near the antimeridian.
+- **Landsat-class overpass fallback** (`gui/smart_tasking_dock.py`) now uses fractional orbital progress with a stable per-satellite seed, which restores missing fallback accesses for long-period orbits; Landsat 8 was also added to the satellite catalogue and alias map.
+
+### Documentation
+- Release documentation updated to version `0.5.2` (`README.md`, `RELEASE_NOTES.md`, `GUIDE.md`).
+- README and GUIDE now reflect the removal of **CDSE Sentinel** as an active provider and point users to the supported public STAC alternatives.
+
 ## [0.5.1] - 2026-08-08
 
 ### Added
@@ -18,7 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Searches all supported swisstopo collections when no collection is specified
   - Preserves `collection` field in normalized items and avoids duplicate features across merged responses
 - **Archive Search wiring** (`gui/archive_dock.py`) now forwards the selected swisstopo collection and registers the provider with `COLLECTIONS`, so the UI dropdown and query path stay aligned.
-- **Smart Tasking archive search** (`gui/smart_tasking_dock.py`) now normalizes the selected dates to explicit UTC day boundaries before dispatching connector queries, so the selected end day is included consistently across STAC backends.
+- **Search and Predict archive search** (`gui/smart_tasking_dock.py`) now normalizes the selected dates to explicit UTC day boundaries before dispatching connector queries, so the selected end day is included consistently across STAC backends.
 
 ### Documentation
 - Release documentation updated to version `0.5.1` (`README.md`, `RELEASE_NOTES.md`, `SHA256SUMS.md`).
@@ -37,7 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Planetary Computer connector** (`connectors/planetary_computer_stac.py`): searches are now restricted to collections tagged as `Imagery` or `Fire`, and only items with valid raster/COG assets are returned.
 
 ### Fixed
-- **Smart Tasking geometry CRS reliability** (`gui/smart_tasking_dock.py`): memory layers now explicitly set CRS to `EPSG:4326` to ensure correct on-the-fly reprojection in project CRSs such as `EPSG:2056` and `EPSG:3857`.
+- **Search and Predict geometry CRS reliability** (`gui/smart_tasking_dock.py`): memory layers now explicitly set CRS to `EPSG:4326` to ensure correct on-the-fly reprojection in project CRSs such as `EPSG:2056` and `EPSG:3857`.
 
 ## [0.4.5] - 2025-06-05
 
@@ -67,8 +88,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Drop-in compatible API (`setMapCanvas`, `setCurrentExtent`, `setOriginalExtent`, `setOutputCrs`, `outputExtent`, `outputCrs`, `extentChanged` signal)
 
 ### Changed
-- **All four panels** (Archive, Open Data, Tasking, Smart Tasking) now use `AoiWidget` instead of `QgsExtentWidget`
-- **Tasking and Smart Tasking docks**: `setMapCanvas()` is now called safely — no longer omitted due to KADAS crash risk (the new tool uses `QgsMapTool` directly, not `QgsMapToolExtent`)
+- **All four panels** (Archive, Open Data, Tasking, Search and Predict) now use `AoiWidget` instead of `QgsExtentWidget`
+- **Tasking and Search and Predict docks**: `setMapCanvas()` is now called safely — no longer omitted due to KADAS crash risk (the new tool uses `QgsMapTool` directly, not `QgsMapToolExtent`)
 - **metadata.txt**: version bumped to 0.4.4
 
 ### Fixed
@@ -79,11 +100,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Jilin-1 Gaofen STAC connector** (`jilin_gaofen_stac.py`) — connector file for CGSTL's Jilin-1 high-resolution optical constellation (commercial, 0.72 m GSD):
   - Bearer-token authentication via QSettings (`altair/jilin_access_token`) or credentials dict
   - STAC POST `/search` with bbox + date + cloud cover + collection filters; GET fallback for collections without POST search
-  - Available in Archive and Smart Tasking docks
-- **Jilin-1 entry in satellite catalogue** (Smart Tasking dock): NORAD 52836, 0.72 m GSD, off-nadir model, max 30°, 1-day revisit
+  - Available in Archive and Search and Predict docks
+- **Jilin-1 entry in satellite catalogue** (Search and Predict dock): NORAD 52836, 0.72 m GSD, off-nadir model, max 30°, 1-day revisit
 
 ### Removed
-- **Jilin-1 Gaofen removed from Open Data dock** — Jilin-1 is a commercial service (Chang Guang Satellite Technology, CGSTL); requires a private endpoint and bearer token per tenant. The connector file is retained for Archive/Smart Tasking use but is no longer registered in the Open Data panel.
+- **Jilin-1 Gaofen removed from Open Data dock** — Jilin-1 is a commercial service (Chang Guang Satellite Technology, CGSTL); requires a private endpoint and bearer token per tenant. The connector file is retained for Archive/Search and Predict use but is no longer registered in the Open Data panel.
 
 ### Fixed
 - **KADAS AOI crash** — removed `QgsExtentWidget.setMapCanvas()` call in `smart_tasking_dock.py` and `tasking_dock.py`.
@@ -97,7 +118,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.4.2] - 2026-04-01
 
 ### Added
-- **Smart Tasking dock** — satellite overpass prediction and 3D orbit visualisation:
+- **Search and Predict dock** — satellite overpass prediction and 3D orbit visualisation:
   - **Bearing-convergence engine**: iterative bisection detects when a satellite’s sensor footprint crosses the target AOI (replaces elevation-based scanning)
   - **Sensor models**: `pushbroom` (swath-only) and `off_nadir` (swath + max scan angle) with per-satellite parameters in a 21-entry catalogue
   - **SGP4 orbital propagation** via `sgp4` library with analytical sun-synchronous fallback
@@ -113,12 +134,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **Satellite catalogue** enriched with `sensor_model` and `max_off_nadir_deg` fields for all 21 entries
-- **metadata.txt**: Updated version to 0.4.2, description updated with Smart Tasking capabilities
+- **metadata.txt**: Updated version to 0.4.2, description updated with Search and Predict capabilities
 
 ### Documentation
 - Added inspiring projects to Credits: [eo-predictor](https://github.com/developmentseed/eo-predictor), [sat-predict](https://sat-predict.davidhsu.cc/)
-- Updated ARCHITECTURE.md with Smart Tasking dock in architecture diagram and project structure
-- Updated README.md with Smart Tasking feature and version badge
+- Updated ARCHITECTURE.md with Search and Predict dock in architecture diagram and project structure
+- Updated README.md with Search and Predict feature and version badge
 
 ## [0.4.1] - 2026-03-31
 

@@ -21,7 +21,6 @@ _LAZY_IMPORTS: Dict[str, Tuple[str, str | None]] = {
     "UmbraConnector": (".umbra", "UmbraConnector"),
     "CapellaSTACConnector": (".capella_stac", "CapellaSTACConnector"),
     "CapellaConnector": (".capella", "CapellaConnector"),
-    "CdseSentinelConnector": (".cdse_sentinel", "CdseSentinelConnector"),
     "NasaEarthdataConnector": (
         ".nasa_earthdata",
         "NasaEarthdataConnector",

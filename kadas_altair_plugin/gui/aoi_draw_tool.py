@@ -202,7 +202,7 @@ class AoiWidget(QWidget):
     def setExtent(self, extent, crs):
         """
         Unconditionally set the AOI extent and its source CRS.
-        Use this for external pre-fill (e.g. from Smart Tasking) where
+        Use this for external pre-fill (e.g. from Search and Predict) where
         the caller already knows the exact extent and CRS.
         """
         if extent and not extent.isEmpty() and crs and crs.isValid():

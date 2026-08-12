@@ -130,6 +130,8 @@ class NasaEarthdataConnector(ConnectorBase):
         "https://raw.githubusercontent.com/opengeos/NASA-Earth-Data/main/nasa_earth_data.tsv",
         "https://cdn.jsdelivr.net/gh/opengeos/NASA-Earth-Data@main/nasa_earth_data.tsv",
     )
+    CMR_COLLECTIONS_URL = "https://cmr.earthdata.nasa.gov/search/collections.json"
+    CMR_COLLECTIONS_FALLBACK_URL = "https://cmr.earthdata.nasa.gov/search/collections.umm_json"
     CMR_GRANULES_URL = "https://cmr.earthdata.nasa.gov/search/granules.json"
     CMR_GRANULES_FALLBACK_URL = "https://cmr.earthdata.nasa.gov/search/granules.umm_json"
     AUTH_PROBE_TIMEOUT = 60
@@ -283,6 +285,29 @@ class NasaEarthdataConnector(ConnectorBase):
                 seen.add(url)
         return ordered
 
+    def _cmr_collection_urls(self) -> List[str]:
+        """Return collection endpoints with optional env overrides and fallback."""
+        urls: List[str] = []
+
+        env_full = (os.environ.get("EARTHDATA_CMR_COLLECTIONS_URL") or "").strip()
+        if env_full:
+            urls.append(env_full)
+
+        env_base = (os.environ.get("EARTHDATA_CMR_BASE_URL") or "").strip().rstrip("/")
+        if env_base:
+            urls.append(f"{env_base}/search/collections.json")
+            urls.append(f"{env_base}/search/collections.umm_json")
+
+        urls.extend([self.CMR_COLLECTIONS_URL, self.CMR_COLLECTIONS_FALLBACK_URL])
+
+        seen = set()
+        ordered: List[str] = []
+        for url in urls:
+            if url and url not in seen:
+                ordered.append(url)
+                seen.add(url)
+        return ordered
+
     @staticmethod
     def _http_timeout(total_seconds: int) -> Tuple[int, int]:
         """Return (connect, read) timeout tuple tuned for corporate proxies."""
@@ -317,11 +342,13 @@ class NasaEarthdataConnector(ConnectorBase):
         params: Dict[str, Any],
         base_timeout: int,
         max_attempts: int = 3,
+        urls: Optional[List[str]] = None,
+        request_name: str = "NASA CMR request",
     ) -> Dict[str, Any]:
         """Request CMR with retries and endpoint fallback."""
         last_exc: Optional[Exception] = None
 
-        cmr_urls = self._cmr_urls()
+        cmr_urls = urls or self._cmr_urls()
         headers: Dict[str, str] = {
             "Accept": "application/json",
         }
@@ -335,7 +362,8 @@ class NasaEarthdataConnector(ConnectorBase):
                 timeout_tuple = self._http_timeout(base_timeout + (attempt - 1) * 15)
                 try:
                     logger.debug(
-                        "NASA CMR request %s attempt %s/%s timeout=%s",
+                        "%s %s attempt %s/%s timeout=%s",
+                        request_name,
                         url,
                         attempt,
                         max_attempts,
@@ -348,19 +376,32 @@ class NasaEarthdataConnector(ConnectorBase):
                         params=params,
                         timeout=max(timeout_tuple),
                     )
-                    if qgis_error is None and isinstance(data, dict):
+                    # Only accept the QGIS result when it contains a real CMR
+                    # "feed" key. An empty dict ({}) means QGIS NAM returned an
+                    # empty body (common in background threads); fall through to
+                    # session.get in that case.
+                    if qgis_error is None and isinstance(data, dict) and "feed" in data:
                         return data
+
+                    if qgis_error is None and isinstance(data, dict) and "feed" not in data:
+                        logger.debug(
+                            "%s QGIS response missing 'feed' key on %s, "
+                            "falling back to requests",
+                            request_name,
+                            url,
+                        )
 
                     if qgis_error is not None:
                         # Do not keep retrying a parameter-level 400 for minutes.
                         if status == 400 or "bad request" in str(qgis_error).lower():
                             raise RuntimeError(
-                                f"NASA CMR rejected request parameters: {qgis_error}"
+                                f"{request_name} rejected request parameters: {qgis_error}"
                             )
 
                         logger.warning(
-                            "NASA CMR request via QGIS failed on %s "
+                            "%s via QGIS failed on %s "
                             "(attempt %s/%s, status=%s): %s",
+                            request_name,
                             url,
                             attempt,
                             max_attempts,
@@ -378,7 +419,8 @@ class NasaEarthdataConnector(ConnectorBase):
                     last_exc = exc
                     kind = self._classify_auth_error(exc)
                     logger.warning(
-                        "NASA CMR request failed on %s (attempt %s/%s): %s",
+                        "%s failed on %s (attempt %s/%s): %s",
+                        request_name,
                         url,
                         attempt,
                         max_attempts,
@@ -392,7 +434,8 @@ class NasaEarthdataConnector(ConnectorBase):
             next_url = cmr_urls[idx + 1] if (idx + 1) < len(cmr_urls) else None
             if next_url:
                 logger.warning(
-                    "NASA CMR endpoint unreachable (%s), trying fallback endpoint: %s",
+                    "%s endpoint unreachable (%s), trying fallback endpoint: %s",
+                    request_name,
                     url,
                     next_url,
                 )
@@ -420,6 +463,58 @@ class NasaEarthdataConnector(ConnectorBase):
                 exc,
             )
             return False
+
+    def _discover_collection_concept_ids(
+        self,
+        session: requests.Session,
+        bbox: Optional[List[float]],
+        start_date: str,
+        end_date: str,
+        query: str,
+        limit: int,
+        **kwargs,
+    ) -> List[str]:
+        """Resolve a broad bbox/date/query search to concrete collection concept ids."""
+        params: Dict[str, Any] = {
+            "page_size": max(1, min(int(limit), 20)),
+            "has_granules": "true",
+        }
+
+        if query:
+            params["keyword"] = query
+            # When a keyword scopes the collection search, do NOT add bbox or
+            # temporal: CMR collection metadata spatial/temporal indexing is
+            # unreliable and these filters can silently drop valid collections.
+            # Spatial/temporal filtering is applied later at the granule level.
+        else:
+            if bbox and len(bbox) >= 4:
+                params["bounding_box"] = ",".join(str(v) for v in bbox[:4])
+            if start_date or end_date:
+                params["temporal"] = self._normalize_temporal(start_date, end_date)
+        if kwargs.get("provider"):
+            params["provider"] = kwargs["provider"]
+        if kwargs.get("version"):
+            params["version"] = kwargs["version"]
+
+        data = self._request_cmr(
+            session=session,
+            params=params,
+            base_timeout=min(int(self.timeout_search or 60), 20),
+            max_attempts=2,
+            urls=self._cmr_collection_urls(),
+            request_name="NASA CMR collection discovery",
+        )
+
+        entries = data.get("feed", {}).get("entry", [])
+        concept_ids: List[str] = []
+        seen = set()
+        for entry in entries:
+            concept_id = str(entry.get("id") or "").strip()
+            if not concept_id or concept_id in seen:
+                continue
+            seen.add(concept_id)
+            concept_ids.append(concept_id)
+        return concept_ids
 
     def authenticate(self, credentials: Optional[dict] = None, verify: bool = True) -> bool:
         self._last_auth_error = None
@@ -746,6 +841,28 @@ class NasaEarthdataConnector(ConnectorBase):
             max_v *= 100.0
         return (0.0, max_v)
 
+    @staticmethod
+    def _has_granule_scope(params: Dict[str, Any]) -> bool:
+        """CMR granule search must target at least one collection subset."""
+        scope_keys = (
+            "concept_id",
+            "collection_concept_id",
+            "short_name",
+            "provider",
+            "entry_title",
+            "entry_id",
+            "echo_collection_id",
+        )
+
+        for key in scope_keys:
+            value = params.get(key)
+            if value is not None and str(value).strip():
+                return True
+
+        short_name = str(params.get("short_name") or "").strip()
+        version = str(params.get("version") or "").strip()
+        return bool(short_name and version)
+
     def search_unified(
         self,
         bbox=None,
@@ -795,6 +912,7 @@ class NasaEarthdataConnector(ConnectorBase):
         query = str(kwargs.get("query", text_query or "")).strip()
         concept_id = None
         short_name = None
+        collection_concept_ids: List[str] = []
 
         if collection:
             collection = str(collection).strip()
@@ -804,12 +922,35 @@ class NasaEarthdataConnector(ConnectorBase):
                 short_name = collection
 
         if not concept_id and not short_name and query:
-            catalog = self._load_catalog()
-            if catalog:
-                match = catalog.find_dataset(query)
-                if match:
-                    concept_id = match.get("concept_id") or None
-                    short_name = match.get("short_name") or None
+            # Only consult the catalog when `collection` was explicitly provided
+            # as a text name (not a CMR concept ID). Do NOT use catalog lookup
+            # for keyword hints from search hints (text_query) because the TSV
+            # ShortName column sometimes contains hashes/UUIDs that are not
+            # valid CMR identifiers and cause 400 errors in granule searches.
+            # Keyword-based searches always go through collection discovery.
+            explicit_collection_text = (
+                collection and not (collection.startswith("C") and "-" in collection)
+            )
+            if explicit_collection_text:
+                catalog = self._load_catalog()
+                if catalog:
+                    match = catalog.find_dataset(query)
+                    if match:
+                        candidate_concept_id = match.get("concept_id") or None
+                        candidate_short_name = match.get("short_name") or None
+                        # Accept only well-formed CMR identifiers.
+                        # CMR concept IDs look like "C12345678-PROVIDER"; short
+                        # names are alphanumeric strings (no raw UUIDs/hashes).
+                        if candidate_concept_id and re.match(
+                            r'^C\d+-[A-Z0-9_]+$', candidate_concept_id
+                        ):
+                            concept_id = candidate_concept_id
+                        if (
+                            not concept_id
+                            and candidate_short_name
+                            and re.match(r'^[A-Za-z0-9_\-\.]{2,40}$', candidate_short_name)
+                        ):
+                            short_name = candidate_short_name
 
         if not concept_id and not short_name:
             has_bbox = bool(bbox and len(bbox) >= 4)
@@ -827,17 +968,44 @@ class NasaEarthdataConnector(ConnectorBase):
 
             logger.info(
                 "NASA EarthData: no collection specified, running broad "
-                "CMR search with available filters"
+                "collection discovery with available filters"
             )
 
-        params: Dict[str, Any] = {"page_size": int(limit)}
-        if concept_id:
-            params["concept_id"] = concept_id
-        elif short_name:
-            params["short_name"] = short_name
+            try:
+                collection_concept_ids = self._discover_collection_concept_ids(
+                    session=self._session,
+                    bbox=bbox,
+                    start_date=start_date,
+                    end_date=end_date,
+                    query=query,
+                    limit=limit,
+                    **kwargs,
+                )
+            except Exception as exc:
+                message = str(exc)
+                if "rejected request parameters" in message.lower() or "bad request" in message.lower():
+                    logger.warning(
+                        "NASA EarthData collection discovery skipped due to rejected request parameters: %s",
+                        exc,
+                    )
+                else:
+                    logger.warning("NASA EarthData collection discovery failed: %s", exc)
+                return [], None
 
-        if query and not concept_id and not short_name:
-            params["keyword"] = query
+            if not collection_concept_ids:
+                logger.info(
+                    "NASA EarthData collection discovery returned no matching datasets"
+                )
+                return [], None
+
+        params: Dict[str, Any] = {}
+        if short_name:
+            params["short_name"] = short_name
+        elif concept_id:
+            collection_concept_ids = [concept_id]
+
+        if not collection_concept_ids:
+            collection_concept_ids = []
 
         if bbox and len(bbox) >= 4:
             params["bounding_box"] = ",".join(str(v) for v in bbox[:4])
@@ -846,9 +1014,6 @@ class NasaEarthdataConnector(ConnectorBase):
             params["temporal"] = self._normalize_temporal(start_date, end_date)
 
         cloud_cover = self._normalize_cloud_cover(max_cloud_cover, kwargs)
-        # Many NASA CMR collections/endpoints reject generic cloud_cover as a
-        # top-level query parameter. Keep this disabled unless explicitly
-        # requested as an advanced passthrough.
         if cloud_cover is not None and bool(kwargs.get("force_cloud_cover_param", False)):
             params["cloud_cover"] = f"{cloud_cover[0]},{cloud_cover[1]}"
 
@@ -864,18 +1029,57 @@ class NasaEarthdataConnector(ConnectorBase):
             params["orbit_number"] = kwargs["orbit_number"]
 
         try:
-            data = self._request_cmr(
-                session=self._session,
-                params=params,
-                base_timeout=min(int(timeout or self.timeout_search or 60), 20),
-                max_attempts=2,
-            )
-            entries = data.get("feed", {}).get("entry", [])
+            results: List[Dict[str, Any]] = []
+            seen_result_ids = set()
+            remaining = max(int(limit), 1)
+            granule_scopes = collection_concept_ids or [None]
+            made_granule_request = False
 
-            results = [
-                self._granule_to_result(entry, idx)
-                for idx, entry in enumerate(entries)
-            ]
+            for collection_concept_id in granule_scopes:
+                request_params = dict(params)
+                request_params["page_size"] = remaining
+                if collection_concept_id:
+                    request_params["collection_concept_id"] = collection_concept_id
+                # Do NOT add keyword to granule search: CMR rejects unscoped
+                # keyword-only granule queries with 400 Bad Request, and adding
+                # keyword together with short_name/collection_concept_id also
+                # causes errors. Collection scoping is handled above.
+
+                if not self._has_granule_scope(request_params):
+                    logger.info(
+                        "NASA EarthData: skipping unscoped granule request; "
+                        "collection/provider scope is required by CMR"
+                    )
+                    continue
+
+                made_granule_request = True
+
+                data = self._request_cmr(
+                    session=self._session,
+                    params=request_params,
+                    base_timeout=min(int(timeout or self.timeout_search or 60), 20),
+                    max_attempts=2,
+                )
+                entries = data.get("feed", {}).get("entry", [])
+
+                for entry in entries:
+                    result = self._granule_to_result(entry, len(results))
+                    result_id = str(result.get("id") or "")
+                    if result_id and result_id in seen_result_ids:
+                        continue
+                    if result_id:
+                        seen_result_ids.add(result_id)
+                    results.append(result)
+                    remaining -= 1
+                    if remaining <= 0:
+                        break
+
+                if remaining <= 0:
+                    break
+
+            if not made_granule_request:
+                return [], None
+
             return results, None
 
         except Exception as exc:
@@ -981,6 +1185,18 @@ class NasaEarthdataConnector(ConnectorBase):
         geometry = self._extract_geometry(bbox)
         links = self._extract_links(entry)
         quicklook_links = self._extract_quicklook_links(entry)
+        dataset_id = str(entry.get("dataset_id") or "")
+        short_name = str(entry.get("short_name") or "")
+        granule_title = str(entry.get("title") or "")
+        collection_title = str(entry.get("entry_title") or "")
+        description = str(
+            entry.get("summary")
+            or entry.get("abstract")
+            or entry.get("description")
+            or ""
+        )
+        platform_name = short_name or dataset_id or granule_title
+        title = granule_title or collection_title or platform_name or str(granule_id)
 
         assets: Dict[str, Any] = {}
         for i, href in enumerate(links):
@@ -1012,8 +1228,14 @@ class NasaEarthdataConnector(ConnectorBase):
                 "datetime": entry.get("time_start", ""),
                 "start_datetime": entry.get("time_start", ""),
                 "end_datetime": entry.get("time_end", ""),
-                "platform": entry.get("dataset_id", ""),
-                "instrument": "",
+                "platform": platform_name,
+                "mission": dataset_id or short_name,
+                "dataset_id": dataset_id,
+                "short_name": short_name,
+                "entry_title": collection_title,
+                "title": title,
+                "description": description,
+                "instrument": str(entry.get("instrument", "") or ""),
                 "eo:cloud_cover": None,
                 "cloud_cover": None,
                 "provider": entry.get("data_center", ""),

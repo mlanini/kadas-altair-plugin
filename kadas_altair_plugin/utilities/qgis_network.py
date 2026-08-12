@@ -17,7 +17,7 @@ logger = get_logger('utilities.qgis_network')
 
 try:
     from qgis.core import QgsBlockingNetworkRequest, QgsNetworkAccessManager
-    from qgis.PyQt.QtCore import QUrl
+    from qgis.PyQt.QtCore import QUrl, QUrlQuery
     from qgis.PyQt.QtNetwork import QNetworkRequest
 
     QGIS_NETWORK_AVAILABLE = True
@@ -55,13 +55,22 @@ def qgis_request_json(
     if not full_url:
         return None, 'Empty URL', None
 
-    if params:
-        query = urlencode(params, doseq=True)
-        sep = '&' if '?' in full_url else '?'
-        full_url = f'{full_url}{sep}{query}'
-
     try:
-        request = QNetworkRequest(QUrl(full_url))
+        # Build QUrl and attach query parameters via QUrlQuery so that Qt
+        # handles percent-encoding itself.  Using urlencode() + QUrl(string)
+        # causes double-encoding: %2C (comma) becomes %252C because QUrl
+        # re-encodes the percent sign when parsing an already-encoded string.
+        q_url = QUrl(full_url)
+        if params:
+            q = QUrlQuery()
+            for key, val in params.items():
+                if isinstance(val, (list, tuple)):
+                    for v in val:
+                        q.addQueryItem(str(key), str(v))
+                else:
+                    q.addQueryItem(str(key), str(val))
+            q_url.setQuery(q)
+        request = QNetworkRequest(q_url)
         for key, value in (headers or {}).items():
             if value is None:
                 continue

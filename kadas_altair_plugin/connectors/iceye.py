@@ -17,8 +17,8 @@ class IceyeConnector(ConnectorBase):
     SEARCH_PATH = "/api/catalog/v2/items"
     COLLECTIONS_PATH = "/api/catalog/v2/collections"
 
-    timeout_auth: float = 12.0
-    timeout_search: float = 45.0
+    timeout_auth: float = 10.0
+    timeout_search: float = 60.0
 
     def __init__(self) -> None:
         super().__init__()

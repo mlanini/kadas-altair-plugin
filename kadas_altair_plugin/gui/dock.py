@@ -238,7 +238,7 @@ class AltairDockWidget(QDockWidget):
         
         Verifies support for:
         - GeoTIFF (required for most data)
-        - JPEG2000 (required for Copernicus/Sentinel data)
+        - JPEG2000 (required for JP2-backed imagery)
         - VSICURL (required for S3/HTTP streaming)
         """
         if not QGIS_AVAILABLE:
@@ -263,7 +263,7 @@ class AltairDockWidget(QDockWidget):
             if jp2_available:
                 logger.info(f"✓ GDAL JPEG2000 support available (driver: {jp2_driver_found})")
             else:
-                logger.warning("⚠ GDAL JPEG2000 support not available - Copernicus/Sentinel data may fail to load")
+                logger.warning("⚠ GDAL JPEG2000 support not available - JP2-backed data may fail to load")
                 logger.warning("  To fix: Ensure GDAL is compiled with OpenJPEG support")
             
             # Check GeoTIFF driver
@@ -1372,112 +1372,6 @@ class AltairDockWidget(QDockWidget):
         elif connector_id in ('capella', 'capella_stac'):
             self._load_capella_collections()
     
-    def _load_copernicus_collections(self):
-        """Load collections from Copernicus Dataspace connector"""
-        logger.info("=" * 60)
-        logger.info("COPERNICUS: _load_copernicus_collections() called")
-        logger.info("=" * 60)
-        
-        if not self.copernicus_connector:
-            logger.error("COPERNICUS: copernicus_connector is None!")
-            return
-        
-        logger.info(f"COPERNICUS: connector object exists: {self.copernicus_connector}")
-        
-        try:
-            self._set_status("Loading Copernicus Sentinel collections...", "color: #FFA500;")
-            
-            # Get credentials from secure storage
-            if not self.secure_storage:
-                self._set_status("Secure storage not available", "color: #FF0000;")
-                logger.error("COPERNICUS: Secure storage not available!")
-                return
-            
-            logger.info("CDSE Sentinel: Attempting to retrieve credentials from secure storage...")
-            creds = self.secure_storage.get_credentials('cdse_sentinel')
-            
-            logger.info(f"CDSE Sentinel: Retrieved credentials: {creds is not None}")
-            if creds:
-                logger.info(f"COPERNICUS: Credentials keys: {list(creds.keys())}")
-                client_id = creds.get('client_id', '')
-                client_secret = creds.get('client_secret', '')
-                logger.info(f"COPERNICUS: client_id length: {len(client_id)}")
-                logger.info(f"COPERNICUS: client_secret length: {len(client_secret)}")
-                logger.info(f"COPERNICUS: client_id first 20 chars: {client_id[:20] if client_id else 'EMPTY'}")
-            else:
-                logger.error("CDSE Sentinel: get_credentials('cdse_sentinel') returned None!")
-            
-            if not creds or not creds.get('client_id') or not creds.get('client_secret'):
-                self._set_status("Copernicus credentials not configured", "color: #FF0000;")
-                self.collections_combo.clear()
-                self.collections_combo.addItem("Configure credentials in Settings", userData=None)
-                self.collections_combo.setEnabled(False)
-                logger.error("COPERNICUS: Credentials missing or incomplete!")
-                return
-            
-            # Authenticate with OAuth2 via ConnectorManager (this updates the 'authenticated' flag)
-            logger.info("CDSE Sentinel: Calling authenticate_connector() via ConnectorManager...")
-            auth_result = self.connector_manager.authenticate_connector(
-                connector_id='cdse_sentinel',
-                credentials=creds
-            )
-            logger.info(f"COPERNICUS: authenticate_connector() returned: {auth_result}")
-            
-            if not auth_result:
-                self._set_status("Failed to authenticate Copernicus", "color: #FF0000;")
-                self.collections_combo.clear()
-                self.collections_combo.addItem("Authentication failed - check credentials", userData=None)
-                self.collections_combo.setEnabled(False)
-                logger.error("COPERNICUS: OAuth2 authentication FAILED")
-                return
-            
-            logger.info("COPERNICUS: Authentication SUCCESSFUL!")
-            logger.info(f"COPERNICUS: ConnectorManager authenticated flag updated")
-            logger.info(f"COPERNICUS: is_authenticated = {self.copernicus_connector.is_authenticated}")
-            logger.info(f"COPERNICUS: _access_token exists = {self.copernicus_connector._access_token is not None}")
-            if self.copernicus_connector._access_token:
-                logger.info(f"COPERNICUS: token preview: {self.copernicus_connector._access_token[:30]}...")
-            
-            # Clear collections cache since new connector is authenticated
-            self.connector_manager.clear_collections_cache()
-            
-            # Get collections from connector (now properly authenticated)
-            collections = self.copernicus_connector.get_collections()
-            
-            if not collections:
-                self._set_status("No Copernicus collections available", "color: #FFA500;")
-                logger.warning("Copernicus connector returned no collections")
-                return
-            
-            self.collections_combo.clear()
-            self.collections_combo.addItem("All Collections", userData=None)
-            
-            for collection in collections:
-                collection_id = collection.get('id', 'unknown')
-                title = collection.get('title', collection_id)
-                description = collection.get('description', '')
-                
-                # Format display with description
-                if description:
-                    display_text = f"{title} - {description}"
-                else:
-                    display_text = title
-                
-                self.collections_combo.addItem(display_text, userData=collection)
-            
-            self.collections_combo.setEnabled(True)
-            
-            self._set_status(
-                f"Loaded {len(collections)} Copernicus Sentinel collections",
-                "color: #00FF00;"
-            )
-            
-            logger.info(f"Loaded {len(collections)} Copernicus collections")
-            
-        except Exception as e:
-            logger.error(f"Failed to load Copernicus collections: {e}")
-            self._set_status(f"Error loading collections: {e}", "color: #FF0000;")
-
     def _on_endpoint_changed(self, index):
         """Handle STAC endpoint selection change"""
         if index < 0:
@@ -3205,41 +3099,6 @@ class AltairDockWidget(QDockWidget):
                 format_type = "JPEG2000" if is_jp2 else "GeoTIFF"
                 logger.info(f"  Format: {format_type}")
                 
-                # Check if Copernicus requires authentication
-                needs_copernicus_auth = 'dataspace.copernicus.eu' in cog_url or 'eodata.dataspace.copernicus.eu' in cog_url
-                
-                if needs_copernicus_auth:
-                    from osgeo import gdal
-                    
-                    # Get OAuth2 token from Copernicus connector
-                    copernicus_token = None
-                    try:
-                        if hasattr(self, 'connector_manager') and self.connector_manager:
-                            # Access connector instance from manager's internal dict
-                            if 'cdse_sentinel' in self.connector_manager._connectors:
-                                copernicus_connector = self.connector_manager._connectors['cdse_sentinel']['instance']
-                                if copernicus_connector and hasattr(copernicus_connector, 'access_token'):
-                                    copernicus_token = copernicus_connector.access_token
-                                    logger.debug(f"  Got Copernicus token: {copernicus_token[:20] if copernicus_token else 'None'}...")
-                    except Exception as e:
-                        logger.debug(f"  Could not get Copernicus token: {e}")
-                    
-                    if copernicus_token:
-                        # Configure GDAL to send Bearer token in Authorization header
-                        auth_header = f"Authorization: Bearer {copernicus_token}"
-                        gdal.SetConfigOption('GDAL_HTTP_HEADERS', auth_header)
-                        logger.info("  🔐 Copernicus: Using OAuth2 Bearer token authentication")
-                    else:
-                        logger.warning("  ⚠️  Copernicus token not available - authentication may fail")
-                    
-                    # CRITICAL: Windows SSL certificate revocation check issue
-                    # Copernicus eodata uses SChannel which fails with CRYPT_E_NO_REVOCATION_CHECK
-                    gdal.SetConfigOption('GDAL_HTTP_UNSAFESSL', 'YES')
-                    gdal.SetConfigOption('CPL_CURL_VERBOSE', 'NO')
-                    
-                    logger.info("  🔐 Copernicus: Using direct HTTPS access (Windows SSL workaround enabled)")
-                    logger.debug("     GDAL_HTTP_UNSAFESSL=YES to bypass certificate revocation check")
-                
                 # Validate URL is HTTP/HTTPS (required for vsicurl)
                 if not cog_url.startswith(('http://', 'https://')):
                     logger.error(f"❌ Invalid URL scheme: {cog_url[:100]}")
@@ -3318,19 +3177,6 @@ class AltairDockWidget(QDockWidget):
                             logger.warning("   S3 access denied - bucket may require authentication")
                         elif is_jp2 and "not recognized" in error_msg.lower():
                             logger.warning("   JPEG2000 driver not available - install GDAL with JP2 support")
-                        elif needs_copernicus_auth and ("401" in error_msg or "403" in error_msg or "Unauthorized" in error_msg):
-                            logger.error("   ❌ Copernicus authentication failed")
-                            logger.error("   Possible causes:")
-                            logger.error("     1. OAuth2 token expired - try re-authenticating")
-                            logger.error("     2. Token not included in GDAL request")
-                            logger.error("     3. Asset requires different authentication method")
-                            logger.error("   💡 Solution: Go to Settings → Copernicus and re-enter credentials")
-                        elif needs_copernicus_auth:
-                            logger.error("   ❌ Copernicus asset access failed")
-                            logger.error(f"   Error: {error_msg}")
-                            logger.error("   Note: Copernicus Dataspace may require OData API for some assets")
-                            logger.error("   See: https://documentation.dataspace.copernicus.eu/APIs/OData.html")
-            
             # Clean up GDAL configuration options
             from osgeo import gdal
             
@@ -3585,43 +3431,9 @@ class AltairDockWidget(QDockWidget):
                 try:
                     logger.info(f"Downloading {cog_url} to {filepath}")
                     
-                    # Check if Copernicus (use direct HTTPS with OAuth2 token)
-                    needs_copernicus_auth = 'eodata.dataspace.copernicus.eu' in cog_url
-                    
-                    if needs_copernicus_auth:
-                        # Copernicus: Use direct HTTPS download with Bearer token
-                        logger.info("Copernicus: Using authenticated HTTPS download")
-                        
-                        # Get OAuth2 token from Copernicus connector
-                        copernicus_token = None
-                        try:
-                            if hasattr(self, 'connector_manager') and self.connector_manager:
-                                # Access connector instance from manager's internal dict
-                                if 'cdse_sentinel' in self.connector_manager._connectors:
-                                    copernicus_connector = self.connector_manager._connectors['cdse_sentinel']['instance']
-                                    if copernicus_connector and hasattr(copernicus_connector, 'access_token'):
-                                        copernicus_token = copernicus_connector.access_token
-                                        logger.debug(f"  Got Copernicus token for download: {copernicus_token[:20] if copernicus_token else 'None'}...")
-                        except Exception as e:
-                            logger.debug(f"  Could not get Copernicus token: {e}")
-                        
-                        if copernicus_token:
-                            # Download with Bearer token
-                            import urllib.request
-                            req = urllib.request.Request(cog_url)
-                            req.add_header('Authorization', f'Bearer {copernicus_token}')
-                            
-                            with urllib.request.urlopen(req) as response:
-                                with open(filepath, 'wb') as out_file:
-                                    out_file.write(response.read())
-                        else:
-                            logger.warning("  ⚠️  Copernicus token not available - download may fail")
-                            import urllib.request
-                            urllib.request.urlretrieve(cog_url, filepath)
-                    else:
-                        # Standard download (works for Vantor S3 public buckets)
-                        import urllib.request
-                        urllib.request.urlretrieve(cog_url, filepath)
+                    # Standard download (works for public HTTP/S and S3-backed assets)
+                    import urllib.request
+                    urllib.request.urlretrieve(cog_url, filepath)
                     
                     downloaded_count += 1
                     downloaded_files.append(filepath)

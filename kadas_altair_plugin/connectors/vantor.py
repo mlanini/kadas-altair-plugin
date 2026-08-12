@@ -11,11 +11,9 @@ References:
 - https://github.com/mlanini/kadas-vantor-plugin
 - https://github.com/opengeos/maxar-open-data
 """
-import csv
 import json
 import os
 from typing import List, Dict, Any, Optional, Tuple
-from io import StringIO
 from urllib.parse import urljoin, urlencode
 from urllib.parse import urlparse, parse_qs
 
@@ -39,12 +37,11 @@ GITHUB_RAW_URL = "https://raw.githubusercontent.com/opengeos/maxar-open-data/mas
 DATASETS_CSV_URL = f"{GITHUB_RAW_URL}/datasets.csv"
 GEOJSON_URL_TEMPLATE = f"{GITHUB_RAW_URL}/datasets/{{event}}.geojson"
 
-# STAC catalog URLs - primary is the official Vantor Open Data catalog
-# (same as qgis-vantor-plugin reference implementation)
-# Fallback to legacy Vantor Open Data bucket for backwards compatibility
+# STAC catalog URLs.
+# Include both Vantor and Maxar Open Data catalogs so assets from either source
+# are discoverable through the same connector.
 STAC_CATALOG_URLS = [
     "https://vantor-opendata.s3.amazonaws.com/events/catalog.json",
-    "https://maxar-opendata.s3.amazonaws.com/events/catalog.json",
     "https://maxar-opendata.s3.dualstack.us-west-2.amazonaws.com/events/catalog.json",
 ]
 
@@ -56,13 +53,36 @@ TIMEOUT_FOOTPRINTS = 180  # seconds for large GeoJSON files
 DISCOVERY_BASE_URL = "https://api.maxar.com/discovery/v1"
 DISCOVERY_IMAGERY_SEARCH_PATH = "/catalogs/imagery/search"
 DISCOVERY_ROOT_SEARCH_PATH = "/search"
-DISCOVERY_TIMEOUT_DEFAULT = 30  # seconds
-TASKING_TIMEOUT_DEFAULT = 30  # seconds
+DISCOVERY_TIMEOUT_DEFAULT = 60  # seconds
+TASKING_TIMEOUT_DEFAULT = 60  # seconds
 
 # Common imagery collections recommended by Discovery docs for satellite imagery.
 DISCOVERY_IMAGERY_COLLECTIONS = [
     "ge01", "wv01", "wv02", "wv03-vnir", "wv04", "lg01", "lg02", "lg03", "lg04",
 ]
+
+
+def _event_name_from_collection_href(href: str) -> str:
+    """Derive stable event name from a STAC collection href.
+
+    Example:
+    - https://.../events/Venezuela-Earthquake-Jun-2026/collection.json
+      -> Venezuela-Earthquake-Jun-2026
+    """
+    text = str(href or '').strip()
+    if not text:
+        return ''
+
+    parsed = urlparse(text)
+    path_parts = [p for p in parsed.path.split('/') if p]
+    if not path_parts:
+        return ''
+
+    tail = path_parts[-1].lower()
+    if tail in ('collection.json', 'collection') and len(path_parts) >= 2:
+        return path_parts[-2]
+
+    return path_parts[-1]
 
 
 class VantorConnector(ConnectorBase):
@@ -728,84 +748,131 @@ class VantorConnector(ConnectorBase):
         Returns:
             List[Tuple[str, int]]: List of (event_name, tile_count)
         """
-        logger.info(f"Loading events from: {DATASETS_CSV_URL}")
+        logger.info("Loading Vantor events from GitHub + STAC catalogs")
 
+        github_events: List[Tuple[str, int]] = []
+        github_sources: Dict[str, Dict[str, str]] = {}
+        stac_events: List[Tuple[str, int]] = []
+        stac_sources: Dict[str, Dict[str, str]] = {}
+
+        # 1) GitHub dataset (legacy Maxar open-data source)
         try:
-            csv_data = self._fetch_url(DATASETS_CSV_URL, timeout=TIMEOUT_EVENTS)
-            
-            # Debug: Log CSV data length and first 200 chars
-            logger.debug(f"Fetched CSV data: {len(csv_data)} bytes")
-            if csv_data:
-                logger.debug(f"CSV preview: {csv_data[:200]}")
-            else:
-                logger.error("CSV data is empty!")
-                return []
-            
-            # Parse CSV manually (same as kadas-vantor-plugin for robustness)
-            # Format: name,count
-            # Example:
-            # name,count
-            # Afghanistan-earthquake-Jun22,345
-            # American-Samoa-cyclone-Jan23,123
-            events = []
-            lines = csv_data.strip().split("\n")
-            
-            logger.debug(f"CSV has {len(lines)} lines (including header)")
-            
-            # Skip header (first line)
-            for i, line in enumerate(lines[1:], start=1):
-                line = line.strip()
-                if not line:
-                    continue  # Skip empty lines
-                
-                parts = line.split(",")
-                if len(parts) >= 2:
-                    event_name = parts[0].strip()
-                    tile_count_str = parts[1].strip()
-                    
-                    # Debug: Log first 3 rows
-                    if i <= 3:
-                        logger.debug(f"Row {i}: name='{event_name}', count='{tile_count_str}'")
-                    
-                    if event_name:
-                        try:
-                            tile_count_int = int(tile_count_str)
-                        except ValueError:
-                            logger.warning(f"Invalid tile count for {event_name}: {tile_count_str}")
-                            tile_count_int = 0
-                        
-                        events.append((event_name, tile_count_int))
-            
-            logger.info(f"Parsed {len(lines)-1} CSV rows (excluding header), extracted {len(events)} valid events")
-            
-            # Sort by event name
-            events.sort(key=lambda x: x[0].lower())
-            
-            self.events = events
-            self.event_sources = {
-                event_name: {'mode': 'github', 'ref': event_name}
-                for event_name, _ in events
-            }
-            logger.info(f"Loaded {len(events)} events")
-            
-            return events
-            
+            github_events, github_sources = self._load_events_from_github_csv()
+            logger.info(f"Loaded {len(github_events)} event(s) from GitHub dataset")
         except Exception as e:
-            logger.warning(f"GitHub event loading failed, trying STAC fallback: {e}")
-            try:
-                return self._load_events_from_stac()
-            except Exception as stac_error:
-                logger.error(f"Failed to load events from both GitHub and STAC fallback: {stac_error}", exc_info=True)
-                raise
+            logger.warning(f"GitHub event loading failed: {e}")
 
-    def _load_events_from_stac(self) -> List[Tuple[str, int]]:
+        # 2) STAC catalogs (primary includes new vantor-opendata bucket)
+        try:
+            stac_events, stac_sources = self._load_events_from_stac_catalogs()
+            logger.info(f"Loaded {len(stac_events)} event(s) from STAC catalogs")
+        except Exception as e:
+            logger.warning(f"STAC event loading failed: {e}")
+
+        # 3) Merge both sources; prefer STAC refs so footprint loading can use
+        # direct STAC item/assets endpoints (Vantor and Maxar catalogs).
+        event_counts: Dict[str, int] = {name: count for name, count in github_events}
+        merged_sources: Dict[str, Dict[str, str]] = dict(github_sources)
+
+        for event_name, _ in stac_events:
+            source = stac_sources.get(event_name)
+            if not source:
+                continue
+            source_ref = str(source.get('ref', ''))
+            source_is_new_bucket = (
+                'vantor-opendata.s3.amazonaws.com' in source_ref
+            )
+
+            if event_name not in event_counts:
+                event_counts[event_name] = 0
+
+            existing = merged_sources.get(event_name)
+            existing_ref = str((existing or {}).get('ref', ''))
+            existing_mode = str((existing or {}).get('mode', '')).lower()
+            prefer_new_bucket = source_is_new_bucket
+            existing_is_new_bucket = 'vantor-opendata.s3.amazonaws.com' in existing_ref
+            if existing is None:
+                merged_sources[event_name] = source
+            elif prefer_new_bucket:
+                merged_sources[event_name] = source
+            elif existing_mode == 'stac' and not existing_is_new_bucket:
+                merged_sources[event_name] = source
+
+        if not event_counts:
+            raise Exception("No events available from either GitHub or STAC sources")
+
+        merged_events = sorted(event_counts.items(), key=lambda x: x[0].lower())
+        self.events = merged_events
+        self.event_sources = merged_sources
+        logger.info(
+            f"Loaded {len(merged_events)} total event(s) "
+            f"(GitHub={len(github_events)}, STAC={len(stac_events)})"
+        )
+        return merged_events
+
+    def _load_events_from_github_csv(self) -> Tuple[List[Tuple[str, int]], Dict[str, Dict[str, str]]]:
+        """Load events from legacy GitHub datasets.csv source."""
+        logger.info(f"Loading events from: {DATASETS_CSV_URL}")
+        csv_data = self._fetch_url(DATASETS_CSV_URL, timeout=TIMEOUT_EVENTS)
+
+        logger.debug(f"Fetched CSV data: {len(csv_data)} bytes")
+        if csv_data:
+            logger.debug(f"CSV preview: {csv_data[:200]}")
+        else:
+            logger.error("CSV data is empty")
+            return [], {}
+
+        events: List[Tuple[str, int]] = []
+        event_sources: Dict[str, Dict[str, str]] = {}
+        lines = csv_data.strip().split("\n")
+        logger.debug(f"CSV has {len(lines)} lines (including header)")
+
+        # Skip header (first line)
+        for i, line in enumerate(lines[1:], start=1):
+            line = line.strip()
+            if not line:
+                continue
+
+            parts = line.split(",")
+            if len(parts) < 2:
+                continue
+
+            event_name = parts[0].strip()
+            tile_count_str = parts[1].strip()
+
+            if i <= 3:
+                logger.debug(f"Row {i}: name='{event_name}', count='{tile_count_str}'")
+
+            if not event_name:
+                continue
+
+            try:
+                tile_count_int = int(tile_count_str)
+            except ValueError:
+                logger.warning(f"Invalid tile count for {event_name}: {tile_count_str}")
+                tile_count_int = 0
+
+            events.append((event_name, tile_count_int))
+            event_sources[event_name] = {'mode': 'github', 'ref': event_name}
+
+        logger.info(
+            f"Parsed {len(lines)-1} CSV rows (excluding header), "
+            f"extracted {len(events)} valid events"
+        )
+        events.sort(key=lambda x: x[0].lower())
+        return events, event_sources
+
+    def _load_events_from_stac_catalogs(self) -> Tuple[List[Tuple[str, int]], Dict[str, Dict[str, str]]]:
         """Load events from Vantor Open Data STAC catalog as fallback.
 
         Returns:
             List[Tuple[str, int]]: List of (event_name, tile_count). tile_count
             is 0 when not available in catalog metadata.
         """
+        aggregated_events: Dict[str, int] = {}
+        aggregated_sources: Dict[str, Dict[str, str]] = {}
         last_error = None
+        successful_catalogs = 0
 
         for catalog_url in STAC_CATALOG_URLS:
             try:
@@ -814,8 +881,7 @@ class VantorConnector(ConnectorBase):
                 catalog = json.loads(catalog_str)
 
                 links = catalog.get('links', []) if isinstance(catalog, dict) else []
-                events: List[Tuple[str, int]] = []
-                event_sources: Dict[str, Dict[str, str]] = {}
+                local_events = 0
 
                 for link in links:
                     if not isinstance(link, dict):
@@ -830,36 +896,46 @@ class VantorConnector(ConnectorBase):
                     if not href.startswith(('http://', 'https://')):
                         href = urljoin(catalog_url, href)
 
-                    title = link.get('title')
-                    if not title:
-                        stripped = href.rstrip('/')
-                        title = stripped.split('/')[-1] if '/' in stripped else href
+                    title = str(link.get('title') or '').strip()
+                    event_name = title if title else _event_name_from_collection_href(href)
 
-                    event_name = str(title).strip()
+                    # Last fallback: keep non-empty basename from href
+                    if not event_name:
+                        stripped = href.rstrip('/')
+                        event_name = stripped.split('/')[-1] if '/' in stripped else href
+                    event_name = str(event_name).strip()
                     if not event_name:
                         continue
 
-                    if event_name in event_sources:
+                    if event_name.lower().endswith('collection.json'):
+                        # Defensive skip when href parsing failed.
                         continue
 
-                    events.append((event_name, 0))
-                    event_sources[event_name] = {'mode': 'stac', 'ref': href}
+                    local_events += 1
+                    aggregated_events.setdefault(event_name, 0)
 
-                if not events:
+                    existing = aggregated_sources.get(event_name)
+                    prefer_new_bucket = 'vantor-opendata.s3.amazonaws.com' in href
+                    existing_ref = str((existing or {}).get('ref', ''))
+                    existing_is_new_bucket = 'vantor-opendata.s3.amazonaws.com' in existing_ref
+                    if existing is None or prefer_new_bucket or not existing_is_new_bucket:
+                        aggregated_sources[event_name] = {'mode': 'stac', 'ref': href}
+
+                if local_events == 0:
                     raise Exception("STAC catalog returned no child events")
 
-                events.sort(key=lambda x: x[0].lower())
-                self.events = events
-                self.event_sources = event_sources
-
-                logger.info(f"Loaded {len(events)} events from STAC fallback")
-                return events
+                successful_catalogs += 1
+                logger.info(f"Loaded {local_events} STAC event(s) from {catalog_url}")
 
             except Exception as e:
                 last_error = e
                 logger.warning(f"STAC fallback URL failed ({catalog_url}): {e}")
 
-        raise Exception(f"All STAC fallback URLs failed: {last_error}")
+        if successful_catalogs == 0 or not aggregated_events:
+            raise Exception(f"All STAC fallback URLs failed: {last_error}")
+
+        events = sorted(aggregated_events.items(), key=lambda x: x[0].lower())
+        return events, aggregated_sources
     
     def get_collections(self) -> List[Dict[str, Any]]:
         """Get available collections (events)
@@ -994,7 +1070,20 @@ class VantorConnector(ConnectorBase):
                 break
 
         if not items_href:
-            items_href = collection_href.rstrip('/') + '/items'
+            parsed = urlparse(collection_href)
+            path = parsed.path.rstrip('/')
+            lower_path = path.lower()
+
+            if lower_path.endswith('/collection.json'):
+                base_path = path[:-len('/collection.json')]
+            elif lower_path.endswith('.json'):
+                # Generic fallback for collection-like JSON URLs.
+                base_path = path.rsplit('/', 1)[0] if '/' in path else path
+            else:
+                base_path = path
+
+            base_path = base_path.rstrip('/')
+            items_href = f"{parsed.scheme}://{parsed.netloc}{base_path}/items"
 
         if not items_href.startswith(('http://', 'https://')):
             items_href = urljoin(collection_href, items_href)
@@ -1090,6 +1179,7 @@ class VantorConnector(ConnectorBase):
 
         # Maximum events to download when collection is not specified
         MAX_EVENTS_TO_FETCH = 10
+        MAX_EVENTS_TO_FETCH_FALLBACK = 50
 
         logger.info(f"Vantor.search() called: collection={collection}, bbox={bbox}, "
                    f"dates={start_date} to {end_date}, cloud<={max_cloud_cover}, limit={limit}, "
@@ -1107,10 +1197,17 @@ class VantorConnector(ConnectorBase):
         if collection:
             events_to_search = [collection]
         else:
-            # Cached events first (already in memory — free), then remaining
+            # Cached events first (already in memory — free), then STAC-backed
+            # events from the Vantor bucket, then remaining GitHub events.
             cached = list(self.footprints_cache.keys())
             remaining = [ev for ev, _ in self.events if ev not in self.footprints_cache]
-            events_to_search = cached + remaining
+
+            stac_first = [
+                ev for ev in remaining
+                if str(self.event_sources.get(ev, {}).get('mode', '')) == 'stac'
+            ]
+            github_rest = [ev for ev in remaining if ev not in stac_first]
+            events_to_search = cached + stac_first + github_rest
 
         results: List[Dict[str, Any]] = []
         events_fetched = 0
@@ -1170,6 +1267,66 @@ class VantorConnector(ConnectorBase):
                 ):
                     continue
                 results.append(item)
+
+        if (
+            collection is None
+            and not results
+            and events_fetched >= MAX_EVENTS_TO_FETCH
+            and len(events_to_search) > events_fetched
+        ):
+            logger.info(
+                "Vantor: zero results after initial capped scan; retrying with "
+                f"expanded cap ({MAX_EVENTS_TO_FETCH_FALLBACK})"
+            )
+            for event_name in events_to_search:
+                if len(results) >= limit:
+                    break
+                if event_name in self.footprints_cache:
+                    continue
+                if events_fetched >= MAX_EVENTS_TO_FETCH_FALLBACK:
+                    break
+
+                events_fetched += 1
+                try:
+                    geojson = self.load_footprints(event_name)
+                except Exception as e:
+                    logger.warning(f"Vantor: skipping event {event_name!r}: {e}")
+                    continue
+
+                features = geojson.get('features', [])
+                for feature_idx, feature in enumerate(features):
+                    if len(results) >= limit:
+                        break
+
+                    props = feature.get('properties', {})
+
+                    raw_id = feature.get('id')
+                    if raw_id is None or str(raw_id).strip() == '':
+                        raw_id = props.get('id') or props.get('catalog_id') or props.get('datetime')
+                    item_id = str(raw_id).strip() if raw_id is not None else ''
+                    if not item_id:
+                        item_id = f"{event_name}-{feature_idx}"
+
+                    item = {
+                        'id': item_id,
+                        'type': 'Feature',
+                        'geometry': feature.get('geometry'),
+                        'bbox': feature.get('bbox'),
+                        'properties': props,
+                        'assets': self._extract_assets(props, feature),
+                        'collection': event_name,
+                        'event_id': event_name,
+                    }
+                    if not self._item_matches_filters(
+                        item,
+                        bbox=bbox,
+                        start_date=start_date,
+                        end_date=end_date,
+                        max_cloud_cover=max_cloud_cover,
+                        text_query=text_query,
+                    ):
+                        continue
+                    results.append(item)
 
         logger.info(
             f"Vantor search: {len(results)} result(s) "
@@ -1308,19 +1465,48 @@ class VantorConnector(ConnectorBase):
         if max_cloud_cover is not None:
             cloud_cover = props.get('cloud_cover', props.get('eo:cloud_cover', 0))
             try:
-                if float(cloud_cover) > float(max_cloud_cover):
+                cloud_limit = float(max_cloud_cover)
+                cloud_value = float(cloud_cover)
+
+                # UI often sends 0..1 while open-data metadata commonly stores
+                # cloud cover in 0..100.
+                if 0.0 <= cloud_limit <= 1.0:
+                    cloud_limit *= 100.0
+
+                if cloud_value > cloud_limit:
                     return False
             except (TypeError, ValueError):
                 pass
 
         if start_date or end_date:
-            datetime_str = str(props.get('datetime', '') or '').strip()
-            if not datetime_str:
+            date_part = ''
+            for field in (
+                'datetime',
+                'start_datetime',
+                'end_datetime',
+                'acquired',
+                'acquisition_date',
+                'date',
+            ):
+                raw_value = props.get(field)
+                if raw_value is None:
+                    continue
+                text_value = str(raw_value).strip()
+                if len(text_value) >= 10:
+                    date_part = text_value[:10]
+                    break
+
+            if not date_part:
                 return False
-            date_part = datetime_str[:10]
-            if start_date and date_part < str(start_date):
+
+            start_day = str(start_date)[:10] if start_date else ''
+            end_day = str(end_date)[:10] if end_date else ''
+            # Safety-net: swap if range is inverted
+            if start_day and end_day and start_day > end_day:
+                start_day, end_day = end_day, start_day
+            if start_day and date_part < start_day:
                 return False
-            if end_date and date_part > str(end_date):
+            if end_day and date_part > end_day:
                 return False
 
         if text_query:

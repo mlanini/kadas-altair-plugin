@@ -4,7 +4,7 @@
 [KADAS Albireo 2](https://www.kadas-albireo.ch) is an open-source GIS platform for geospatial planning, analysis and sharing. It is used to visualise maps and satellite data, manage operational scenarios and support rapid decision-making in the civil and security sectors.
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/Version-0.5.1-success.svg)](https://github.com/mlanini/kadas-altair-plugin)
+[![Version](https://img.shields.io/badge/Version-0.5.2-success.svg)](https://github.com/mlanini/kadas-altair-plugin)
 [![Status](https://img.shields.io/badge/Status-Production-success.svg)](https://github.com/mlanini/kadas-altair-plugin)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/mlanini/kadas-altair-plugin)
 
@@ -25,6 +25,7 @@
 | **[README.md](README.md)** | Overview, features, quick start (this file) |
 | **[GUIDE.md](GUIDE.md)** | Installation, configuration, usage tutorial |
 | **[CHANGELOG.md](CHANGELOG.md)** | Version-by-version change log |
+| **[RELEASE_NOTES.md](RELEASE_NOTES.md)** | Curated release highlights |
 
 ---
 
@@ -58,17 +59,17 @@ cp -r kadas_altair_plugin ~/.local/share/Kadas/KadasZivil/profiles/default/pytho
 4. Define an AOI by drawing on the map or using the current view.
 5. Set date range, cloud-cover limits and optionally a collection.
 6. Click **Search** to retrieve results.
-7. Select a result and use **Preview** or **Load COG** to inspect or stream the scene.
+7. In **Search and Predict**, a visible hourglass indicator confirms archive/overpass background processing is active.
+8. Select a result and use **Preview** or **Load COG** to inspect or stream the scene.
 
 ### Optional Credentials
 
 Some providers require authentication or tokens:
-- **Copernicus Data Space**: OAuth2 client credentials
 - **NASA EarthData**: token or username/password
 - **Jilin-1 Gaofen**: bearer token
 - **Commercial providers**: credentials configured in the plugin settings
 
-Public connectors such as **ICEYE**, **Umbra**, **Capella**, **Vantor Open Data**, **JAXA Earth**, and **swisstopo** can often be used without signing in.
+Public connectors such as **Earth Search (Element84)**, **Microsoft Planetary Computer**, **ICEYE**, **Umbra**, **Capella**, **Vantor Open Data**, **JAXA Earth**, and **swisstopo** can often be used without signing in.
 
 ---
 
@@ -76,7 +77,7 @@ Public connectors such as **ICEYE**, **Umbra**, **Capella**, **Vantor Open Data*
 
 ### Connectors
 
-The plugin currently supports 8 production-ready connectors, 1 experimental connector and 2 stub connectors:
+The plugin currently supports 9 production-ready connectors, 1 experimental connector and 2 stub connectors:
 
 | # | Connector | Type | Notes |
 |---|-----------|------|-------|
@@ -86,11 +87,12 @@ The plugin currently supports 8 production-ready connectors, 1 experimental conn
 | 4 | **Vantor Open Data** | Optical | Disaster-event imagery and open-data access |
 | 5 | **swisstopo STAC** | Optical | Swiss national imagery collections, including Special flights |
 | 6 | **JAXA Earth STAC** | Multi | Public COG-STAC catalog with no credentials required |
-| 7 | **Copernicus Data Space** | Multi | Sentinel-1/2/3/5P access with OAuth2 |
-| 8 | **Jilin-1 Gaofen** | Optical | Commercial STAC connector with bearer-token support |
-| 9 | **NASA EarthData** | Multi | Experimental connector for CMR/earthdata workflows |
-| 10 | **Planet** | Optical | Stub connector for future integration |
-| 11 | **OneAtlas** | Optical | Stub connector for future integration |
+| 7 | **Earth Search (Element84)** | Multi | Public STAC access for Sentinel and Landsat collections |
+| 8 | **Microsoft Planetary Computer** | Multi | Public STAC access for curated optical and fire collections |
+| 9 | **Jilin-1 Gaofen** | Optical | Commercial STAC connector with bearer-token support |
+| 10 | **NASA EarthData** | Multi | Experimental connector for CMR/earthdata workflows |
+| 11 | **Planet** | Optical | Stub connector for future integration |
+| 12 | **OneAtlas** | Optical | Stub connector for future integration |
 
 ### Search and Visualization
 
@@ -101,19 +103,20 @@ The plugin currently supports 8 production-ready connectors, 1 experimental conn
 - **COG loading** via GDAL/virtual file access for streaming without full download
 - **Collection-aware search** and metadata normalization for consistent results
 
-### Smart Tasking
+### Search and Predict
 
 - **Satellite catalogue** covering a broad set of EO and SAR constellations
 - **Overpass prediction** using a bearing-convergence workflow tailored to sensor footprint and AOI
 - **3D orbit visualisation** with orbit track, ground track, swath corridor and satellite marker
 - **Archive search** for historical scenes by satellite and provider
+- **Busy hourglass indicator** while archive search and overpass prediction run in background
 - **Tasking prefill** to move selected results into the tasking workflow quickly
 
 ### Tasking Orders
 
 - **Guided tasking form** for provider, sensor, AOI, resolution and acquisition constraints
 - **Mailto workflow** that generates a pre-filled request for the selected provider
-- **Smart prefill** from Smart Tasking and archive results to reduce manual entry
+- **Search and Predict prefill** from Search and Predict or archive results to reduce manual entry
 
 ### Settings and Security
 
@@ -167,7 +170,7 @@ Contributions welcome via issue discussion on GitHub.
 
 **Before submitting issues:**
 - Check logs: `Plugins` → `Altair` → `View Log`
-- Include KADAS version, plugin version (`0.5.1`), and steps to reproduce
+- Include KADAS version, plugin version (`0.5.2`), and steps to reproduce
 
 ---
 
@@ -203,7 +206,7 @@ terms.
 | Vantor Open Data events | Open-data program terms (check event/dataset page) | Attribute Maxar Open Data / Vantor Open Data and preserve any dataset-specific notice |
 | Jilin-1 Gaofen | Tenant/provider-specific terms | Use attribution text from your Jilin API/data agreement |
 | JAXA Earth | Public datasets with JAXA terms of use | Credit JAXA Earth / dataset name and comply with dataset terms |
-| CDSE Sentinel | Copernicus free and open data policy | Credit European Union, Copernicus Sentinel data, and product generation chain when required |
+| Sentinel / Landsat via public STAC mirrors | Dataset-specific public catalog terms | Credit the original mission/provider and preserve any collection-specific attribution guidance |
 | swisstopo RapidMapping | Swiss open government/public sector data terms | Credit swisstopo and dataset/event identifier |
 | NASA EarthData | Dataset-specific NASA/DAAC terms | Credit NASA + DAAC + collection identifier (for example concept ID/short name) |
 

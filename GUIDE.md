@@ -2,13 +2,15 @@
 
 This guide explains how to install, configure, and use the KADAS Altair plugin to search, preview, and prepare satellite imagery acquisition orders inside KADAS Albireo 2.
 
+Current documented release: v0.5.2.
+
 ## What the plugin offers
 
 KADAS Altair brings together multiple EO/SAR data sources in a single operational workflow:
 - archive search and preview of satellite scenes
 - direct COG loading through GDAL and virtual file access
 - multi-provider search through STAC connectors and provider-specific services
-- Smart Tasking with overpass prediction and 3D orbit visualization
+- Search and Predict with overpass prediction and 3D orbit visualization
 - tasking-order preparation with prefill from search results
 
 ## Requirements
@@ -63,7 +65,7 @@ After activating the plugin, open the panels available from the Altair menu or t
 
 The main operational areas are:
 - the Open Data / Archive Search panel for imagery search
-- the Smart Tasking panel for overpass prediction and historical search
+- the Search and Predict panel for overpass prediction and historical search
 - the Tasking panel for order preparation
 - the Settings panel for authentication and configuration
 
@@ -74,7 +76,8 @@ The main operational areas are:
 The plugin supports multiple providers. For immediate use:
 - swisstopo STAC: public Swiss data and specific collections
 - JAXA Earth STAC: public catalog with no credentials required
-- Copernicus Data Space: Sentinel data access through OAuth2
+- Earth Search (Element84): public Sentinel and Landsat STAC access
+- Microsoft Planetary Computer: public curated STAC access for optical and fire collections
 - NASA EarthData: token or username/password workflows
 - ICEYE, Umbra, Capella, Vantor Open Data: public or commercial providers
 
@@ -101,12 +104,14 @@ For each search, it is useful to set:
 
 After clicking Search, the plugin retrieves results and displays them in a table. If the provider supports footprints or previews, those are shown on the map.
 
+In the **Search and Predict** panel, a dedicated hourglass indicator appears while archive search and/or overpass prediction are running in background.
+
 ### 5. Preview or load the results
 
 From a selected result, you can:
 - view a quick preview
 - load the dataset as a COG or supported layer
-- use the result as input for Smart Tasking or Tasking
+- use the result as input for Search and Predict or Tasking
 
 ## Available connectors
 
@@ -122,11 +127,17 @@ From a selected result, you can:
 - does not require credentials for basic use
 - useful for quickly checking availability, previews, and access to public data
 
-### Copernicus Data Space
+### Earth Search (Element84)
 
-- access to Sentinel data through STAC
-- requires OAuth2 with client ID and client secret
-- useful for operational workflows and full Sentinel dataset search
+- public STAC access for Sentinel and Landsat collections
+- no credentials required for standard catalog use
+- useful for broad archive discovery over public optical collections
+
+### Microsoft Planetary Computer
+
+- public STAC catalog with curated optical and fire-oriented collections
+- no credentials required for standard catalog use
+- useful when you need fast previewable public archive access
 
 ### NASA EarthData
 
@@ -144,16 +155,16 @@ From a selected result, you can:
 - represent future integrations or partial/stub implementations depending on the plugin version
 - should not be considered fully operational providers without validating the deployment context
 
-## Smart Tasking
+## Search and Predict
 
-The Smart Tasking panel helps answer questions such as:
+The Search and Predict panel helps answer questions such as:
 - when will a satellite pass over the area of interest?
 - which scene might be acquired within a given time window?
 - which archive result is most suitable for tasking?
 
 ### How to use it
 
-1. Open the Smart Tasking panel.
+1. Open the Search and Predict panel.
 2. Select the satellite or constellation of interest.
 3. Define the AOI and time window.
 4. Start overpass prediction or archive search.
@@ -164,7 +175,14 @@ The Smart Tasking panel helps answer questions such as:
 - overpass prediction using orbital models and convergence logic
 - 3D visualization of the orbit, ground track, and swath corridor
 - historical search across supported catalogs and providers
+- busy hourglass feedback during long-running archive and overpass operations
 - rapid transfer of results into the tasking workflow
+
+### Busy indicator behavior
+
+- Archive mode: the indicator is shown while archive connectors are being queried.
+- Tasking mode: the indicator is shown while overpass prediction is being computed.
+- Mixed mode: the indicator remains visible until both archive and overpass tasks complete.
 
 ## Tasking Order
 
@@ -199,7 +217,7 @@ For many providers, it is useful to configure:
 
 ### Typical providers
 
-- Copernicus Data Space: OAuth2 with client ID and client secret
+- Earth Search / Planetary Computer: no credentials for normal public catalog access
 - NASA EarthData: token or username/password
 - Jilin-1 Gaofen: bearer token or tenant credentials
 - commercial providers: account and token according to contract

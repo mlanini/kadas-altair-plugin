@@ -2,25 +2,27 @@
 
 This file summarizes the main releases of the KADAS Altair plugin. For the full version-by-version history, see [CHANGELOG.md](CHANGELOG.md).
 
-## Current release: v0.5.1
+## Current release: v0.5.2
 
-Released 2026-08-09.
+Released 2026-08-12
 
 ### Highlights
-- Added support for the swisstopo STAC collection `ch.swisstopo.spezialbefliegungen`.
-- Made swisstopo searches collection-aware so a selected collection is queried directly, while unselected searches still span the supported swisstopo collections.
-- Fixed Archive Search wiring so the selected swisstopo collection is preserved through the full query path.
-- Normalized Smart Tasking archive date ranges to explicit UTC day boundaries so end dates are handled consistently across STAC backends.
+- Fixed Search and Predict swath geometry for antimeridian-heavy scenes by using MultiPolygon swaths, validating the geometry, and keeping longitude wrapping consistent.
+- Restored Landsat-class fallback access by using fractional orbital progress with a stable per-satellite seed, and added Landsat 8 to the satellite catalogue.
+- Added a visible hourglass busy indicator in **Search and Predict** while archive search and overpass prediction are running.
+- Improved user feedback during mixed **Search + Predict** mode: the indicator stays visible until all active background tasks are complete.
+- Reduces ambiguity during multi-second provider requests and overpass computations.
+- Makes it explicit that Altair is working and the UI is responsive.
 
 ### Packaging
 - Build command: `KADAS_SKIP_PIP=1 python package_plugin_full.py`
-- Output archive: `kadas_altair_plugin_full_v0.5.1.zip`
+- Output archive: `kadas_altair_plugin_full_v0.5.2.zip`
 
 ## Previous releases
 
 ### v0.5.0
 - Added a mandatory activation disclaimer dialog.
-- Improved Smart Tasking CRS handling for geometry layers.
+- Improved Search and Predict CRS handling for geometry layers.
 - Tightened Planetary Computer filtering so only valid raster/COG assets are returned.
 
 ### v0.4.5
@@ -31,7 +33,7 @@ Released 2026-08-09.
 - Introduced the AOI widget and removed the crash-prone extent-widget workflow from the dock panels.
 
 ### v0.4.2
-- Introduced Smart Tasking with overpass prediction and 3D orbit visualization.
+- Introduced Search and Predict with overpass prediction and 3D orbit visualization.
 - Added archive search support for historical scenes and provider-side result inspection.
 
 ### v0.4.1

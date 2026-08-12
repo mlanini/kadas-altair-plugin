@@ -42,7 +42,7 @@ TASKING_TOKEN_KEY = 'AltairEOData/jilin_tasking_access_token'
 class JilinGaofenStacConnector(ConnectorBase):
     """STAC connector for Jilin-1 Gaofen constellation archives."""
 
-    timeout_search = 30.0
+    timeout_search = 60.0
 
     def __init__(self, base_url: Optional[str] = None):
         super().__init__()

@@ -33,7 +33,7 @@ class PlanetaryComputerStacConnector(ConnectorBase):
     SETTINGS_API_ROOT_KEY = 'AltairEOData/planetary_computer_stac_api_url'
     SETTINGS_TIMEOUT_KEY = 'AltairEOData/planetary_computer_stac_timeout'
 
-    timeout_search = 30.0
+    timeout_search = 60.0
 
     SUPPORTED_COLLECTION_KEYWORDS = (
         'imagery',

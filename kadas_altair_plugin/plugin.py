@@ -422,7 +422,7 @@ class KadasAltair(QObject):
         self._archive_dock.raise_()
 
     def open_smart_tasking_dock(self):
-        """Open/focus Smart Tasking dock without toggle hide behavior."""
+        """Open/focus Search and Predict dock without toggle hide behavior."""
         if self._smart_tasking_dock is None:
             self.toggle_smart_tasking_dock()
             return
@@ -671,7 +671,7 @@ class KadasAltair(QObject):
         self.archive_action.setChecked(visible)
 
     def toggle_smart_tasking_dock(self):
-        """Toggle Smart Tasking dock"""
+        """Toggle Search and Predict dock"""
         if self._smart_tasking_dock is None:
             try:
                 from .gui.smart_tasking_dock import SmartTaskingDockWidget
@@ -689,10 +689,10 @@ class KadasAltair(QObject):
 
             except Exception as e:
                 error_msg = str(e)
-                logger.error(f'Failed to create Smart Tasking panel: {error_msg}', exc_info=True)
+                logger.error(f'Failed to create Search and Predict panel: {error_msg}', exc_info=True)
                 QMessageBox.critical(
                     self.iface.mainWindow(), 'Error',
-                    f'Failed to create Smart Tasking panel:\n{error_msg}',
+                    f'Failed to create Search and Predict panel:\n{error_msg}',
                 )
                 self.smart_tasking_action.setChecked(False)
                 return
@@ -704,7 +704,7 @@ class KadasAltair(QObject):
             self._smart_tasking_dock.raise_()
 
     def _on_smart_tasking_visibility_changed(self, visible):
-        """Sync action checked state with Smart Tasking dock visibility"""
+        """Sync action checked state with Search and Predict dock visibility"""
         self.smart_tasking_action.setChecked(visible)
 
     def _open_tasking_from_archive(self, item):
@@ -737,7 +737,7 @@ class KadasAltair(QObject):
             logger.warning(f"Could not prefill Tasking dock from archive result: {e}")
 
     def _open_tasking_from_smart_tasking(self, data: dict):
-        """Open Tasking dock and prefill from Smart Tasking payload."""
+        """Open Tasking dock and prefill from Search and Predict payload."""
         try:
             if self._tasking_dock is None:
                 self.toggle_tasking_dock()
@@ -748,7 +748,7 @@ class KadasAltair(QObject):
             self._tasking_dock.show()
             self._tasking_dock.raise_()
         except Exception as e:
-            logger.warning(f'Could not prefill Tasking dock from Smart Tasking: {e}')
+            logger.warning(f'Could not prefill Tasking dock from Search and Predict: {e}')
 
     def show_help(self):
         """Show online documentation in browser"""
@@ -815,7 +815,7 @@ class KadasAltair(QObject):
             config.read(metadata_path, encoding='utf-8')
             
             name = config.get('general', 'name', fallback='KADAS Altair')
-            version = config.get('general', 'version', fallback='0.5.0')
+            version = config.get('general', 'version', fallback='0.5.2')
             author = config.get('general', 'author', fallback='Michael Lanini')
             email = config.get('general', 'email', fallback='mlanini@proton.me')
             repository = config.get('general', 'repository', fallback='https://github.com/mlanini/kadas-altair-plugin')
@@ -874,5 +874,5 @@ Licensed under the MIT License.<br>
             QMessageBox.about(
                 self.iface.mainWindow(),
                 "About KADAS Altair",
-                f"KADAS Altair EO Data Plugin\n\nVersion: 0.5.0\nAuthor: Michael Lanini\n\nError loading full metadata: {str(e)}"
+                f"KADAS Altair EO Data Plugin\n\nVersion: 0.5.2\nAuthor: Michael Lanini\n\nError loading full metadata: {str(e)}"
             )

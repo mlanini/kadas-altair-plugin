@@ -40,7 +40,7 @@ class Element84StacConnector(ConnectorBase):
         'landsat-c2-l2',
     ]
 
-    timeout_search = 30.0
+    timeout_search = 60.0
 
     def __init__(self):
         super().__init__()
