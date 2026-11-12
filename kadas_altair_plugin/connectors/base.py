@@ -1,5 +1,6 @@
 import logging
 import os
+from urllib.parse import urljoin, urlsplit
 
 try:
     import requests
@@ -129,6 +130,12 @@ class ConnectorBase:
                 f"connector init: {e}"
             )
 
+        try:
+            from ..utilities.kadas_network_settings import apply_gdal_proxy_settings
+            apply_gdal_proxy_settings()
+        except Exception as e:
+            self._logger.debug("GDAL proxy settings unavailable: %s", e)
+
         if requests is None:
             self._session = None
             return
@@ -226,19 +233,21 @@ class ConnectorBase:
 
         for key in self._PREVIEW_ASSET_KEYS:
             asset = assets.get(key)
-            if isinstance(asset, dict) and asset.get('href'):
-                return str(asset.get('href'))
-            if isinstance(asset, str) and asset.strip():
-                return asset.strip()
+            href = self._asset_href(item, asset)
+            if href:
+                return href
 
+        preview_roles = ('thumbnail', 'overview', 'preview', 'browse', 'quicklook')
         for _key, asset in assets.items():
             if not isinstance(asset, dict):
                 continue
             roles = asset.get('roles') or []
-            if 'thumbnail' in roles or 'overview' in roles or 'preview' in roles:
-                href = asset.get('href')
+            if isinstance(roles, str):
+                roles = [roles]
+            if any(role in roles for role in preview_roles):
+                href = self._asset_href(item, asset)
                 if href:
-                    return str(href)
+                    return href
 
         links = item.get('links') if isinstance(item, dict) else []
         if isinstance(links, list):
@@ -246,7 +255,24 @@ class ConnectorBase:
                 if not isinstance(link, dict):
                     continue
                 if link.get('rel') in ('thumbnail', 'preview', 'quicklook') and link.get('href'):
-                    return str(link.get('href'))
+                    return self._asset_href(item, link)
+
+        properties = item.get('properties') if isinstance(item, dict) else {}
+        if isinstance(properties, dict):
+            quicklook_links = properties.get('quicklook_links')
+            if isinstance(quicklook_links, list):
+                for href in quicklook_links:
+                    resolved = self._asset_href(item, href)
+                    if resolved:
+                        return resolved
+            for key in (
+                'thumbnail', 'thumbnail_url', 'thumbnail_href',
+                'quicklook', 'quicklook_url', 'quicklook_href',
+                'overview', 'overview_url', 'browse_url', 'preview_url',
+            ):
+                href = self._asset_href(item, properties.get(key))
+                if href:
+                    return href
 
         return ''
 
@@ -258,36 +284,73 @@ class ConnectorBase:
         assets = item.get('assets') if isinstance(item, dict) else {}
         assets = assets if isinstance(assets, dict) else {}
 
+        # Honor well-known asset keys, but never mistake a browse image for data.
         for key in self._COG_ASSET_PRIORITY:
             asset = assets.get(key)
             if not asset:
                 continue
-            href = asset.get('href') if isinstance(asset, dict) else asset if isinstance(asset, str) else None
-            if href and not str(href).endswith('.SAFE') and not str(href).endswith('/'):
-                return str(href)
+            if self._is_preview_asset(key, asset):
+                continue
+            href = self._asset_href(item, asset)
+            if href and self._is_raster_asset(href, asset, key):
+                return href
 
         for key, asset in assets.items():
-            if key == 'thumbnail' or not isinstance(asset, dict):
+            if self._is_preview_asset(key, asset):
                 continue
-            media_type = str(asset.get('type') or '').lower()
-            href = str(asset.get('href') or '')
-            if any(mt in media_type for mt in self._COG_MEDIA_TYPES):
-                if href and not href.endswith('.SAFE') and not href.endswith('/'):
-                    return href
-
-        for key, asset in assets.items():
-            if key == 'thumbnail':
-                continue
-            href = (
-                asset.get('href') if isinstance(asset, dict)
-                else asset if isinstance(asset, str)
-                else ''
-            ) or ''
-            href = str(href)
-            if href.lower().endswith(('.tif', '.tiff', '.jp2', '.j2k')) and not href.endswith('.SAFE'):
+            href = self._asset_href(item, asset)
+            if href and self._is_raster_asset(href, asset):
                 return href
 
         return ''
+
+    @staticmethod
+    def _asset_href(item: dict, asset) -> str:
+        if isinstance(asset, dict):
+            href = str(asset.get('href') or '').strip()
+        elif isinstance(asset, str):
+            href = asset.strip()
+        else:
+            href = ''
+        if not href:
+            return ''
+
+        parsed = urlsplit(href)
+        if parsed.scheme or href.startswith('//'):
+            return href
+
+        links = item.get('links') if isinstance(item, dict) else []
+        if isinstance(links, list):
+            for link in links:
+                if isinstance(link, dict) and link.get('rel') == 'self' and link.get('href'):
+                    return urljoin(str(link['href']), href)
+        return href
+
+    @staticmethod
+    def _is_preview_asset(key: str, asset) -> bool:
+        preview_names = {'thumbnail', 'quicklook', 'preview', 'overview', 'browse'}
+        if str(key).lower() in preview_names:
+            return True
+        if not isinstance(asset, dict):
+            return False
+        roles = asset.get('roles') or []
+        if isinstance(roles, str):
+            roles = [roles]
+        return bool(preview_names.intersection(str(role).lower() for role in roles))
+
+    def _is_raster_asset(self, href: str, asset, key: str = '') -> bool:
+        path = urlsplit(href).path.lower()
+        if path.endswith('.safe') or path.endswith('/'):
+            return False
+        media_type = str(asset.get('type') or '').lower() if isinstance(asset, dict) else ''
+        if media_type:
+            if any(media_type.startswith(media) for media in ('image/png', 'image/jpeg', 'image/gif', 'application/json')):
+                return False
+            if any(media_type.startswith(media) for media in self._COG_MEDIA_TYPES):
+                return True
+        elif key in self._COG_ASSET_PRIORITY:
+            return True
+        return path.endswith(('.tif', '.tiff', '.jp2', '.j2k', '.cog'))
 
     def get_asset_auth_headers(self, item: dict, href: str) -> dict:
         """Optional auth headers for direct asset access.

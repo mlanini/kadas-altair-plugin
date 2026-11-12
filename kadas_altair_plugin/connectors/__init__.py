@@ -42,6 +42,7 @@ _LAZY_IMPORTS: Dict[str, Tuple[str, str | None]] = {
         ".planetary_computer_stac",
         "PlanetaryComputerStacConnector",
     ),
+    "CustomStacConnector": (".custom_stac", "CustomStacConnector"),
 }
 
 

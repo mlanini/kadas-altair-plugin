@@ -240,10 +240,18 @@ def get_pip_install_cmd(lib_dir, dep):
     pip_retries = os.environ.get("KADAS_PIP_RETRIES", "4").strip()
     pip_timeout = os.environ.get("KADAS_PIP_TIMEOUT", "45").strip()
 
-    cmd = [
-        sys.executable,
-        "-m",
-        "pip",
+    configured_pip = os.environ.get("KADAS_PIP_EXECUTABLE", "").strip()
+    if configured_pip:
+        pip_command = [configured_pip]
+    else:
+        scripts_dir = Path(sys.executable).resolve().parent / "Scripts"
+        pip_executable = scripts_dir / ("pip.exe" if os.name == "nt" else "pip")
+        if pip_executable.is_file():
+            pip_command = [str(pip_executable)]
+        else:
+            pip_command = [sys.executable, "-m", "pip"]
+
+    cmd = pip_command + [
         "install",
         "--target",
         lib_dir,

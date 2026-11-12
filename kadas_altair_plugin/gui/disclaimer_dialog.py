@@ -17,6 +17,7 @@ from qgis.PyQt.QtWidgets import (
     QTextEdit,
     QVBoxLayout,
 )
+from .ui_theme import apply_dialog_theme, set_button_variant, set_label_role
 
 try:
     from qgis.core import QgsSettings
@@ -138,6 +139,7 @@ class DisclaimerDialog(QDialog):
         self._build_ui()
 
     def _build_ui(self) -> None:
+        apply_dialog_theme(self)
         root = QVBoxLayout(self)
         root.setSpacing(10)
 
@@ -149,23 +151,23 @@ class DisclaimerDialog(QDialog):
         title_font.setBold(True)
         title.setFont(title_font)
         title.setAlignment(Qt.AlignCenter)
+        set_label_role(title, 'title')
         root.addWidget(title)
 
         root.addWidget(self._section_label("1 - Limitation of Liability"))
         disclaimer_label = QLabel(_DISCLAIMER_TEXT)
         disclaimer_label.setWordWrap(True)
         disclaimer_label.setTextFormat(Qt.RichText)
-        disclaimer_label.setStyleSheet(
-            "QLabel { background:#f9f9f9; padding:8px; border:1px solid #ccc; "
-            "border-radius:4px; font-size:10px; }"
-        )
+        set_label_role(disclaimer_label, 'panel')
         root.addWidget(disclaimer_label)
 
         self._cb_disclaimer = QCheckBox(
             "I understand and accept that I am solely responsible for any "
             "operational use of this software."
         )
-        self._cb_disclaimer.setStyleSheet("font-weight: bold;")
+        disclaimer_font = self._cb_disclaimer.font()
+        disclaimer_font.setBold(True)
+        self._cb_disclaimer.setFont(disclaimer_font)
         self._cb_disclaimer.stateChanged.connect(self._update_ok_button)
         root.addWidget(self._cb_disclaimer)
 
@@ -179,18 +181,15 @@ class DisclaimerDialog(QDialog):
         license_edit.setReadOnly(True)
         license_edit.setPlainText(_LICENSE_TEXT)
         license_edit.setFixedHeight(140)
-        license_edit.setStyleSheet(
-            "QTextEdit { background:#f0f4f8; font-family: Consolas, "
-            "monospace; "
-            "font-size: 10px; border:1px solid #ccc; "
-            "border-radius:4px; }"
-        )
+        license_edit.setFont(QFont('Courier New', 9))
         root.addWidget(license_edit)
 
         self._cb_license = QCheckBox(
             "I have read and accept the terms of the MIT License."
         )
-        self._cb_license.setStyleSheet("font-weight: bold;")
+        license_font = self._cb_license.font()
+        license_font.setBold(True)
+        self._cb_license.setFont(license_font)
         self._cb_license.stateChanged.connect(self._update_ok_button)
         root.addWidget(self._cb_license)
 
@@ -202,7 +201,6 @@ class DisclaimerDialog(QDialog):
         self._cb_remember = QCheckBox(
             "Remember my acceptance and do not show this dialog again"
         )
-        self._cb_remember.setStyleSheet("color: #555; font-size: 10px;")
         root.addWidget(self._cb_remember)
 
         self._button_box = QDialogButtonBox(
@@ -211,6 +209,10 @@ class DisclaimerDialog(QDialog):
         self._ok_btn = self._button_box.button(QDialogButtonBox.Ok)
         self._ok_btn.setText("Accept and Continue")
         self._ok_btn.setEnabled(False)
+        set_button_variant(self._ok_btn, 'primary')
+        cancel_btn = self._button_box.button(QDialogButtonBox.Cancel)
+        if cancel_btn:
+            set_button_variant(cancel_btn, 'ghost')
         self._button_box.accepted.connect(self._on_accept)
         self._button_box.rejected.connect(self.reject)
         root.addWidget(self._button_box)
@@ -222,6 +224,7 @@ class DisclaimerDialog(QDialog):
         font.setPointSize(9)
         font.setBold(True)
         label.setFont(font)
+        set_label_role(label, 'meta')
         return label
 
     def _update_ok_button(self) -> None:

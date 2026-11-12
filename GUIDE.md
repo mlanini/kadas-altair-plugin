@@ -2,7 +2,7 @@
 
 This guide explains how to install, configure, and use the KADAS Altair plugin to search, preview, and prepare satellite imagery acquisition orders inside KADAS Albireo 2.
 
-Current documented release: v0.5.2.
+Current documented release: v0.6.1.
 
 ## What the plugin offers
 
@@ -10,16 +10,17 @@ KADAS Altair brings together multiple EO/SAR data sources in a single operationa
 - archive search and preview of satellite scenes
 - direct COG loading through GDAL and virtual file access
 - multi-provider search through STAC connectors and provider-specific services
+- a configurable Custom STAC connector
 - Search and Predict with overpass prediction and 3D orbit visualization
-- tasking-order preparation with prefill from search results
+- tasking results and order preparation with prefill from selected results
 
 ## Requirements
 
 - KADAS Albireo 2.3+ or newer
-- stable internet connectivity
+- internet access for provider searches and orbital TLE refreshes
 - access to the required provider services (mandatory in some cases)
 
-The plugin includes or naturally relies on the dependencies needed for basic operation. In offline environments or restricted networks, compatibility depends on KADAS support and the availability of remote services.
+The full ZIP bundles the Python dependencies required by the plugin. Overpass prediction can use a saved TLE cache offline while the orbital records remain within the configured age limit; provider searches still require their remote services.
 
 ## Installation
 
@@ -52,12 +53,7 @@ To build a full package, run:
 python package_plugin_full.py
 ```
 
-If you are working in CI or in an environment without dependency installation, you can use:
-
-```powershell
-$env:KADAS_SKIP_PIP = "1"
-python package_plugin_full.py
-```
+The full build installs and verifies dependencies from `kadas_altair_plugin/requirements.txt`, so the build environment must be able to reach its configured Python package index. Configure the environment's pip proxy/index settings before building when required.
 
 ## First launch
 
@@ -79,6 +75,7 @@ The plugin supports multiple providers. For immediate use:
 - Earth Search (Element84): public Sentinel and Landsat STAC access
 - Microsoft Planetary Computer: public curated STAC access for optical and fire collections
 - NASA EarthData: token or username/password workflows
+- Custom STAC: user-configured endpoint with optional Basic or Bearer authentication
 - ICEYE, Umbra, Capella, Vantor Open Data: public or commercial providers
 
 In many cases the connector is selected directly from the search interface. When a provider requires authentication, the plugin displays the required fields in the Settings section.
@@ -118,8 +115,18 @@ From a selected result, you can:
 ### swisstopo STAC
 
 - supports public STAC collections
-- exposes swisstopo collections in a selectable form
+- uses STAC API v1 and swissEO S2-SR v200 by default
+- maps a saved v100 collection selection to v200
 - generally works without credentials for public sources
+- swissEO S2-SR covers Switzerland; processing normally takes 10-24 hours,
+	and acquisitions with excessive cloud cover are not processed
+- the true-colour 10 m COG is preferred for loading; individual spectral bands
+	and quality masks remain available in the STAC item assets
+- when an item has no cloud-cover percentage in its STAC properties, the cloud
+	filter cannot assess it and retains it; the cloud mask is a separate raster
+- source attribution is required: © swisstopo, Contains modified Copernicus
+	Sentinel data [Year]. See the [swissEO S2-SR product page](https://www.swisstopo.admin.ch/en/satelliteimage-swisseo-s2-sr)
+	for current terms and product details
 
 ### JAXA Earth STAC
 
@@ -152,8 +159,8 @@ From a selected result, you can:
 
 ### Planet and OneAtlas
 
-- represent future integrations or partial/stub implementations depending on the plugin version
-- should not be considered fully operational providers without validating the deployment context
+- Planet provides archive search through the Data API and tasking operations through the Tasking API; an API key and account permissions are required.
+- OneAtlas credentials can be tested from Settings, but OneAtlas is not registered as an archive provider because search is not implemented.
 
 ## Search and Predict
 
@@ -172,7 +179,13 @@ The Search and Predict panel helps answer questions such as:
 
 ### Main features
 
-- overpass prediction using orbital models and convergence logic
+- SGP4 propagation using validated TLE records
+- point-access prediction for the center of the AOI bounding rectangle; a predicted access does not mean the whole AOI is covered or that a provider will acquire imagery
+- a 48-hour default prediction window, configurable in hours or as a date range
+- persistent orbital cache with an offline-only option; the default maximum TLE epoch offset is 72 hours and can be configured from 1 to 720 hours
+- configurable optical minimum solar elevation, initially 10 degrees
+- SAR geometric candidates are kept separate when incidence, look side, or acquisition mode cannot be verified
+- separate statuses for no predicted pass, unavailable orbital data, and partial calculations; invalid or stale TLEs do not produce synthetic prediction times
 - 3D visualization of the orbit, ground track, and swath corridor
 - historical search across supported catalogs and providers
 - busy hourglass feedback during long-running archive and overpass operations
@@ -183,6 +196,14 @@ The Search and Predict panel helps answer questions such as:
 - Archive mode: the indicator is shown while archive connectors are being queried.
 - Tasking mode: the indicator is shown while overpass prediction is being computed.
 - Mixed mode: the indicator remains visible until both archive and overpass tasks complete.
+
+### Prediction limits and diagnostics
+
+The prediction target is the center of the AOI's bounding rectangle, which may fall outside an irregular AOI. Treat results as planning opportunities for that point, not as full-area coverage or a guarantee of collection.
+
+Each satellite's diagnostics show the TLE epoch, fetch time and source, the interval actually calculated, and any reason data was unavailable. A TLE is used only within the configured epoch-offset limit. In offline-only mode, prediction is possible only when the persistent cache contains a valid record. A partially calculated interval is reported as partial rather than silently presented as a complete forecast.
+
+Optical opportunities must meet the configured solar-elevation threshold at the target point. SAR results are operational opportunities only when the sensor's acquisition mode, incidence limits and look side are known; otherwise they are shown separately as geometric candidates.
 
 ## Tasking Order
 

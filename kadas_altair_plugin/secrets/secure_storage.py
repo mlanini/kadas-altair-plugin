@@ -270,6 +270,16 @@ class SecureStorage:
                 credentials['access_token'] = access_token
             elif token:
                 credentials['access_token'] = token
+        elif service == 'custom_stac':
+            for key in ('username', 'password', 'access_token'):
+                value = self.retrieve_credential(service, key)
+                if value:
+                    credentials[key] = value
+        elif service == 'gdal_proxy':
+            for key in ('username', 'password'):
+                value = self.retrieve_credential(service, key)
+                if value:
+                    credentials[key] = value
         
         return credentials if credentials else None
 

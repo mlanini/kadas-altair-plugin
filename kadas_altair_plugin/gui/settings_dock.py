@@ -2,15 +2,18 @@
 Altair EO Data Settings Dock Widget
 """
 import importlib
+from pathlib import Path
 
 from qgis.PyQt.QtWidgets import (
     QDockWidget, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLabel, QLineEdit, QPushButton, QCheckBox, QSpinBox, QComboBox,
-    QTabWidget, QGroupBox, QFileDialog, QMessageBox, QApplication, QScrollArea
+    QTabWidget, QStackedWidget, QGroupBox, QFileDialog, QMessageBox, QApplication,
+    QScrollArea, QDoubleSpinBox
 )
-from qgis.PyQt.QtCore import QSettings, Qt, pyqtSignal
+from qgis.PyQt.QtCore import QSettings, QStandardPaths, Qt, pyqtSignal
 from qgis.PyQt.QtGui import QFont
 from ..logger import get_logger
+from .ui_theme import apply_dock_theme, set_button_variant, set_label_role, set_status_state
 
 logger = get_logger('gui.settings')
 
@@ -53,11 +56,7 @@ class SettingsDockWidget(QDockWidget):
 
         widget = QWidget()
         scroll.setWidget(widget)
-        widget.setStyleSheet(
-            "QLabel { color: #303030; }"
-            "QCheckBox { color: #303030; }"
-            "QGroupBox { color: #303030; font-weight: bold; }"
-        )
+        apply_dock_theme(widget)
         
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(6, 6, 6, 6)
@@ -71,7 +70,7 @@ class SettingsDockWidget(QDockWidget):
         header_font.setBold(True)
         header_label.setFont(header_font)
         header_label.setAlignment(Qt.AlignCenter)
-        header_label.setStyleSheet("color: #1f1f1f;")
+        set_label_role(header_label, 'title')
         layout.addWidget(header_label)
         
         # Tab widget for organized settings
@@ -81,11 +80,24 @@ class SettingsDockWidget(QDockWidget):
         # Security info label
         if self.secure_storage:
             storage_method = self.secure_storage.get_storage_method()
-            security_label = QLabel(f"🔒 Protected credentials: {storage_method}")
-            security_label.setStyleSheet("color: #00ff00; font-size: 9px; font-style: italic;")
+            security_label = QLabel(f"Protected credentials: {storage_method}")
+            set_label_role(security_label, 'meta')
             layout.addWidget(security_label)
         
-        # Build connector panels and add only those backed by available connectors.
+        # Display settings tab
+        general_tab = self._create_general_tab()
+        tab_widget.addTab(general_tab, "General")
+
+        connectors_tab = QWidget()
+        connectors_layout = QVBoxLayout(connectors_tab)
+        connector_form = QFormLayout()
+        self.connector_combo = QComboBox()
+        connector_form.addRow("Connector:", self.connector_combo)
+        connectors_layout.addLayout(connector_form)
+        self.connector_stack = QStackedWidget()
+        connectors_layout.addWidget(self.connector_stack, 1)
+
+        # Build every panel so settings fields exist, but show only available connectors.
         provider_panels = [
             ("oneatlas", "OneAtlas", self._create_oneatlas_tab),
             ("planet", "Planet", self._create_planet_tab),
@@ -102,7 +114,9 @@ class SettingsDockWidget(QDockWidget):
                 "Planetary Computer",
                 self._create_planetary_computer_stac_tab,
             ),
+            ("swisstopo_stac", "swisstopo STAC", self._create_swisstopo_stac_tab),
             ("nasa_earthdata", "NASA EarthData", self._create_nasa_tab),
+            ("custom_stac", "Custom STAC", self._create_custom_stac_tab),
             ("capella", "Capella Space", self._create_capella_tab),
             ("jilin_gaofen_stac", "Jilin-1 Gaofen", self._create_jilin_tab),
             ("jaxa_earth_stac", "JAXA Earth", self._create_jaxa_tab),
@@ -111,37 +125,56 @@ class SettingsDockWidget(QDockWidget):
         for connector_id, tab_title, builder in provider_panels:
             panel_widget = builder()
             if self._is_connector_available(connector_id):
-                tab_widget.addTab(panel_widget, tab_title)
+                self.connector_combo.addItem(tab_title, connector_id)
+                self.connector_stack.addWidget(panel_widget)
             else:
                 logger.info(
                     "Settings panel skipped (connector unavailable): %s",
                     connector_id,
                 )
 
-        # Display settings tab
-        display_tab = self._create_display_tab()
-        tab_widget.addTab(display_tab, "Display")
+        if self.connector_stack.count():
+            self.connector_combo.currentIndexChanged.connect(
+                self.connector_stack.setCurrentIndex
+            )
+        else:
+            self.connector_combo.addItem("No connectors available")
+            self.connector_combo.setEnabled(False)
+            self.connector_stack.addWidget(QLabel("No connector settings are available."))
+
+        tab_widget.addTab(connectors_tab, "Connectors")
         
         # Buttons
         button_layout = QHBoxLayout()
         
         self.save_btn = QPushButton("Save Settings")
         self.save_btn.clicked.connect(self._save_settings)
+        set_button_variant(self.save_btn, 'primary')
         button_layout.addWidget(self.save_btn)
         
         self.reset_btn = QPushButton("Reset Defaults")
         self.reset_btn.clicked.connect(self._reset_defaults)
+        set_button_variant(self.reset_btn, 'ghost')
         button_layout.addWidget(self.reset_btn)
         
         layout.addLayout(button_layout)
         
         # Status label
         self.status_label = QLabel("Settings loaded")
-        self.status_label.setStyleSheet("color: #404040; font-size: 10px;")
+        set_label_role(self.status_label, 'status')
+        set_status_state(self.status_label, 'neutral')
         layout.addWidget(self.status_label)
         
         # Load current settings
         self._load_settings()
+
+    def _set_status(self, text: str, state: str = 'neutral') -> None:
+        self.status_label.setText(text)
+        set_status_state(self.status_label, state)
+
+    def _set_inline_status(self, label, text: str, state: str = 'neutral') -> None:
+        label.setText(text)
+        set_status_state(label, state)
 
     def _is_connector_available(self, connector_id: str) -> bool:
         """Return True when the connector module/class can be imported."""
@@ -159,7 +192,12 @@ class SettingsDockWidget(QDockWidget):
                 "..connectors.planetary_computer_stac",
                 "PlanetaryComputerStacConnector",
             ),
+            "swisstopo_stac": (
+                "..connectors.swisstopo_stac",
+                "SwisstopoStacConnector",
+            ),
             "nasa_earthdata": ("..connectors.nasa_earthdata", "NasaEarthdataConnector"),
+            "custom_stac": ("..connectors.custom_stac", "CustomStacConnector"),
             "capella": ("..connectors.capella", "CapellaConnector"),
             "jilin_gaofen_stac": ("..connectors.jilin_gaofen_stac", "JilinGaofenStacConnector"),
             "jaxa_earth_stac": ("..connectors.jaxa_earth_stac", "JaxaEarthStacConnector"),
@@ -186,11 +224,11 @@ class SettingsDockWidget(QDockWidget):
         # Info label
         info_label = QLabel(
             "OneAtlas uses OAuth2 client credentials flow. Obtain your API credentials from "
-            "<a href='https://www.intelligence-airbusds.com/access-to-our-products/'>Airbus Intelligence Portal</a>."
+            "<a href='https://www.intelligence-airbusds.com/access-to-our-products/'>Airbus Intelligence Portal</a>. "
+            "Archive search is currently unavailable in this plugin; the connection test validates OAuth only."
         )
         info_label.setOpenExternalLinks(True)
         info_label.setWordWrap(True)
-        info_label.setStyleSheet("color: #404040; font-size: 9px;")
         oneatlas_layout.addRow("", info_label)
         
         # Client ID (NOT secret - should be visible)
@@ -212,9 +250,8 @@ class SettingsDockWidget(QDockWidget):
         
         # Commercial notice
         commercial_label = QLabel(
-            "⚠️ OneAtlas is a commercial service. Valid subscription required."
+            "OneAtlas is a commercial service. Valid subscription required."
         )
-        commercial_label.setStyleSheet("color: #ff9900; font-size: 10px; font-weight: bold;")
         commercial_label.setWordWrap(True)
         oneatlas_layout.addRow("", commercial_label)
         
@@ -241,7 +278,6 @@ class SettingsDockWidget(QDockWidget):
         )
         info_label.setOpenExternalLinks(True)
         info_label.setWordWrap(True)
-        info_label.setStyleSheet("color: #404040; font-size: 9px;")
         planet_layout.addRow("", info_label)
 
         # API base URL
@@ -261,7 +297,6 @@ class SettingsDockWidget(QDockWidget):
             "Override only if your tenant uses custom routing."
         )
         tasking_label.setWordWrap(True)
-        tasking_label.setStyleSheet("color: #404040; font-size: 9px;")
         planet_layout.addRow("", tasking_label)
 
         self.planet_tasking_base_url = QLineEdit()
@@ -283,11 +318,8 @@ class SettingsDockWidget(QDockWidget):
         
         # Commercial notice
         commercial_label = QLabel(
-            "⚠️ Planet is a commercial service. Valid subscription or "
+            "Planet is a commercial service. Valid subscription or "
             "trial required."
-        )
-        commercial_label.setStyleSheet(
-            "color: #ff9900; font-size: 10px; font-weight: bold;"
         )
         commercial_label.setWordWrap(True)
         planet_layout.addRow("", commercial_label)
@@ -312,7 +344,6 @@ class SettingsDockWidget(QDockWidget):
             "Configure the Discovery endpoint, credentials, and optional imagery filters here."
         )
         info_label.setWordWrap(True)
-        info_label.setStyleSheet("color: #404040; font-size: 9px;")
         vantor_layout.addRow("", info_label)
 
         self.vantor_discovery_enabled = QCheckBox("Enable Discovery API for archive search")
@@ -359,7 +390,6 @@ class SettingsDockWidget(QDockWidget):
             "Tasking API (Maxar/Vantor Tasking v2) is optional and used for order submission workflows."
         )
         tasking_info.setWordWrap(True)
-        tasking_info.setStyleSheet("color: #404040; font-size: 9px;")
         vantor_layout.addRow("", tasking_info)
 
         self.vantor_tasking_base_url = QLineEdit()
@@ -390,7 +420,6 @@ class SettingsDockWidget(QDockWidget):
             "Open-data fallback remains internal to the connector and is not configured here."
         )
         legacy_label.setWordWrap(True)
-        legacy_label.setStyleSheet("color: #805d00; font-size: 9px; font-style: italic;")
         vantor_layout.addRow("", legacy_label)
         
         # Default button
@@ -406,7 +435,6 @@ class SettingsDockWidget(QDockWidget):
         # Results display
         self.vantor_results = QLabel("")
         self.vantor_results.setWordWrap(True)
-        self.vantor_results.setStyleSheet("color: #404040; font-size: 9px; font-family: monospace;")
         vantor_layout.addRow("", self.vantor_results)
         
         layout.addWidget(vantor_group)
@@ -429,7 +457,6 @@ class SettingsDockWidget(QDockWidget):
             "Requires a valid API access token (Bearer) and optional contract/collection scope."
         )
         info_label.setWordWrap(True)
-        info_label.setStyleSheet("color: #404040; font-size: 9px;")
         iceye_layout.addRow("", info_label)
         
         # API base URL
@@ -479,7 +506,6 @@ class SettingsDockWidget(QDockWidget):
         # Results display
         self.iceye_results = QLabel("")
         self.iceye_results.setWordWrap(True)
-        self.iceye_results.setStyleSheet("color: #404040; font-size: 9px; font-family: monospace;")
         iceye_layout.addRow("", self.iceye_results)
         
         layout.addWidget(iceye_group)
@@ -501,7 +527,6 @@ class SettingsDockWidget(QDockWidget):
         )
         info_label.setOpenExternalLinks(True)
         info_label.setWordWrap(True)
-        info_label.setStyleSheet("color: #404040; font-size: 9px;")
         umbra_layout.addRow("", info_label)
 
         self.umbra_api_base_url = QLineEdit()
@@ -545,7 +570,6 @@ class SettingsDockWidget(QDockWidget):
 
         self.umbra_results = QLabel("")
         self.umbra_results.setWordWrap(True)
-        self.umbra_results.setStyleSheet("color: #404040; font-size: 9px; font-family: monospace;")
         umbra_layout.addRow("", self.umbra_results)
 
         layout.addWidget(umbra_group)
@@ -567,7 +591,6 @@ class SettingsDockWidget(QDockWidget):
             "results expose direct COG assets for map loading."
         )
         info.setWordWrap(True)
-        info.setStyleSheet("color: #404040; font-size: 9px;")
         form.addRow("", info)
 
         self.element84_stac_api_url = QLineEdit()
@@ -581,7 +604,6 @@ class SettingsDockWidget(QDockWidget):
             "(for example sentinel-2-l2a, sentinel-1-grd, landsat-c2-l2)."
         )
         collections_label.setWordWrap(True)
-        collections_label.setStyleSheet("color: #404040; font-size: 9px;")
         form.addRow("Scope:", collections_label)
 
         self.element84_stac_timeout = QSpinBox()
@@ -600,9 +622,6 @@ class SettingsDockWidget(QDockWidget):
 
         self.element84_stac_results = QLabel("")
         self.element84_stac_results.setWordWrap(True)
-        self.element84_stac_results.setStyleSheet(
-            "color: #404040; font-size: 9px; font-family: monospace;"
-        )
         form.addRow("", self.element84_stac_results)
 
         layout.addWidget(group)
@@ -623,7 +642,6 @@ class SettingsDockWidget(QDockWidget):
             "(visual > render > preview > first COG)."
         )
         info.setWordWrap(True)
-        info.setStyleSheet("color: #404040; font-size: 9px;")
         form.addRow("", info)
 
         self.planetary_computer_stac_api_url = QLineEdit()
@@ -636,7 +654,6 @@ class SettingsDockWidget(QDockWidget):
             "Default scope: optical satellite collections with RGB-ready assets."
         )
         collections_label.setWordWrap(True)
-        collections_label.setStyleSheet("color: #404040; font-size: 9px;")
         form.addRow("Scope:", collections_label)
 
         self.planetary_computer_stac_timeout = QSpinBox()
@@ -655,10 +672,37 @@ class SettingsDockWidget(QDockWidget):
 
         self.planetary_computer_stac_results = QLabel("")
         self.planetary_computer_stac_results.setWordWrap(True)
-        self.planetary_computer_stac_results.setStyleSheet(
-            "color: #404040; font-size: 9px; font-family: monospace;"
-        )
         form.addRow("", self.planetary_computer_stac_results)
+
+        layout.addWidget(group)
+        layout.addStretch()
+        return widget
+
+    def _create_swisstopo_stac_tab(self):
+        """Create swisstopo STAC settings tab."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+
+        group = QGroupBox("swisstopo STAC")
+        form = QFormLayout(group)
+
+        info = QLabel(
+            "Open-data swisstopo STAC endpoint used for archive search only. "
+            "Default uses the current v1 collections root; the connector "
+            "automatically probes fallback roots when needed."
+        )
+        info.setWordWrap(True)
+        form.addRow("", info)
+
+        self.swisstopo_stac_api_root = QLineEdit()
+        self.swisstopo_stac_api_root.setPlaceholderText(
+            "https://data.geo.admin.ch/api/stac/v1/collections"
+        )
+        form.addRow("Collections API Root:", self.swisstopo_stac_api_root)
+
+        default_btn = QPushButton("Restore Defaults")
+        default_btn.clicked.connect(self._restore_default_swisstopo_stac)
+        form.addRow("", default_btn)
 
         layout.addWidget(group)
         layout.addStretch()
@@ -677,7 +721,6 @@ class SettingsDockWidget(QDockWidget):
             "Provide your API base URL and Bearer token to enable archive search."
         )
         info_label.setWordWrap(True)
-        info_label.setStyleSheet("color: #404040; font-size: 9px;")
         capella_layout.addRow("", info_label)
 
         self.capella_api_base_url = QLineEdit()
@@ -707,9 +750,6 @@ class SettingsDockWidget(QDockWidget):
 
         self.capella_results = QLabel("")
         self.capella_results.setWordWrap(True)
-        self.capella_results.setStyleSheet(
-            "color: #404040; font-size: 9px; font-family: monospace;"
-        )
         capella_layout.addRow("", self.capella_results)
 
         layout.addWidget(capella_group)
@@ -749,14 +789,8 @@ class SettingsDockWidget(QDockWidget):
             self.capella_results.setText(
                 f"\u2705 Connected\nCollections discovered: {len(collections)}"
             )
-            self.capella_results.setStyleSheet(
-                "color: #00ff00; font-size: 9px; font-family: monospace;"
-            )
         except Exception as exc:
             self.capella_results.setText(f"\u274c {exc}")
-            self.capella_results.setStyleSheet(
-                "color: #ff6b6b; font-size: 9px; font-family: monospace;"
-            )
 
     def _create_nasa_tab(self):
         """Create NASA EarthData settings tab"""
@@ -773,16 +807,14 @@ class SettingsDockWidget(QDockWidget):
             "GEDI, MODIS, Landsat, Sentinel, VIIRS, and more. Requires free account."
         )
         info_label.setWordWrap(True)
-        info_label.setStyleSheet("color: #404040; font-size: 9px;")
         nasa_layout.addRow("", info_label)
         
         # Registration link
         reg_label = QLabel(
-            "📖 <a href='https://urs.earthdata.nasa.gov/'>Register for NASA Earthdata Account</a> | "
+            "<a href='https://urs.earthdata.nasa.gov/'>Register for NASA Earthdata Account</a> | "
             "<a href='https://earthdata.nasa.gov/'>NASA Earthdata Portal</a>"
         )
         reg_label.setOpenExternalLinks(True)
-        reg_label.setStyleSheet("color: #4CAF50; font-size: 9px;")
         nasa_layout.addRow("", reg_label)
         
         # Username
@@ -809,7 +841,6 @@ class SettingsDockWidget(QDockWidget):
             "Credentials are saved securely when available."
         )
         cred_info.setWordWrap(True)
-        cred_info.setStyleSheet("color: #ffaa00; font-size: 9px; font-style: italic;")
         nasa_layout.addRow("", cred_info)
         
         # Catalog cache timeout
@@ -820,25 +851,21 @@ class SettingsDockWidget(QDockWidget):
         nasa_layout.addRow("Catalog Cache:", self.nasa_cache_timeout)
         
         cache_info = QLabel("How long to cache the NASA dataset catalog locally")
-        cache_info.setStyleSheet("color: gray; font-size: 8px; font-style: italic;")
         nasa_layout.addRow("", cache_info)
         
         # Authentication status
         self.nasa_auth_status = QLabel("")
         self.nasa_auth_status.setWordWrap(True)
-        self.nasa_auth_status.setStyleSheet("color: #404040; font-size: 9px;")
         nasa_layout.addRow("Auth Status:", self.nasa_auth_status)
         
         # Test credentials button
         test_btn = QPushButton("Test Credentials")
         test_btn.clicked.connect(self._test_nasa_connection)
-        test_btn.setStyleSheet("background-color: #0B3D91; color: white; font-weight: bold;")
         nasa_layout.addRow("", test_btn)
         
         # Results display
         self.nasa_results = QLabel("")
         self.nasa_results.setWordWrap(True)
-        self.nasa_results.setStyleSheet("color: #404040; font-size: 9px; font-family: monospace;")
         nasa_layout.addRow("", self.nasa_results)
         
         layout.addWidget(nasa_group)
@@ -857,12 +884,61 @@ class SettingsDockWidget(QDockWidget):
             "• HLS: Harmonized Landsat Sentinel-2\n"
             "• And 9,000+ more Earth science datasets"
         )
-        datasets_info.setStyleSheet("color: #404040; font-size: 9px;")
         info_layout.addWidget(datasets_info)
         
         layout.addWidget(info_group)
         layout.addStretch()
         
+        return widget
+
+    def _create_custom_stac_tab(self):
+        """Create settings for a user-defined STAC API endpoint."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        group = QGroupBox("Custom STAC API")
+        form = QFormLayout(group)
+
+        info = QLabel(
+            "Connect to any STAC API endpoint. Use a Bearer token or HTTP Basic "
+            "username and password when required."
+        )
+        info.setWordWrap(True)
+        form.addRow("", info)
+
+        self.custom_stac_endpoint = QLineEdit()
+        self.custom_stac_endpoint.setPlaceholderText("https://example.com/stac")
+        form.addRow("Endpoint*:", self.custom_stac_endpoint)
+
+        self.custom_stac_username = QLineEdit()
+        self.custom_stac_username.setPlaceholderText("Optional Basic auth username")
+        form.addRow("Username:", self.custom_stac_username)
+
+        self.custom_stac_password = QLineEdit()
+        self.custom_stac_password.setPlaceholderText("Optional Basic auth password")
+        self.custom_stac_password.setEchoMode(QLineEdit.Password)
+        form.addRow("Password:", self.custom_stac_password)
+
+        self.custom_stac_access_token = QLineEdit()
+        self.custom_stac_access_token.setPlaceholderText("Optional Bearer token")
+        self.custom_stac_access_token.setEchoMode(QLineEdit.Password)
+        form.addRow("Access Token:", self.custom_stac_access_token)
+
+        self.custom_stac_timeout = QSpinBox()
+        self.custom_stac_timeout.setRange(5, 120)
+        self.custom_stac_timeout.setValue(30)
+        self.custom_stac_timeout.setSuffix(" s")
+        form.addRow("Request Timeout:", self.custom_stac_timeout)
+
+        self.custom_stac_status = QLabel("Not verified")
+        self.custom_stac_status.setWordWrap(True)
+        form.addRow("Connection:", self.custom_stac_status)
+
+        test_button = QPushButton("Test Connection")
+        test_button.clicked.connect(self._test_custom_stac_connection)
+        form.addRow("", test_button)
+
+        layout.addWidget(group)
+        layout.addStretch()
         return widget
 
     # ------------------------------------------------------------------
@@ -882,7 +958,6 @@ class SettingsDockWidget(QDockWidget):
             "for your Jilin tenant."
         )
         info.setWordWrap(True)
-        info.setStyleSheet("color: #404040; font-size: 9px;")
         form.addRow("", info)
 
         self.jilin_catalog_base_url = QLineEdit()
@@ -900,7 +975,6 @@ class SettingsDockWidget(QDockWidget):
 
         tasking_label = QLabel("Optional Tasking API configuration")
         tasking_label.setWordWrap(True)
-        tasking_label.setStyleSheet("color: #404040; font-size: 9px;")
         form.addRow("", tasking_label)
 
         self.jilin_tasking_base_url = QLineEdit()
@@ -926,7 +1000,6 @@ class SettingsDockWidget(QDockWidget):
 
         self.jilin_results = QLabel("")
         self.jilin_results.setWordWrap(True)
-        self.jilin_results.setStyleSheet("color: #404040; font-size: 9px; font-family: monospace;")
         form.addRow("", self.jilin_results)
 
         layout.addWidget(group)
@@ -952,7 +1025,6 @@ class SettingsDockWidget(QDockWidget):
             "for broker/partner workflows."
         )
         info.setWordWrap(True)
-        info.setStyleSheet("color: #303030; font-size: 9px;")
         form.addRow("", info)
 
         self.jaxa_catalog_url = QLineEdit()
@@ -985,7 +1057,8 @@ class SettingsDockWidget(QDockWidget):
         form.addRow("", test_btn)
 
         self.jaxa_status_label = QLabel("")
-        self.jaxa_status_label.setStyleSheet("font-size: 9px;")
+        set_label_role(self.jaxa_status_label, 'status')
+        set_status_state(self.jaxa_status_label, 'neutral')
         form.addRow("", self.jaxa_status_label)
 
         layout.addWidget(group)
@@ -1015,20 +1088,17 @@ class SettingsDockWidget(QDockWidget):
 
             results, _ = connector.search(limit=3)
             self.jilin_results.setText(
-                f"✅ Jilin endpoint reachable\n"
+                f"Jilin endpoint reachable\n"
                 f"Sample items: {len(results)}\n"
                 f"Tasking endpoint: {connector.tasking_url() or '(not configured)'}"
             )
-            self.jilin_results.setStyleSheet("color: #226633; font-size: 9px; font-family: monospace;")
         except Exception as exc:
-            self.jilin_results.setText(f"❌ Jilin test failed\nError: {exc}")
-            self.jilin_results.setStyleSheet("color: #ff6666; font-size: 9px; font-family: monospace;")
+            self.jilin_results.setText(f"Jilin test failed\nError: {exc}")
             logger.warning(f"Jilin catalog test failed: {exc}")
 
     def _test_jaxa_connection(self):
         """Verify access to the JAXA Earth STAC catalog."""
-        self.jaxa_status_label.setText("Testing...")
-        self.jaxa_status_label.setStyleSheet("color: #88ccff; font-size: 9px;")
+        self._set_inline_status(self.jaxa_status_label, "Testing...", 'info')
         try:
             from ..connectors.jaxa_earth_stac import JaxaEarthStacConnector
             connector = JaxaEarthStacConnector()
@@ -1042,24 +1112,100 @@ class SettingsDockWidget(QDockWidget):
             }):
                 collections = connector.get_collections()
                 n = len(collections)
-                self.jaxa_status_label.setText(
-                    f"✅ Catalog reachable - {n} collection(s) found\n"
-                    f"Tasking endpoint: {connector.tasking_url() or '(not configured)'}"
+                self._set_inline_status(
+                    self.jaxa_status_label,
+                    f"Catalog reachable - {n} collection(s) found\n"
+                    f"Tasking endpoint: {connector.tasking_url() or '(not configured)'}",
+                    'success',
                 )
-                self.jaxa_status_label.setStyleSheet("color: #00cc66; font-size: 9px;")
                 logger.info(f"JAXA Earth catalog test OK: {n} collections")
             else:
-                self.jaxa_status_label.setText("❌ Could not reach JAXA catalog")
-                self.jaxa_status_label.setStyleSheet("color: #ff6666; font-size: 9px;")
+                self._set_inline_status(self.jaxa_status_label, "Could not reach JAXA catalog", 'error')
         except Exception as exc:
-            self.jaxa_status_label.setText(f"❌ Error: {exc}")
-            self.jaxa_status_label.setStyleSheet("color: #ff6666; font-size: 9px;")
+            self._set_inline_status(self.jaxa_status_label, f"Error: {exc}", 'error')
             logger.warning(f"JAXA catalog test failed: {exc}")
 
-    def _create_display_tab(self):
-        """Create display settings tab"""
+    def _create_general_tab(self):
+        """Create general connection and display settings tab."""
         widget = QWidget()
         layout = QVBoxLayout(widget)
+
+        connection_group = QGroupBox("GDAL / WCS Connections")
+        connection_form = QFormLayout(connection_group)
+
+        proxy_info = QLabel(
+            "An empty proxy uses the system proxy, following KADAS GDAL settings."
+        )
+        proxy_info.setWordWrap(True)
+        connection_form.addRow("", proxy_info)
+
+        self.gdal_proxy_address = QLineEdit()
+        self.gdal_proxy_address.setPlaceholderText("host:port (optional)")
+        connection_form.addRow("GDAL HTTP Proxy:", self.gdal_proxy_address)
+
+        self.gdal_proxy_username = QLineEdit()
+        connection_form.addRow("Proxy Username:", self.gdal_proxy_username)
+
+        self.gdal_proxy_password = QLineEdit()
+        self.gdal_proxy_password.setEchoMode(QLineEdit.Password)
+        connection_form.addRow("Proxy Password:", self.gdal_proxy_password)
+
+        self.gdal_proxy_auth = QComboBox()
+        self.gdal_proxy_auth.addItem("Default", "")
+        for auth_method in ("BASIC", "NTLM", "NEGOTIATE", "ANY"):
+            self.gdal_proxy_auth.addItem(auth_method, auth_method)
+        connection_form.addRow("Proxy Authentication:", self.gdal_proxy_auth)
+
+        self.connection_timeout = QSpinBox()
+        self.connection_timeout.setRange(5, 600)
+        self.connection_timeout.setValue(60)
+        self.connection_timeout.setSuffix(" s")
+        connection_form.addRow("Default Request Timeout:", self.connection_timeout)
+        layout.addWidget(connection_group)
+
+        prediction_group = QGroupBox("Orbit Prediction")
+        prediction_form = QFormLayout(prediction_group)
+
+        self.prediction_horizon_hours = QSpinBox()
+        self.prediction_horizon_hours.setRange(1, 2880)
+        self.prediction_horizon_hours.setSuffix(" h")
+        prediction_form.addRow("Prediction Horizon:", self.prediction_horizon_hours)
+
+        self.optical_min_sun_elevation = QDoubleSpinBox()
+        self.optical_min_sun_elevation.setRange(0, 90)
+        self.optical_min_sun_elevation.setDecimals(1)
+        self.optical_min_sun_elevation.setSuffix(" deg")
+        prediction_form.addRow(
+            "Optical Min. Sun Elevation:", self.optical_min_sun_elevation
+        )
+
+        self.max_tle_epoch_offset = QSpinBox()
+        self.max_tle_epoch_offset.setRange(1, 720)
+        self.max_tle_epoch_offset.setSuffix(" h")
+        prediction_form.addRow(
+            "Advanced: Max. TLE Epoch Offset:", self.max_tle_epoch_offset
+        )
+        layout.addWidget(prediction_group)
+
+        cache_group = QGroupBox("KADAS WCS Cache")
+        cache_form = QFormLayout(cache_group)
+        cache_info = QLabel(
+            "KADAS stores WCS responses in a temporary GDAL cache and removes it "
+            "at application startup and shutdown. KADAS does not configure a size cap."
+        )
+        cache_info.setWordWrap(True)
+        cache_form.addRow("", cache_info)
+
+        cache_dir = Path(
+            QStandardPaths.writableLocation(QStandardPaths.CacheLocation)
+        ) / "wcs_cache"
+        self.wcs_cache_path = QLineEdit(str(cache_dir))
+        self.wcs_cache_path.setReadOnly(True)
+        cache_form.addRow("Cache Path:", self.wcs_cache_path)
+        self.wcs_cache_size = QLabel("0 MB")
+        cache_form.addRow("Current Size:", self.wcs_cache_size)
+        self._refresh_wcs_cache_size(cache_dir)
+        layout.addWidget(cache_group)
         
         # Download settings group
         download_group = QGroupBox("Download")
@@ -1082,7 +1228,6 @@ class SettingsDockWidget(QDockWidget):
             "If not set, you'll be prompted to select a folder each time."
         )
         folder_info.setWordWrap(True)
-        folder_info.setStyleSheet("color: gray; font-size: 9px; font-style: italic;")
         download_layout.addRow("", folder_info)
         
         layout.addWidget(download_group)
@@ -1125,7 +1270,6 @@ class SettingsDockWidget(QDockWidget):
             "• Errors Only: Only warnings and errors"
         )
         log_info.setWordWrap(True)
-        log_info.setStyleSheet("color: gray; font-size: 9px; font-style: italic;")
         logging_layout.addRow("", log_info)
         
         # Log file location button
@@ -1137,6 +1281,19 @@ class SettingsDockWidget(QDockWidget):
         layout.addStretch()
         
         return widget
+
+    def _refresh_wcs_cache_size(self, cache_dir: Path) -> None:
+        total_bytes = 0
+        try:
+            if cache_dir.is_dir():
+                total_bytes = sum(
+                    path.stat().st_size
+                    for path in cache_dir.rglob('*')
+                    if path.is_file()
+                )
+        except OSError as exc:
+            logger.debug("Unable to measure KADAS WCS cache: %s", exc)
+        self.wcs_cache_size.setText(f"{total_bytes / (1024 * 1024):.1f} MB")
     
     def _browse_download_folder(self):
         """Open folder selection dialog for download folder"""
@@ -1158,6 +1315,48 @@ class SettingsDockWidget(QDockWidget):
 
     def _load_settings(self):
         """Load settings from QSettings and SecureStorage"""
+        # General connection settings
+        self.connection_timeout.setValue(
+            self.settings.value(
+                f"{self.SETTINGS_PREFIX}default_connection_timeout",
+                60,
+                type=int,
+            )
+        )
+        self.gdal_proxy_address.setText(
+            self.settings.value("proxy/gdalHttpProxy", "")
+        )
+        auth_index = self.gdal_proxy_auth.findData(
+            self.settings.value("proxy/gdalProxyAuth", "")
+        )
+        if auth_index >= 0:
+            self.gdal_proxy_auth.setCurrentIndex(auth_index)
+
+        proxy_credentials = (
+            self.secure_storage.get_credentials('gdal_proxy')
+            if self.secure_storage else {}
+        ) or {}
+        self.gdal_proxy_username.setText(proxy_credentials.get('username', ''))
+        self.gdal_proxy_password.setText(proxy_credentials.get('password', ''))
+        if not proxy_credentials:
+            legacy_userpwd = str(
+                self.settings.value("proxy/gdalProxyUserPwd", "") or ""
+            )
+            username, separator, password = legacy_userpwd.partition(':')
+            if separator:
+                self.gdal_proxy_username.setText(username)
+                self.gdal_proxy_password.setText(password)
+
+        self.prediction_horizon_hours.setValue(
+            self.settings.value(f"{self.SETTINGS_PREFIX}predict_hours", 48, type=int)
+        )
+        self.optical_min_sun_elevation.setValue(
+            self.settings.value(f"{self.SETTINGS_PREFIX}predict_min_sun", 10.0, type=float)
+        )
+        self.max_tle_epoch_offset.setValue(
+            self.settings.value(f"{self.SETTINGS_PREFIX}predict_tle_age", 72, type=int)
+        )
+
         # Logging
         log_level = self.settings.value(f"{self.SETTINGS_PREFIX}log_level", "INFO")
         index = self.log_level_combo.findData(log_level)
@@ -1177,7 +1376,10 @@ class SettingsDockWidget(QDockWidget):
         self.max_results.setEnabled(self.limit_results_check.isChecked())
         
         # Download folder
-        download_folder = self.settings.value("altair/download_folder", "")
+        download_folder = self.settings.value(
+            f"{self.SETTINGS_PREFIX}download_folder",
+            self.settings.value("altair/download_folder", ""),
+        )
         if download_folder:
             self.download_folder.setText(download_folder)
         
@@ -1344,9 +1546,23 @@ class SettingsDockWidget(QDockWidget):
                     type=int,
                 )
             )
+
+        if hasattr(self, 'swisstopo_stac_api_root'):
+            self.swisstopo_stac_api_root.setText(
+                self.settings.value(
+                    f"{self.SETTINGS_PREFIX}swisstopo_stac_api_root",
+                        'https://data.geo.admin.ch/api/stac/v1/collections'
+                )
+            )
         
         # NASA EarthData
-        nasa_username = self.settings.value("altair/nasa_username", "")
+        nasa_username = self.settings.value(
+            f"{self.SETTINGS_PREFIX}nasa_username",
+            self.settings.value(
+                "altair/nasa_earthdata_username",
+                self.settings.value("altair/nasa_username", ""),
+            ),
+        )
         if nasa_username:
             self.nasa_username.setText(nasa_username)
         
@@ -1360,10 +1576,22 @@ class SettingsDockWidget(QDockWidget):
                 )
         else:
             # Fallback: load from QSettings
-            nasa_password = self.settings.value("altair/nasa_password", "")
+            nasa_password = self.settings.value(
+                f"{self.SETTINGS_PREFIX}nasa_password",
+                self.settings.value(
+                    "altair/nasa_earthdata_password",
+                    self.settings.value("altair/nasa_password", ""),
+                ),
+            )
             if nasa_password:
                 self.nasa_password.setText(nasa_password)
-            nasa_token = self.settings.value("altair/nasa_access_token", "")
+            nasa_token = self.settings.value(
+                f"{self.SETTINGS_PREFIX}nasa_access_token",
+                self.settings.value(
+                    "altair/nasa_earthdata_token",
+                    self.settings.value("altair/nasa_access_token", ""),
+                ),
+            )
             if nasa_token:
                 self.nasa_access_token.setText(nasa_token)
         
@@ -1374,7 +1602,28 @@ class SettingsDockWidget(QDockWidget):
         # Do not auto-validate NASA credentials on settings load.
         # Validation is network-bound and should be user-triggered via Test Credentials.
         self.nasa_auth_status.setText("Not verified (click Test Credentials)")
-        self.nasa_auth_status.setStyleSheet("color: #404040; font-size: 9px;")
+
+        # Custom STAC
+        self.custom_stac_endpoint.setText(
+            self.settings.value(f"{self.SETTINGS_PREFIX}custom_stac_endpoint", "")
+        )
+        self.custom_stac_timeout.setValue(
+            self.settings.value(
+                f"{self.SETTINGS_PREFIX}custom_stac_timeout", 30, type=int
+            )
+        )
+        custom_stac_creds = {}
+        if self.secure_storage:
+            custom_stac_creds = self.secure_storage.get_credentials('custom_stac') or {}
+        else:
+            custom_stac_creds = {
+                key: self.settings.value(f"{self.SETTINGS_PREFIX}custom_stac_{key}", "")
+                for key in ('username', 'password', 'access_token')
+            }
+        self.custom_stac_username.setText(custom_stac_creds.get('username', ''))
+        self.custom_stac_password.setText(custom_stac_creds.get('password', ''))
+        self.custom_stac_access_token.setText(custom_stac_creds.get('access_token', ''))
+        self.custom_stac_status.setText("Not verified (click Test Connection)")
 
         # Capella API
         self.capella_api_base_url.setText(
@@ -1459,6 +1708,53 @@ class SettingsDockWidget(QDockWidget):
 
     def _save_settings(self):
         """Save settings to QSettings and SecureStorage"""
+        self.settings.setValue(
+            f"{self.SETTINGS_PREFIX}default_connection_timeout",
+            self.connection_timeout.value(),
+        )
+        self.settings.setValue(
+            "proxy/gdalHttpProxy",
+            self.gdal_proxy_address.text().strip(),
+        )
+        self.settings.setValue(
+            "proxy/gdalProxyAuth",
+            self.gdal_proxy_auth.currentData() or "",
+        )
+
+        proxy_credentials = {
+            'username': self.gdal_proxy_username.text().strip(),
+            'password': self.gdal_proxy_password.text(),
+        }
+        self.settings.setValue(
+            f"{self.SETTINGS_PREFIX}predict_hours",
+            self.prediction_horizon_hours.value(),
+        )
+        self.settings.setValue(
+            f"{self.SETTINGS_PREFIX}predict_min_sun",
+            self.optical_min_sun_elevation.value(),
+        )
+        self.settings.setValue(
+            f"{self.SETTINGS_PREFIX}predict_tle_age",
+            self.max_tle_epoch_offset.value(),
+        )
+        if self.secure_storage:
+            for key, value in proxy_credentials.items():
+                if value:
+                    self.secure_storage.store_credential('gdal_proxy', key, value)
+                else:
+                    self.secure_storage.delete_credential('gdal_proxy', key)
+            self.settings.remove("proxy/gdalProxyUserPwd")
+        else:
+            userpwd = (
+                f"{proxy_credentials['username']}:{proxy_credentials['password']}"
+                if proxy_credentials['username'] or proxy_credentials['password']
+                else ""
+            )
+            if userpwd:
+                self.settings.setValue("proxy/gdalProxyUserPwd", userpwd)
+            else:
+                self.settings.remove("proxy/gdalProxyUserPwd")
+
         # Logging
         log_level = self.log_level_combo.currentData()
         self.settings.setValue(
@@ -1488,9 +1784,14 @@ class SettingsDockWidget(QDockWidget):
         # Download folder
         download_folder = self.download_folder.text().strip()
         if download_folder:
-            self.settings.setValue("altair/download_folder", download_folder)
+            self.settings.setValue(
+                f"{self.SETTINGS_PREFIX}download_folder",
+                download_folder,
+            )
+            self.settings.remove("altair/download_folder")
             logger.info(f"Download folder set to: {download_folder}")
         else:
+            self.settings.remove(f"{self.SETTINGS_PREFIX}download_folder")
             self.settings.remove("altair/download_folder")
             logger.info("Download folder cleared")
         
@@ -1677,6 +1978,12 @@ class SettingsDockWidget(QDockWidget):
                 f"{self.SETTINGS_PREFIX}planetary_computer_stac_timeout",
                 self.planetary_computer_stac_timeout.value()
             )
+
+        if hasattr(self, 'swisstopo_stac_api_root'):
+            self.settings.setValue(
+                f"{self.SETTINGS_PREFIX}swisstopo_stac_api_root",
+                self.swisstopo_stac_api_root.text().strip()
+            )
         
         # NASA EarthData
         nasa_username = self.nasa_username.text().strip()
@@ -1684,7 +1991,10 @@ class SettingsDockWidget(QDockWidget):
         nasa_access_token = self.nasa_access_token.text().strip()
         
         if nasa_username or nasa_password or nasa_access_token:
-            self.settings.setValue("altair/nasa_username", nasa_username)
+            self.settings.setValue(
+                f"{self.SETTINGS_PREFIX}nasa_username",
+                nasa_username,
+            )
             # Save sensitive fields to secure storage
             if self.secure_storage:
                 nasa_payload = {}
@@ -1698,16 +2008,68 @@ class SettingsDockWidget(QDockWidget):
                 logger.info("NASA EarthData credentials saved to secure storage")
             else:
                 # Fallback: save sensitive values to QSettings (less secure)
-                self.settings.setValue("altair/nasa_password", nasa_password)
-                self.settings.setValue("altair/nasa_access_token", nasa_access_token)
+                self.settings.setValue(
+                    f"{self.SETTINGS_PREFIX}nasa_password",
+                    nasa_password,
+                )
+                self.settings.setValue(
+                    f"{self.SETTINGS_PREFIX}nasa_access_token",
+                    nasa_access_token,
+                )
                 logger.warning("NASA EarthData credentials saved to QSettings (secure storage not available)")
-        else:
+
+            # Cleanup legacy keys after migrating to AltairEOData/*
             self.settings.remove("altair/nasa_username")
             self.settings.remove("altair/nasa_password")
             self.settings.remove("altair/nasa_access_token")
+            self.settings.remove("altair/nasa_earthdata_username")
+            self.settings.remove("altair/nasa_earthdata_password")
+            self.settings.remove("altair/nasa_earthdata_token")
+        else:
+            self.settings.remove(f"{self.SETTINGS_PREFIX}nasa_username")
+            self.settings.remove(f"{self.SETTINGS_PREFIX}nasa_password")
+            self.settings.remove(f"{self.SETTINGS_PREFIX}nasa_access_token")
+            self.settings.remove("altair/nasa_username")
+            self.settings.remove("altair/nasa_password")
+            self.settings.remove("altair/nasa_access_token")
+            self.settings.remove("altair/nasa_earthdata_username")
+            self.settings.remove("altair/nasa_earthdata_password")
+            self.settings.remove("altair/nasa_earthdata_token")
             if self.secure_storage:
                 self.secure_storage.store_credentials('nasa_earthdata', {})
             logger.info("NASA EarthData credentials cleared")
+
+        # Custom STAC
+        self.settings.setValue(
+            f"{self.SETTINGS_PREFIX}custom_stac_endpoint",
+            self.custom_stac_endpoint.text().strip(),
+        )
+        self.settings.setValue(
+            f"{self.SETTINGS_PREFIX}custom_stac_timeout",
+            self.custom_stac_timeout.value(),
+        )
+        custom_stac_payload = {
+            'username': self.custom_stac_username.text().strip(),
+            'password': self.custom_stac_password.text(),
+            'access_token': self.custom_stac_access_token.text().strip(),
+        }
+        if self.secure_storage:
+            for key, value in custom_stac_payload.items():
+                if value:
+                    self.secure_storage.store_credential('custom_stac', key, value)
+                else:
+                    self.secure_storage.delete_credential('custom_stac', key)
+        else:
+            for key, value in custom_stac_payload.items():
+                setting_key = f"{self.SETTINGS_PREFIX}custom_stac_{key}"
+                if value:
+                    self.settings.setValue(setting_key, value)
+                else:
+                    self.settings.remove(setting_key)
+            logger.warning(
+                "Custom STAC credentials saved to QSettings "
+                "(secure storage not available)"
+            )
 
         # Capella API
         self.settings.setValue(
@@ -1800,9 +2162,14 @@ class SettingsDockWidget(QDockWidget):
         
         # Sync settings
         self.settings.sync()
+
+        try:
+            from ..utilities.kadas_network_settings import apply_gdal_proxy_settings
+            apply_gdal_proxy_settings(self.secure_storage)
+        except Exception as exc:
+            logger.warning("Could not apply GDAL proxy settings: %s", exc)
         
-        self.status_label.setText("Settings saved successfully")
-        self.status_label.setStyleSheet("color: green; font-size: 10px;")
+        self._set_status("Settings saved successfully", 'success')
         
         # Emit signal so main dock can refresh collections if needed
         self.settings_saved.emit()
@@ -1826,6 +2193,14 @@ class SettingsDockWidget(QDockWidget):
         # Display
         self.auto_zoom.setChecked(True)
         self.max_results.setValue(100)
+        self.connection_timeout.setValue(60)
+        self.gdal_proxy_address.clear()
+        self.gdal_proxy_username.clear()
+        self.gdal_proxy_password.clear()
+        self.gdal_proxy_auth.setCurrentIndex(0)
+        self.prediction_horizon_hours.setValue(48)
+        self.optical_min_sun_elevation.setValue(10.0)
+        self.max_tle_epoch_offset.setValue(72)
         
         # Planet
         self._restore_default_planet()
@@ -1847,16 +2222,25 @@ class SettingsDockWidget(QDockWidget):
 
         # Planetary Computer
         self._restore_default_planetary_computer_stac()
+
+        # swisstopo STAC
+        self._restore_default_swisstopo_stac()
         
         # Jilin and JAXA
         self._restore_default_jilin()
         self._restore_default_jaxa()
 
+        self.custom_stac_endpoint.clear()
+        self.custom_stac_username.clear()
+        self.custom_stac_password.clear()
+        self.custom_stac_access_token.clear()
+        self.custom_stac_timeout.setValue(30)
+        self.custom_stac_status.setText("Not verified")
+
         # Copernicus
         self._restore_default_copernicus()
         
-        self.status_label.setText("Settings reset to default values")
-        self.status_label.setStyleSheet("color: blue; font-size: 10px;")
+        self._set_status("Settings reset to default values", 'info')
     
     def _open_log_location(self):
         """Open the directory containing the log file"""
@@ -1974,7 +2358,7 @@ class SettingsDockWidget(QDockWidget):
 
             result_count = len(results or [])
             result_text = (
-                f"✅ Discovery request successful\n"
+                f"Discovery request successful\n"
                 f"Response time: {response_time_ms} ms\n"
                 f"Endpoint: {base_url.rstrip('/')}{payload['discovery_search_path']}\n"
                 f"Collections filter: {', '.join(collections) if collections else '(none)'}\n"
@@ -1988,16 +2372,14 @@ class SettingsDockWidget(QDockWidget):
                     result_text += f"  • {item.get('id', 'unknown')}\n"
 
             self.vantor_results.setText(result_text)
-            self.vantor_results.setStyleSheet("color: #226633; font-size: 9px; font-family: monospace;")
             logger.info(f"Vantor Discovery test successful: {result_count} sample result(s)")
 
         except Exception as e:
             logger.error(f"Vantor Discovery connection test error: {e}")
             self.vantor_results.setText(
-                f"❌ Discovery test failed\n"
+                f"Discovery test failed\n"
                 f"Error: {str(e)}"
             )
-            self.vantor_results.setStyleSheet("color: #ff6666; font-size: 9px; font-family: monospace;")
     
     def _test_oneatlas_connection(self):
         """Test OneAtlas authentication"""
@@ -2028,7 +2410,7 @@ class SettingsDockWidget(QDockWidget):
                 QMessageBox.information(
                     self,
                     "Connection Successful",
-                    "✅ OneAtlas authentication successful!\n\n"
+                    "OneAtlas authentication successful!\n\n"
                     "Your credentials are valid and have been verified."
                 )
                 logger.info("OneAtlas connection test successful")
@@ -2036,7 +2418,7 @@ class SettingsDockWidget(QDockWidget):
                 QMessageBox.warning(
                     self,
                     "Authentication Failed",
-                    "❌ OneAtlas authentication failed.\n\n"
+                    "OneAtlas authentication failed.\n\n"
                     "Please check your credentials and try again.\n"
                     "Ensure you have an active OneAtlas subscription."
                 )
@@ -2084,7 +2466,7 @@ class SettingsDockWidget(QDockWidget):
                 QMessageBox.information(
                     self,
                     'API Key Valid',
-                    '✅ Planet API key verified!\n\n'
+                    'Planet API key verified!\n\n'
                     'The key was accepted by the Planet API.',
                 )
                 logger.info('Planet API key verification successful')
@@ -2092,7 +2474,7 @@ class SettingsDockWidget(QDockWidget):
                 QMessageBox.warning(
                     self,
                     'Verification Failed',
-                    '❌ Planet API key verification failed.\n\n'
+                    'Planet API key verification failed.\n\n'
                     'Please check the API key and base URL and try again.\n'
                     'Ensure your Planet account has access to the requested services.',
                 )
@@ -2111,7 +2493,7 @@ class SettingsDockWidget(QDockWidget):
         self.iceye_endpoint.setText('https://api.iceye.com')
         self.iceye_access_token.clear()
         self.iceye_contract_id.clear()
-        self.iceye_collections.setText('public')
+        self.iceye_collections.clear()
         self.iceye_catalog_timeout.setValue(10)
         self.iceye_search_timeout.setValue(60)
         self.iceye_results.clear()
@@ -2155,6 +2537,14 @@ class SettingsDockWidget(QDockWidget):
             self.planetary_computer_stac_timeout.setValue(60)
             self.planetary_computer_stac_results.clear()
         logger.info("Restored default Planetary Computer STAC settings")
+
+    def _restore_default_swisstopo_stac(self):
+        """Restore default swisstopo STAC settings."""
+        if hasattr(self, 'swisstopo_stac_api_root'):
+            self.swisstopo_stac_api_root.setText(
+                'https://data.geo.admin.ch/api/stac/v1/collections'
+            )
+        logger.info("Restored default swisstopo STAC settings")
 
     def _restore_default_jilin(self):
         """Restore default Jilin API settings."""
@@ -2235,10 +2625,9 @@ class SettingsDockWidget(QDockWidget):
             
             if error != QgsBlockingNetworkRequest.NoError:
                 self.iceye_results.setText(
-                    f"❌ Connection failed\n"
+                    f"Connection failed\n"
                     f"Error: {blocking_request.errorMessage()}"
                 )
-                self.iceye_results.setStyleSheet("color: #ff6666; font-size: 9px; font-family: monospace;")
                 return
             
             # Parse response
@@ -2252,7 +2641,7 @@ class SettingsDockWidget(QDockWidget):
             
             # Build result text
             result_text = (
-                f"✅ Connection successful\n"
+                f"Connection successful\n"
                 f"Response time: {response_time_ms} ms\n"
                 f"─────────────────────\n"
                 f"Endpoint: {items_url}\n"
@@ -2271,17 +2660,15 @@ class SettingsDockWidget(QDockWidget):
                     result_text += f"  • {item_id} ({item_dt})\n"
             
             self.iceye_results.setText(result_text)
-            self.iceye_results.setStyleSheet("color: #226633; font-size: 9px; font-family: monospace;")
             
             logger.info(f"ICEYE Catalog API test OK: {len(features)} items, {response_time_ms}ms")
             
         except Exception as e:
             logger.error(f"ICEYE connection test error: {e}")
             self.iceye_results.setText(
-                f"❌ Test failed\n"
+                f"Test failed\n"
                 f"Error: {str(e)}"
             )
-            self.iceye_results.setStyleSheet("color: #ff6666; font-size: 9px; font-family: monospace;")
 
     def _test_umbra_connection(self):
         """Test Umbra STAC v2 connection and credentials/token"""
@@ -2318,30 +2705,27 @@ class SettingsDockWidget(QDockWidget):
 
             if not success:
                 self.umbra_results.setText(
-                    "❌ Authentication failed\n"
+                    "Authentication failed\n"
                     "Please verify token and endpoint"
                 )
-                self.umbra_results.setStyleSheet("color: #ff6666; font-size: 9px; font-family: monospace;")
                 return
 
             collections = connector.get_collections() or []
             auth_mode = "token" if access_token else "client_credentials"
             self.umbra_results.setText(
-                f"✅ Connection successful\n"
+                f"Connection successful\n"
                 f"Endpoint: {api_base_url}/v2/stac\n"
                 f"Auth mode: {auth_mode}\n"
                 f"Collections: {len(collections)}"
             )
-            self.umbra_results.setStyleSheet("color: #226633; font-size: 9px; font-family: monospace;")
             logger.info(f"Umbra STAC v2 test OK: {len(collections)} collections")
 
         except Exception as e:
             logger.error(f"Umbra connection test error: {e}")
             self.umbra_results.setText(
-                f"❌ Test failed\n"
+                f"Test failed\n"
                 f"Error: {str(e)}"
             )
-            self.umbra_results.setStyleSheet("color: #ff6666; font-size: 9px; font-family: monospace;")
 
     def _test_element84_stac_connection(self):
         """Test Earth Search STAC endpoint and Sentinel/Landsat collections."""
@@ -2382,24 +2766,18 @@ class SettingsDockWidget(QDockWidget):
 
             if error:
                 self.element84_stac_results.setText(
-                    f"❌ Search probe failed\n"
+                    f"Search probe failed\n"
                     f"Error: {error}"
-                )
-                self.element84_stac_results.setStyleSheet(
-                    "color: #ff6666; font-size: 9px; font-family: monospace;"
                 )
                 return
 
             self.element84_stac_results.setText(
-                f"✅ Endpoint reachable\n"
+                f"Endpoint reachable\n"
                 f"Response time: {elapsed_ms} ms\n"
                 f"─────────────────────\n"
                 f"Collections (Sentinel/Landsat): {len(collection_ids)}\n"
                 f"Sample search items: {len(items)}\n"
                 f"API Root: {api_root}"
-            )
-            self.element84_stac_results.setStyleSheet(
-                "color: #226633; font-size: 9px; font-family: monospace;"
             )
             logger.info(
                 "Earth Search STAC test OK: collections=%s, sample_items=%s",
@@ -2410,11 +2788,8 @@ class SettingsDockWidget(QDockWidget):
         except Exception as e:
             logger.error(f"Earth Search STAC connection test error: {e}")
             self.element84_stac_results.setText(
-                f"❌ Test failed\n"
+                f"Test failed\n"
                 f"Error: {str(e)}"
-            )
-            self.element84_stac_results.setStyleSheet(
-                "color: #ff6666; font-size: 9px; font-family: monospace;"
             )
 
     def _test_planetary_computer_stac_connection(self):
@@ -2466,11 +2841,8 @@ class SettingsDockWidget(QDockWidget):
 
             if error:
                 self.planetary_computer_stac_results.setText(
-                    f"❌ Search probe failed\n"
+                    f"Search probe failed\n"
                     f"Error: {error}"
-                )
-                self.planetary_computer_stac_results.setStyleSheet(
-                    "color: #ff6666; font-size: 9px; font-family: monospace;"
                 )
                 return
 
@@ -2486,16 +2858,13 @@ class SettingsDockWidget(QDockWidget):
                     rgb_ready += 1
 
             self.planetary_computer_stac_results.setText(
-                f"✅ Endpoint reachable\n"
+                f"Endpoint reachable\n"
                 f"Response time: {elapsed_ms} ms\n"
                 f"─────────────────────\n"
                 f"Optical collections: {len(collection_ids)}\n"
                 f"Sample items: {len(items)}\n"
                 f"RGB-ready items: {rgb_ready}\n"
                 f"API Root: {api_root}"
-            )
-            self.planetary_computer_stac_results.setStyleSheet(
-                "color: #226633; font-size: 9px; font-family: monospace;"
             )
             logger.info(
                 (
@@ -2510,11 +2879,8 @@ class SettingsDockWidget(QDockWidget):
         except Exception as e:
             logger.error(f"Planetary Computer STAC connection test error: {e}")
             self.planetary_computer_stac_results.setText(
-                f"❌ Test failed\n"
+                f"Test failed\n"
                 f"Error: {str(e)}"
-            )
-            self.planetary_computer_stac_results.setStyleSheet(
-                "color: #ff6666; font-size: 9px; font-family: monospace;"
             )
     
     def _check_nasa_auth_status(self):
@@ -2531,29 +2897,22 @@ class SettingsDockWidget(QDockWidget):
                 credentials={"allow_deferred_validation": True},
                 verify=True,
             ):
-                self.nasa_auth_status.setText("✅ Authenticated")
-                self.nasa_auth_status.setStyleSheet("color: #00ff00; font-size: 9px;")
+                self.nasa_auth_status.setText("Authenticated")
             else:
                 kind = connector.get_last_auth_error_kind()
                 if kind == "proxy_auth_required":
-                    self.nasa_auth_status.setText("⚠️ Proxy authentication required")
-                    self.nasa_auth_status.setStyleSheet("color: #ffaa00; font-size: 9px;")
+                    self.nasa_auth_status.setText("Proxy authentication required")
                 elif kind == "proxy_connection_error":
-                    self.nasa_auth_status.setText("⚠️ Proxy connection failed")
-                    self.nasa_auth_status.setStyleSheet("color: #ffaa00; font-size: 9px;")
+                    self.nasa_auth_status.setText("Proxy connection failed")
                 elif kind == "invalid_credentials":
-                    self.nasa_auth_status.setText("❌ Invalid credentials")
-                    self.nasa_auth_status.setStyleSheet("color: #ff6666; font-size: 9px;")
+                    self.nasa_auth_status.setText("Invalid credentials")
                 else:
-                    self.nasa_auth_status.setText("❌ Not authenticated")
-                    self.nasa_auth_status.setStyleSheet("color: #ff6666; font-size: 9px;")
+                    self.nasa_auth_status.setText("Not authenticated")
                 
         except ImportError:
-            self.nasa_auth_status.setText("⚠️ NASA connector module unavailable")
-            self.nasa_auth_status.setStyleSheet("color: #ffaa00; font-size: 9px;")
+            self.nasa_auth_status.setText("NASA connector module unavailable")
         except Exception:
-            self.nasa_auth_status.setText("❌ Authentication check failed")
-            self.nasa_auth_status.setStyleSheet("color: #ff6666; font-size: 9px;")
+            self.nasa_auth_status.setText("Authentication check failed")
 
     def _test_nasa_connection(self):
         """Test NASA EarthData connection and credentials"""
@@ -2624,10 +2983,9 @@ class SettingsDockWidget(QDockWidget):
                     failure_hint = "Check your credentials and proxy settings."
 
                 self.nasa_results.setText(
-                    f"❌ Authentication failed\n"
+                    f"Authentication failed\n"
                     f"{failure_hint}"
                 )
-                self.nasa_results.setStyleSheet("color: #ff6666; font-size: 9px; font-family: monospace;")
 
                 kind = ""
                 if hasattr(connector, "get_last_auth_error_kind"):
@@ -2637,17 +2995,13 @@ class SettingsDockWidget(QDockWidget):
                         kind = ""
 
                 if kind == "proxy_auth_required":
-                    self.nasa_auth_status.setText("⚠️ Proxy authentication required")
-                    self.nasa_auth_status.setStyleSheet("color: #ffaa00; font-size: 9px;")
+                    self.nasa_auth_status.setText("Proxy authentication required")
                 elif kind == "proxy_connection_error":
-                    self.nasa_auth_status.setText("⚠️ Proxy connection failed")
-                    self.nasa_auth_status.setStyleSheet("color: #ffaa00; font-size: 9px;")
+                    self.nasa_auth_status.setText("Proxy connection failed")
                 elif kind == "invalid_credentials":
-                    self.nasa_auth_status.setText("❌ Invalid credentials")
-                    self.nasa_auth_status.setStyleSheet("color: #ff6666; font-size: 9px;")
+                    self.nasa_auth_status.setText("Invalid credentials")
                 else:
-                    self.nasa_auth_status.setText("❌ Not authenticated")
-                    self.nasa_auth_status.setStyleSheet("color: #ff6666; font-size: 9px;")
+                    self.nasa_auth_status.setText("Not authenticated")
                 return
             
             # Load catalog
@@ -2666,10 +3020,9 @@ class SettingsDockWidget(QDockWidget):
             
             if catalog_is_empty:
                 self.nasa_results.setText(
-                    f"✅ Authentication successful\n"
-                    f"⚠️ Catalog loading failed"
+                    f"Authentication successful\n"
+                    f"Catalog loading failed"
                 )
-                self.nasa_results.setStyleSheet("color: #ff9900; font-size: 9px; font-family: monospace;")
                 return
             
             # Get dataset count
@@ -2710,7 +3063,7 @@ class SettingsDockWidget(QDockWidget):
             
             # Build result text
             result_text = (
-                f"✅ Authentication successful\n"
+                f"Authentication successful\n"
                 f"Auth time: {auth_time_ms} ms\n"
                 f"Auth mode: {auth_mode}\n"
                 f"Catalog load: {catalog_time_ms} ms\n"
@@ -2724,31 +3077,66 @@ class SettingsDockWidget(QDockWidget):
             )
             
             self.nasa_results.setText(result_text)
-            self.nasa_results.setStyleSheet("color: #226633; font-size: 9px; font-family: monospace;")
             
-            self.nasa_auth_status.setText("✅ Authenticated")
-            self.nasa_auth_status.setStyleSheet("color: #00ff00; font-size: 9px;")
+            self.nasa_auth_status.setText("Authenticated")
             
             logger.info(f"NASA EarthData test: loaded {dataset_count} datasets in {catalog_time_ms}ms")
             
         except ImportError as e:
             logger.error(f"NASA EarthData connector not available: {e}")
             self.nasa_results.setText(
-                f"❌ NASA EarthData not available\n"
+                f"NASA EarthData not available\n"
                 f"Error: {str(e)}"
             )
-            self.nasa_results.setStyleSheet("color: #ff6666; font-size: 9px; font-family: monospace;")
         except Exception as e:
             logger.error(f"NASA EarthData connection test error: {e}")
             self.nasa_results.setText(
-                f"❌ Test failed\n"
+                f"Test failed\n"
                 f"Error: {str(e)}\n\n"
                 f"Check:\n"
                 f"  1. Token or credentials are correct\n"
                 f"  2. Internet/proxy connectivity is active\n"
                 f"  3. NASA CMR endpoint is reachable"
             )
-            self.nasa_results.setStyleSheet("color: #ff6666; font-size: 9px; font-family: monospace;")
+
+    def _test_custom_stac_connection(self):
+        endpoint = self.custom_stac_endpoint.text().strip()
+        if not endpoint:
+            self._set_inline_status(
+                self.custom_stac_status,
+                "Enter a STAC API endpoint.",
+                'error',
+            )
+            return
+
+        self._set_inline_status(self.custom_stac_status, "Testing connection...", 'info')
+        QApplication.processEvents()
+        try:
+            from ..connectors.custom_stac import CustomStacConnector
+
+            connector = CustomStacConnector()
+            connected = connector.authenticate({
+                'endpoint': endpoint,
+                'username': self.custom_stac_username.text().strip(),
+                'password': self.custom_stac_password.text(),
+                'access_token': self.custom_stac_access_token.text().strip(),
+                'timeout': self.custom_stac_timeout.value(),
+            })
+            if not connected:
+                raise RuntimeError(connector.last_error or 'STAC connection check failed')
+
+            self._set_inline_status(
+                self.custom_stac_status,
+                f"Connected. {len(connector.get_collections())} collection(s) found.",
+                'success',
+            )
+        except Exception as exc:
+            self._set_inline_status(
+                self.custom_stac_status,
+                f"Connection failed: {exc}",
+                'error',
+            )
+            logger.warning("Custom STAC connection test failed: %s", exc)
 
 
 

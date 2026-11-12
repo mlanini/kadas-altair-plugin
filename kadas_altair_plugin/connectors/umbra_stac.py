@@ -17,6 +17,7 @@ from datetime import datetime
 
 from .base import ConnectorBase
 from ..logger import get_logger
+from ..utilities.qt_compat import qt_exec
 
 logger = get_logger('connectors.umbra_stac')
 
@@ -176,7 +177,7 @@ class UmbraSTACConnector(ConnectorBase):
                 timer.setSingleShot(True)
                 timer.timeout.connect(loop.quit)
                 timer.start(int(self.timeout_auth * 1000))
-                loop.exec_()
+                qt_exec(loop)
 
                 if not reply.isFinished():
                     reply.abort()
@@ -269,7 +270,7 @@ class UmbraSTACConnector(ConnectorBase):
                 timer.timeout.connect(loop.quit)
                 timer.start(int(timeout * 1000))
 
-                loop.exec_()
+                qt_exec(loop)
 
                 if not reply.isFinished():
                     reply.abort()
@@ -331,7 +332,7 @@ class UmbraSTACConnector(ConnectorBase):
                 timer.timeout.connect(loop.quit)
                 timer.start(int(timeout * 1000))
 
-                loop.exec_()
+                qt_exec(loop)
 
                 if not reply.isFinished():
                     reply.abort()

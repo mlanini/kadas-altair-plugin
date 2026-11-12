@@ -9,8 +9,8 @@ pick your favourite space robot, and let the plugin do the rest.
 and lists results in the same tabular format as the Archive dock.
 
 **Tasking mode** — predicts future satellite overpasses above your AOI
-using SGP4 orbital propagation (when available) or a fast analytical
-sun-synchronous model.  Think *eo-predictor* but inside QGIS.
+using SGP4 orbital propagation with validated, persistently cached TLEs.
+Predictions concern the AOI bounding-box centre, not complete AOI coverage.
 
 No animals were harmed.  Probably.
 """
@@ -26,16 +26,19 @@ import inspect
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta, timezone
+from threading import Event
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from qgis.PyQt.QtCore import QDate, QItemSelectionModel, Qt, QSettings, QTimer, QUrl, QVariant, pyqtSignal
-from qgis.PyQt.QtGui import QColor, QFont, QPixmap
+from qgis.PyQt.QtGui import QColor, QDesktopServices, QFont, QPixmap
 from qgis.PyQt.QtNetwork import QNetworkRequest
 from qgis.PyQt.QtWidgets import (
     QAbstractItemView,
+    QCheckBox,
     QComboBox,
     QDateEdit,
+    QDoubleSpinBox,
     QDockWidget,
     QFileDialog,
     QFormLayout,
@@ -83,8 +86,19 @@ except ImportError:
     QGIS_AVAILABLE = False
 
 from ..logger import get_logger
+from ..utilities.eo_predictor_satellites import EO_PREDICTOR_SATELLITE_OVERRIDES
+from ..utilities.overpass_support import (
+    TleCache, ecef_geodetic, geodetic_ecef, prediction_window, solar_elevation, tle_epoch,
+)
 from .aoi_draw_tool import AoiWidget
 from .footprint_tool import FootprintSelectionTool
+from .ui_theme import (
+    apply_dock_theme,
+    set_button_variant,
+    set_label_role,
+    set_status_state,
+    set_widget_state,
+)
 
 logger = get_logger('gui.smart_tasking')
 
@@ -248,7 +262,11 @@ SATELLITE_CATALOGUE: List[Dict] = [
         'gsd_m': 10.0, 'access': 'Free', 'daylight': 'Day',
         'fun_fact': 'Free, 10 m, global. The people\'s satellite.',
         'norad_id': 40697,
-        'connector_ids': ['element84_stac', 'planetary_computer_stac'],
+        'connector_ids': [
+            'element84_stac',
+            'planetary_computer_stac',
+            'swisstopo_stac',
+        ],
         'orbit_alt_km': 786, 'orbit_inc_deg': 98.6,
         'orbit_period_min': 100.6, 'swath_km': 290.0,
         'revisit_days': 5.0, 'ltan_hour': 10.5,
@@ -390,12 +408,65 @@ SATELLITE_CATALOGUE: List[Dict] = [
     },
 ]
 
-
 # GSD thresholds for resolution categories (metres)
 _GSD_HIGH = 1.0        # ≤ 1 m
 _GSD_MEDIUM = 15.0     # ≤ 15 m
 
 _R_EARTH_KM = 6371.0
+
+_EO_PREDICTOR_ALIASES = {
+    'WorldView-3': 'worldview-3',
+    'WorldView-2': 'worldview-2',
+    'WorldView Legion': 'worldview-legion',
+    'SkySat': 'skysat',
+    'PlanetScope (Dove)': 'planetscope',
+    'ICEYE X-band': 'iceye',
+    'Sentinel-1': 'sentinel-1',
+    'Sentinel-2': 'sentinel-2',
+    'Landsat 8': 'landsat',
+    'Landsat 9': 'landsat',
+    'NISAR': 'nisar',
+}
+
+
+def _apply_eo_predictor_overrides(catalogue: List[Dict[str, Any]]) -> None:
+    """Merge eo-predictor spacecraft metadata into local satellite catalogue."""
+    for sat in catalogue:
+        const = str(sat.get('constellation', '')).strip()
+        key = _EO_PREDICTOR_ALIASES.get(const)
+        if not key:
+            continue
+
+        override = EO_PREDICTOR_SATELLITE_OVERRIDES.get(key)
+        if not override:
+            continue
+
+        altitude_km = override.get('altitude_km')
+        swath_km = override.get('swath_km')
+        off_nadir_deg = override.get('off_nadir_deg')
+        norad_ids = [
+            int(n)
+            for n in (override.get('norad_ids') or [])
+            if str(n).strip()
+        ]
+
+        if altitude_km is not None:
+            sat['orbit_alt_km'] = float(altitude_km)
+        if swath_km is not None:
+            sat['swath_km'] = float(swath_km)
+        if off_nadir_deg is not None:
+            off_nadir = float(off_nadir_deg)
+            sat['max_off_nadir_deg'] = off_nadir
+            sat['sensor_model'] = 'off_nadir' if off_nadir > 0 else 'pushbroom'
+
+        if norad_ids:
+            sat['norad_ids'] = norad_ids
+            sat['norad_id'] = int(sat.get('norad_id') or norad_ids[0])
+            if sat['norad_id'] not in sat['norad_ids']:
+                sat['norad_ids'].insert(0, sat['norad_id'])
+
+
+_apply_eo_predictor_overrides(SATELLITE_CATALOGUE)
 
 
 def _resolution_label(gsd: float) -> str:
@@ -473,6 +544,184 @@ def _normalize_wgs84_lonlat(lon: float, lat: float) -> Tuple[float, float]:
     """Return (lon, lat) normalized for WGS84 storage/reprojection."""
     return _wrap_longitude(lon), _clamp_latitude(lat)
 
+def _swath_polygon_parts(
+    swath_ribbon: List[Tuple[float, float]],
+) -> List[List[Tuple[float, float]]]:
+    """Build small antimeridian-safe polygon pieces from a swath ribbon."""
+    if len(swath_ribbon) < 7 or (len(swath_ribbon) - 1) % 2:
+        return []
+
+    edge_count = (len(swath_ribbon) - 1) // 2
+    left_edge = swath_ribbon[:edge_count]
+    right_edge = list(reversed(swath_ribbon[edge_count:-1]))
+    if edge_count < 2 or len(left_edge) != len(right_edge):
+        return []
+
+    def clip_at_longitude(
+        ring: List[Tuple[float, float]], boundary: float, keep_east: bool,
+    ) -> List[Tuple[float, float]]:
+        clipped: List[Tuple[float, float]] = []
+        previous = ring[-1]
+        previous_inside = previous[0] >= boundary if keep_east else previous[0] <= boundary
+        for current in ring:
+            current_inside = current[0] >= boundary if keep_east else current[0] <= boundary
+            if current_inside != previous_inside:
+                fraction = (boundary - previous[0]) / (current[0] - previous[0])
+                latitude = previous[1] + fraction * (current[1] - previous[1])
+                clipped.append((boundary, latitude))
+            if current_inside:
+                clipped.append(current)
+            previous = current
+            previous_inside = current_inside
+        return clipped
+
+    def geodesic_intermediate_points(
+        start: Tuple[float, float], end: Tuple[float, float], steps: int = 4,
+    ) -> List[Tuple[float, float]]:
+        def to_vector(point: Tuple[float, float]) -> Tuple[float, float, float]:
+            lon, lat = map(math.radians, point)
+            cos_lat = math.cos(lat)
+            return cos_lat * math.cos(lon), cos_lat * math.sin(lon), math.sin(lat)
+
+        start_vector = to_vector(start)
+        end_vector = to_vector(end)
+        dot = max(-1.0, min(1.0, sum(
+            start_vector[axis] * end_vector[axis] for axis in range(3)
+        )))
+        angle = math.acos(dot)
+        if angle < 1e-12:
+            return []
+
+        sin_angle = math.sin(angle)
+        points = []
+        for step in range(1, steps):
+            fraction = step / steps
+            start_weight = math.sin((1.0 - fraction) * angle) / sin_angle
+            end_weight = math.sin(fraction * angle) / sin_angle
+            vector = tuple(
+                start_weight * start_vector[axis] + end_weight * end_vector[axis]
+                for axis in range(3)
+            )
+            lon = math.degrees(math.atan2(vector[1], vector[0]))
+            lat = math.degrees(math.atan2(
+                vector[2], math.hypot(vector[0], vector[1])
+            ))
+            points.append((_wrap_longitude(lon), _clamp_latitude(lat)))
+        return points
+
+    cross_track_bands = 8
+    cross_sections = [
+        [left_edge[index]]
+        + geodesic_intermediate_points(
+            left_edge[index], right_edge[index], steps=cross_track_bands
+        )
+        + [right_edge[index]]
+        for index in range(edge_count)
+    ]
+
+    parts: List[List[Tuple[float, float]]] = []
+    for index in range(edge_count - 1):
+        for band in range(cross_track_bands):
+            corners = (
+                cross_sections[index][band],
+                cross_sections[index + 1][band],
+                cross_sections[index + 1][band + 1],
+                cross_sections[index][band + 1],
+            )
+            ring_points: List[Tuple[float, float]] = []
+            for corner_index, start in enumerate(corners):
+                end = corners[(corner_index + 1) % len(corners)]
+                ring_points.append(start)
+                ring_points.extend(geodesic_intermediate_points(start, end))
+
+            ring: List[Tuple[float, float]] = []
+            for lon, lat in ring_points:
+                lon = _wrap_longitude(lon)
+                if ring:
+                    while lon - ring[-1][0] > 180.0:
+                        lon -= 360.0
+                    while lon - ring[-1][0] < -180.0:
+                        lon += 360.0
+                ring.append((lon, _clamp_latitude(lat)))
+
+            min_lon = min(point[0] for point in ring)
+            max_lon = max(point[0] for point in ring)
+            first_strip = math.floor((min_lon + 180.0) / 360.0)
+            last_strip = math.floor((max_lon + 180.0) / 360.0)
+            for strip in range(first_strip, last_strip + 1):
+                west = -180.0 + 360.0 * strip
+                east = 180.0 + 360.0 * strip
+                clipped = clip_at_longitude(ring, west, True)
+                if len(clipped) >= 3:
+                    clipped = clip_at_longitude(clipped, east, False)
+                if len(clipped) < 3:
+                    continue
+
+                part = [
+                    (max(-180.0, min(180.0, lon - 360.0 * strip)), lat)
+                    for lon, lat in clipped
+                ]
+                if part[0] != part[-1]:
+                    part.append(part[0])
+                area = sum(
+                    part[i][0] * part[i + 1][1] - part[i + 1][0] * part[i][1]
+                    for i in range(len(part) - 1)
+                )
+                if abs(area) > 1e-12:
+                    parts.append(part)
+
+    return parts
+
+
+def _build_order_email_content(payload: Dict[str, Any]) -> Tuple[str, str]:
+    satellite = str(payload.get('satellite') or 'Satellite acquisition')
+    provider = str(payload.get('_provider') or payload.get('operator') or 'Unspecified')
+    date_value = str(payload.get('access_start_utc') or payload.get('date') or 'date TBD')
+    subject = f"Altair acquisition request - {satellite} - {date_value}"
+
+    bbox = payload.get('bbox')
+    bbox_text = ', '.join(f'{float(value):.6f}' for value in bbox[:4]) if bbox else 'N/A'
+    lines = [
+        'Satellite acquisition request prepared from KADAS Altair results',
+        '',
+        f"Request type: {'Archive scene' if payload.get('_source') == 'archive' else 'Predicted overpass'}",
+        f'Provider: {provider}',
+        f'Satellite: {satellite}',
+        f'Sensor: {payload.get("sensor_type") or "N/A"}',
+        f'GSD: {payload.get("gsd_m", "N/A")} m',
+        f'WGS84 AOI bbox: {bbox_text}',
+    ]
+
+    if payload.get('_source') == 'archive':
+        lines.extend([
+            f'Scene ID: {payload.get("scene_id") or "N/A"}',
+            f'Collection: {payload.get("collection") or "N/A"}',
+            f'Acquisition date/time: {payload.get("acquisition_datetime") or "N/A"}',
+        ])
+    else:
+        lines.extend([
+            f'Predicted pass: {payload.get("datetime_utc") or "N/A"}',
+            f'Access interval (UTC): {payload.get("access_start_utc") or "N/A"} / '
+            f'{payload.get("access_end_utc") or "N/A"}',
+            f'Target point (lat, lon): {payload.get("target_point") or "N/A"}',
+            f'Direction: {payload.get("direction") or "N/A"}',
+            f'Max elevation: {payload.get("max_elevation", "N/A")} degrees',
+            f'Off-nadir: {payload.get("off_nadir_deg", "N/A")} degrees',
+            f'Access duration: {payload.get("duration_min", "N/A")} minutes',
+            f'TLE epoch (UTC): {payload.get("tle_epoch") or "N/A"}',
+            f'Result type: {payload.get("prediction_kind") or "N/A"}',
+        ])
+
+    notes = str(payload.get('notes') or '').strip()
+    if notes:
+        lines.extend(['', 'Details', notes])
+    lines.extend([
+        '',
+        'Please confirm availability, acquisition feasibility, pricing, and delivery terms.',
+        '',
+        'Generated by KADAS Altair.',
+    ])
+    return subject, '\n'.join(lines)
 
 def _normalize_bbox_wgs84(
     bbox: Tuple[float, float, float, float],
@@ -607,7 +856,7 @@ class _OverpassEngine:
 
     **Algorithm (bearing-convergence)**
 
-    1.  Propagate the satellite forward in time (SGP4 / analytical).
+    1.  Propagate the satellite forward in time using validated TLEs and SGP4.
     2.  Compute the angle between the satellite velocity vector and the
         direction from satellite to ground target.  When this angle is
         exactly 90 deg, the satellite is at closest approach.
@@ -636,9 +885,97 @@ class _OverpassEngine:
     _SHRINK_FACTOR = 20.0       # bisection shrink
     _CONVERGENCE_DEG = 0.0001   # bearing precision threshold
     _MAX_BISECTIONS = 12        # safety limit per zero-crossing
+    _PASS_DEDUP_WINDOW_SECONDS = 120
 
-    def __init__(self):
+    def __init__(self, cache_dir=None, max_tle_age_hours=72,
+                 min_solar_elevation=10, offline=False, network_unavailable=None):
         self._tle_cache: Dict[int, Tuple[str, str]] = {}
+        self._tle_records: Dict[int, Dict[str, Any]] = {}
+        base = os.environ.get('LOCALAPPDATA') or os.path.expanduser('~/.cache')
+        self._disk_cache = TleCache(cache_dir or os.path.join(base, 'KadasAltair', 'tle'))
+        self.max_tle_age_hours = max(1, min(720, float(max_tle_age_hours)))
+        self.min_solar_elevation = max(0, min(90, float(min_solar_elevation)))
+        self.offline = offline
+        self._network_unavailable = network_unavailable
+        self.diagnostics: List[Dict[str, Any]] = []
+        self._requested_window = None
+        self._propagation_failed = False
+
+    @staticmethod
+    def _candidate_norad_ids(sat: Dict[str, Any]) -> List[int]:
+        """Return prioritized NORAD IDs for a constellation."""
+        ordered: List[int] = []
+        for val in sat.get('norad_ids', []) or []:
+            try:
+                cid = int(val)
+            except Exception:
+                continue
+            if cid not in ordered:
+                ordered.append(cid)
+
+        primary = sat.get('norad_id')
+        try:
+            if primary is not None:
+                pid = int(primary)
+                if pid not in ordered:
+                    ordered.insert(0, pid)
+        except Exception:
+            pass
+
+        return ordered
+
+    @staticmethod
+    def _dedupe_passes(passes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Deduplicate near-identical passes generated by constellation fleets."""
+        if not passes:
+            return []
+
+        def _dt_key(item: Dict[str, Any]) -> datetime:
+            raw = str(item.get('datetime_utc', '')).replace(' UTC', '')
+            try:
+                return datetime.strptime(raw, '%Y-%m-%d %H:%M')
+            except Exception:
+                return datetime.min
+
+        sorted_passes = sorted(
+            passes,
+            key=lambda p: (
+                str(p.get('datetime_utc', '')),
+                str(p.get('direction', '')),
+            ),
+        )
+
+        deduped: List[Dict[str, Any]] = []
+        for p in sorted_passes:
+            if not deduped:
+                deduped.append(p)
+                continue
+
+            prev = deduped[-1]
+            prev_dt = _dt_key(prev)
+            cur_dt = _dt_key(p)
+            same_sat = (prev.get('satellite'), prev.get('norad_id')) == (
+                p.get('satellite'), p.get('norad_id'))
+            same_dir = str(prev.get('direction', '')) == str(p.get('direction', ''))
+
+            if not same_sat or not same_dir:
+                deduped.append(p)
+                continue
+
+            delta_s = abs((cur_dt - prev_dt).total_seconds())
+            if delta_s > _OverpassEngine._PASS_DEDUP_WINDOW_SECONDS:
+                deduped.append(p)
+                continue
+
+            # Keep the better pass (higher elevation, then lower distance).
+            prev_elev = float(prev.get('max_elevation', 0.0) or 0.0)
+            cur_elev = float(p.get('max_elevation', 0.0) or 0.0)
+            prev_dist = float(prev.get('ground_dist_km', 9999.0) or 9999.0)
+            cur_dist = float(p.get('ground_dist_km', 9999.0) or 9999.0)
+            if (cur_elev, -cur_dist) > (prev_elev, -prev_dist):
+                deduped[-1] = p
+
+        return deduped
 
     # ----- public API --------------------------------------------------
 
@@ -659,50 +996,117 @@ class _OverpassEngine:
             sub_sat_lat, sub_sat_lon, orbit_alt_km, swath_km,
             orbit_track, ground_track, swath_ribbon
         """
-        inc = sat.get('orbit_inc_deg', 98.0)
-        if abs(aoi_lat) > inc:
-            return []
-
-        if _SGP4_OK:
-            norad = sat.get('norad_id')
-            if norad:
-                tle = self._fetch_tle(norad)
-                if tle:
-                    try:
-                        return self._sgp4_predict(sat, tle, aoi_lat, aoi_lon,
-                                                  aoi_bbox, start_dt, end_dt)
-                    except Exception as exc:
-                        logger.warning(
-                            f'SGP4 prediction failed for {sat["constellation"]}: '
-                            f'{exc}; falling back to analytical model'
-                        )
-
-        return self._analytical_predict(
-            sat, aoi_lat, aoi_lon, aoi_bbox, start_dt, end_dt,
-        )
+        self.diagnostics = []
+        self._requested_window = (start_dt, end_dt)
+        candidate_ids = self._candidate_norad_ids(sat)
+        sgp4_passes: List[Dict[str, Any]] = []
+        for norad in candidate_ids or [None]:
+            report = dict(satellite=sat.get('constellation', '?'), norad_id=norad,
+                          status='unavailable', reason='', pass_count=0)
+            self.diagnostics.append(report)
+            if not _SGP4_OK or norad is None:
+                report['reason'] = 'SGP4 unavailable' if not _SGP4_OK else 'Missing NORAD ID'
+                continue
+            tle = self._fetch_tle(norad)
+            if not tle:
+                report['reason'] = 'No usable orbital data'
+                continue
+            try:
+                epoch = tle_epoch(tle, norad)
+                record = self._tle_records.get(norad, {})
+                report.update(tle_epoch=epoch.isoformat(),
+                              fetched_at=record.get('fetched_at', ''),
+                              source=record.get('source', 'unknown'))
+                limit = timedelta(hours=self.max_tle_age_hours)
+                valid_start = max(start_dt, epoch - limit)
+                valid_end = min(end_dt, epoch + limit)
+                if valid_start >= valid_end:
+                    report['reason'] = 'TLE outside age limit for requested window'
+                    continue
+                if sat.get('sensor') == 'Optical':
+                    solar_elevation(aoi_lat, aoi_lon, valid_start)
+                self._propagation_failed = False
+                self._valid_window = (valid_start, valid_end)
+                passes = self._sgp4_predict(
+                    sat, tle, aoi_lat, aoi_lon, None, valid_start, valid_end, norad,
+                )
+                if self._propagation_failed:
+                    raise ValueError('SGP4 propagation failed within requested window')
+                partial = valid_start > start_dt or valid_end < end_dt
+                report.update(status='partial' if partial else 'complete',
+                              reason='TLE age limits the computed interval' if partial else '',
+                              valid_from=valid_start.isoformat(), valid_until=valid_end.isoformat(),
+                              pass_count=len(passes))
+                for prediction in passes:
+                    prediction.update(tle_epoch=epoch.isoformat(),
+                                      tle_fetched_at=record.get('fetched_at', ''),
+                                      tle_source=record.get('source', 'unknown'),
+                                      tle_max_age_hours=self.max_tle_age_hours)
+                sgp4_passes.extend(passes)
+            except Exception as exc:
+                report['reason'] = str(exc)
+                logger.debug('Prediction unavailable for NORAD %s: %s', norad, exc)
+        return self._dedupe_passes(sgp4_passes)
 
     # ----- TLE fetching -----------------------------------------------
 
     def _fetch_tle(self, norad_id: int) -> Optional[Tuple[str, str]]:
         if norad_id in self._tle_cache:
             return self._tle_cache[norad_id]
-        url = self._TLE_URL.format(norad=norad_id)
+        cached = self._disk_cache.read(norad_id)
+        now = datetime.now(timezone.utc)
+        fresh = False
+        if cached and self._requested_window:
+            fresh = (timedelta(0) <= now - cached['fetched_at'] < timedelta(hours=6)
+                     and all(abs(instant - cached['epoch']) <= timedelta(hours=self.max_tle_age_hours)
+                             for instant in self._requested_window))
+        record = cached
         try:
-            req = urllib.request.Request(url, headers={'User-Agent': 'AltairPlugin/0.4'})
-            with urllib.request.urlopen(req, timeout=self._TLE_TIMEOUT) as resp:
-                text = resp.read().decode('utf-8', errors='replace').strip()
-            lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-            if len(lines) >= 3:
-                tle = (lines[1], lines[2])
-            elif len(lines) == 2 and lines[0].startswith('1 ') and lines[1].startswith('2 '):
-                tle = (lines[0], lines[1])
-            else:
-                return None
-            self._tle_cache[norad_id] = tle
-            return tle
+            if (not self.offline and not fresh and
+                    (self._network_unavailable is None or
+                     not self._network_unavailable.is_set())):
+                text = self._download_tle(norad_id)
+                lines = [line.rstrip() for line in text.splitlines() if line.strip()]
+                pairs = [(lines[index], lines[index + 1]) for index in range(len(lines) - 1)
+                         if lines[index].startswith('1 ') and lines[index + 1].startswith('2 ')]
+                if len(pairs) != 1:
+                    raise ValueError('Expected exactly one TLE record')
+                tle = pairs[0]
+                epoch = tle_epoch(tle, norad_id)
+                record = dict(tle=tle, epoch=epoch, fetched_at=now, source='network')
+                try:
+                    self._disk_cache.write(norad_id, tle, now)
+                except OSError as exc:
+                    logger.warning('Cannot persist TLE cache: %s', exc)
         except Exception as exc:
-            logger.debug(f'TLE fetch failed for NORAD {norad_id}: {exc}')
-        return None
+            if isinstance(exc, OSError) and 'proxy' in str(exc).lower():
+                self.offline = True
+                if self._network_unavailable is not None:
+                    self._network_unavailable.set()
+            logger.debug('TLE refresh failed for NORAD %s; using cache if valid: %s', norad_id, exc)
+        if not record:
+            return None
+        self._tle_records[norad_id] = dict(
+            epoch=record['epoch'].isoformat(), fetched_at=record['fetched_at'].isoformat(),
+            source=record['source'],
+        )
+        self._tle_cache[norad_id] = record['tle']
+        return record['tle']
+
+    def _download_tle(self, norad_id):
+        url = self._TLE_URL.format(norad=norad_id)
+        if QGIS_AVAILABLE:
+            from qgis.core import QgsNetworkAccessManager
+            QgsNetworkAccessManager.instance().setupDefaultProxyAndCache()
+            request = QNetworkRequest(QUrl(url))
+            request.setRawHeader(b'User-Agent', b'KadasAltair/Overpass')
+            blocking = QgsBlockingNetworkRequest()
+            if blocking.get(request, forceRefresh=True) != QgsBlockingNetworkRequest.NoError:
+                raise OSError(blocking.errorMessage())
+            return bytes(blocking.reply().content()).decode('utf-8', errors='replace')
+        request = urllib.request.Request(url, headers={'User-Agent': 'KadasAltair/Overpass'})
+        with urllib.request.urlopen(request, timeout=self._TLE_TIMEOUT) as response:
+            return response.read().decode('utf-8', errors='replace')
 
     # ----- SGP4 helpers ------------------------------------------------
 
@@ -717,9 +1121,11 @@ class _OverpassEngine:
 
     def _sat_ecef(self, satrec, dt: datetime) -> Optional[Tuple[float, float, float]]:
         """ECEF position (km)."""
-        jd, fr = _sgp4_jday(dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second)
+        jd, fr = _sgp4_jday(dt.year, dt.month, dt.day, dt.hour, dt.minute,
+                          dt.second + dt.microsecond / 1000000.0)
         e, r, _v = satrec.sgp4(jd, fr)
         if e != 0:
+            self._propagation_failed = True
             return None
         g = self._gmst_rad(jd, fr)
         cg, sg = math.cos(g), math.sin(g)
@@ -732,9 +1138,7 @@ class _OverpassEngine:
         pos = self._sat_ecef(satrec, dt)
         if pos is None:
             return None
-        xe, ye, ze = pos
-        lat = math.degrees(math.atan2(ze, math.sqrt(xe * xe + ye * ye)))
-        lon = math.degrees(math.atan2(ye, xe))
+        lat, lon, altitude = ecef_geodetic(pos)
         return lat, lon
 
     def _velocity_bearing(self, satrec, dt: datetime) -> Optional[float]:
@@ -753,7 +1157,88 @@ class _OverpassEngine:
         pos = self._sat_ecef(satrec, dt)
         if pos is None:
             return 600.0
-        return math.sqrt(pos[0] ** 2 + pos[1] ** 2 + pos[2] ** 2) - _R_EARTH_KM
+        return ecef_geodetic(pos)[2]
+
+    def _point_access(self, satrec, sat, instant, lat, lon):
+        position = self._sat_ecef(satrec, instant)
+        if position is None:
+            return None
+        target = geodetic_ecef(lat, lon)
+        line = tuple(target[index] - position[index] for index in range(3))
+        distance = math.sqrt(sum(component ** 2 for component in line))
+        radius = math.sqrt(sum(component ** 2 for component in position))
+        if distance <= 0 or radius <= 0:
+            return None
+        cosine = -sum(line[index] * position[index] for index in range(3)) / (distance * radius)
+        off_nadir = math.degrees(math.acos(max(-1, min(1, cosine))))
+        lat_rad, lon_rad = math.radians(lat), math.radians(lon)
+        normal = (math.cos(lat_rad) * math.cos(lon_rad),
+                  math.cos(lat_rad) * math.sin(lon_rad), math.sin(lat_rad))
+        sine = -sum(line[index] * normal[index] for index in range(3)) / distance
+        elevation = math.degrees(math.asin(max(-1, min(1, sine))))
+        if elevation <= 0:
+            return None
+        sub_lat, sub_lon, altitude = ecef_geodetic(position)
+        ground_distance = _haversine_km(sub_lat, sub_lon, lat, lon)
+        if sat.get('sensor_model', 'pushbroom') == 'pushbroom':
+            if ground_distance > float(sat.get('swath_km', 20)) / 2:
+                return None
+        elif off_nadir > float(sat.get('max_off_nadir_deg', 30)):
+            return None
+        incidence = 90 - elevation
+        constraints_verified = sat.get('sensor') != 'SAR'
+        if sat.get('sensor') == 'SAR':
+            constraints_verified = bool(
+                sat.get('sensor_constraints_verified')
+                and sat.get('acquisition_mode')
+                and sat.get('look_side') in ('left', 'right', 'both')
+                and isinstance(sat.get('min_incidence_deg'), (int, float))
+                and isinstance(sat.get('max_incidence_deg'), (int, float))
+                and 0 <= sat['min_incidence_deg'] < sat['max_incidence_deg'] < 90
+            )
+            if constraints_verified:
+                if not sat['min_incidence_deg'] <= incidence <= sat['max_incidence_deg']:
+                    return None
+                bearing = self._velocity_bearing(satrec, instant)
+                if bearing is None:
+                    return None
+                relative = ((_bearing_deg(sub_lat, sub_lon, lat, lon) - bearing + 180) % 360) - 180
+                side = 'right' if relative >= 0 else 'left'
+                if sat['look_side'] != 'both' and side != sat['look_side']:
+                    return None
+        return dict(off_nadir_deg=off_nadir, max_elevation=elevation,
+                    incidence_deg=incidence, ground_dist_km=ground_distance,
+                    sub_sat_lat=sub_lat, sub_sat_lon=sub_lon, orbit_alt_km=altitude,
+                    sensor_constraints_verified=constraints_verified)
+
+    def _access_bounds(self, satrec, sat, center, lat, lon, period_s):
+        bounds = []
+        valid_start, valid_end = self._valid_window
+        for direction, limit in ((-1, valid_start), (1, valid_end)):
+            inside = center
+            outside = center
+            for offset in range(15, int(period_s / 2) + 15, 15):
+                probe = center + timedelta(seconds=direction * offset)
+                probe = max(valid_start, min(valid_end, probe))
+                if self._point_access(satrec, sat, probe, lat, lon) is None:
+                    outside = probe
+                    break
+                inside = probe
+                if probe == limit:
+                    break
+            else:
+                outside = inside
+            if outside != center and outside != inside:
+                for iteration in range(16):
+                    middle = inside + (outside - inside) / 2
+                    if abs((outside - inside).total_seconds()) < 0.1:
+                        break
+                    if self._point_access(satrec, sat, middle, lat, lon) is None:
+                        outside = middle
+                    else:
+                        inside = middle
+            bounds.append(inside)
+        return bounds[0], bounds[1]
 
     # ----- Bearing-convergence SGP4 prediction ------------------------
 
@@ -762,6 +1247,7 @@ class _OverpassEngine:
         tgt_lat: float, tgt_lon: float,
         aoi_bbox: Optional[Tuple[float, float, float, float]],
         start_dt: datetime, end_dt: datetime,
+        norad_id: Optional[int] = None,
     ) -> List[Dict]:
         satrec = Satrec.twoline2rv(tle[0], tle[1])
         swath_km = sat.get('swath_km', 20.0)
@@ -772,7 +1258,10 @@ class _OverpassEngine:
 
         # Maximum sensor reach on ground (for pre-filtering)
         if model == 'off_nadir' and max_ona > 0:
-            max_reach_km = alt_km * math.tan(math.radians(max_ona))
+            ratio = ((_R_EARTH_KM + alt_km) / _R_EARTH_KM
+                     * math.sin(math.radians(max_ona)))
+            max_reach_km = _R_EARTH_KM * (
+                math.asin(min(1.0, ratio)) - math.radians(max_ona))
         else:
             max_reach_km = swath_km / 2.0
 
@@ -790,7 +1279,7 @@ class _OverpassEngine:
 
             # Quick distance filter (skip if way too far)
             dist_km = _haversine_km(ss[0], ss[1], tgt_lat, tgt_lon)
-            if dist_km > max_reach_km * 3.0:
+            if dist_km > max_reach_km * 1.5 + 10 * self._INITIAL_STEP_S:
                 dt += step
                 prev_bdiff = None
                 continue
@@ -805,7 +1294,7 @@ class _OverpassEngine:
             perp = ((tb - vb + 180.0) % 360.0) - 180.0
             bdiff = abs(perp) - 90.0  # negative = inside approach, positive = outside
 
-            if prev_bdiff is not None and prev_bdiff * bdiff < 0:
+            if prev_bdiff is not None and prev_bdiff <= 0 <= bdiff:
                 # Zero-crossing detected -> bisect to converge
                 t_lo = dt - step
                 t_hi = dt
@@ -837,6 +1326,7 @@ class _OverpassEngine:
                 pass_result = self._evaluate_pass(
                     satrec, sat, converged_dt, tgt_lat, tgt_lon,
                     aoi_bbox, swath_km, max_ona, model, alt_km, period_s,
+                    norad_id,
                 )
                 if pass_result:
                     overpasses.append(pass_result)
@@ -856,26 +1346,25 @@ class _OverpassEngine:
         aoi_bbox: Optional[Tuple[float, float, float, float]],
         swath_km: float, max_ona: float, model: str,
         alt_km: float, period_s: float,
+        norad_id: Optional[int] = None,
     ) -> Optional[Dict]:
         """Check sensor constraints and build a full overpass dict."""
+        geometry = self._point_access(satrec, sat, dt, tgt_lat, tgt_lon)
+        if geometry is None:
+            return None
+        sun_elevation = None
+        if sat.get('sensor') == 'Optical':
+            sun_elevation = solar_elevation(tgt_lat, tgt_lon, dt)
+            if sun_elevation < self.min_solar_elevation:
+                return None
         ss = self._sub_sat_lonlat(satrec, dt)
         if ss is None:
             return None
 
-        dist_km = _haversine_km(ss[0], ss[1], tgt_lat, tgt_lon)
-        actual_alt = self._sat_altitude_km(satrec, dt)
-        ona_deg = math.degrees(math.atan2(dist_km, actual_alt)) if actual_alt > 0 else 90.0
-
-        # Sensor filtering
-        if model == 'off_nadir':
-            if ona_deg > max_ona:
-                return None
-        else:  # pushbroom
-            if dist_km > swath_km / 2.0:
-                return None
-
-        # Elevation from observer
-        elev = 90.0 - ona_deg
+        dist_km = geometry['ground_dist_km']
+        actual_alt = geometry['orbit_alt_km']
+        ona_deg = geometry['off_nadir_deg']
+        elev = geometry['max_elevation']
 
         # Direction
         ss_before = self._sub_sat_lonlat(satrec, dt - timedelta(seconds=30))
@@ -884,23 +1373,24 @@ class _OverpassEngine:
             direction = 'Descending'
 
         # Duration estimate (time target is within sensor footprint)
-        half_reach = (swath_km / 2.0) if model == 'pushbroom' else (
-            actual_alt * math.tan(math.radians(max_ona))
-        )
-        ground_speed_kms = (2.0 * math.pi * _R_EARTH_KM) / period_s
-        duration_s = (2.0 * half_reach) / ground_speed_kms if ground_speed_kms > 0 else 0
-        duration_min = duration_s / 60.0
+        access_start, access_end = self._access_bounds(satrec, sat, dt, tgt_lat, tgt_lon, period_s)
+        duration_min = (access_end - access_start).total_seconds() / 60
+        display_width = swath_km
+        if model == 'off_nadir':
+            ratio = ((_R_EARTH_KM + actual_alt) / _R_EARTH_KM
+                     * math.sin(math.radians(max_ona)))
+            display_width = 2 * _R_EARTH_KM * (
+                math.asin(min(1.0, ratio)) - math.radians(max_ona))
 
         # Build orbit track, ground track, swath ribbon (~ 1 full period)
         orbit_track, ground_track, swath_ribbon = self._build_tracks(
-            satrec, dt, period_s, swath_km, actual_alt,
+            satrec, dt, period_s, display_width, actual_alt,
         )
-        if not _swath_intersects_aoi(swath_ribbon, aoi_bbox):
-            return None
 
         return {
             'satellite': sat['constellation'],
             'operator': sat['operator'],
+            'norad_id': int(norad_id) if norad_id is not None else sat.get('norad_id'),
             'datetime_utc': dt.strftime('%Y-%m-%d %H:%M UTC'),
             'direction': direction,
             'max_elevation': round(elev, 1),
@@ -908,6 +1398,19 @@ class _OverpassEngine:
             'off_nadir_deg': round(ona_deg, 1),
             'ground_dist_km': round(dist_km, 1),
             'confidence': 'SGP4',
+            'prediction_kind': ('opportunity' if geometry['sensor_constraints_verified']
+                                else 'geometric_candidate'),
+            'sensor_constraints_verified': geometry['sensor_constraints_verified'],
+            'sensor_warning': ('' if geometry['sensor_constraints_verified'] else
+                               'SAR incidence limits, look side and acquisition mode not verified'),
+            'solar_elevation_deg': round(sun_elevation, 2) if sun_elevation is not None else None,
+            'incidence_deg': round(geometry['incidence_deg'], 2),
+            'target_lat': tgt_lat, 'target_lon': tgt_lon,
+            'access_start_utc': access_start.isoformat(),
+            'access_end_utc': access_end.isoformat(),
+            'access_window_clipped': (access_start == self._valid_window[0]
+                                      or access_end == self._valid_window[1]),
+            'coverage_kind': 'access_corridor' if model == 'off_nadir' else 'nadir_swath',
             'sub_sat_lat': ss[0],
             'sub_sat_lon': ss[1],
             'orbit_alt_km': round(actual_alt, 1),
@@ -951,8 +1454,7 @@ class _OverpassEngine:
 
             slat, slon = ss
             slon, slat = _normalize_wgs84_lonlat(slon, slat)
-            alt_m = (math.sqrt(pos[0] ** 2 + pos[1] ** 2 + pos[2] ** 2)
-                     - _R_EARTH_KM) * 1000.0
+            alt_m = ecef_geodetic(pos)[2] * 1000.0
 
             orbit_pts.append((slon, slat, alt_m))
             ground_pts.append((slon, slat))
@@ -1197,7 +1699,7 @@ class _SmartSearchTask(QgsTask if QGIS_AVAILABLE else object):  # type: ignore
             connector_timeout = float(
                 self.search_params.get('connector_timeout', 60.0) or 60.0
             )
-            connector_timeout = max(5.0, min(60.0, connector_timeout))
+            connector_timeout = max(5.0, min(600.0, connector_timeout))
             connector_timeouts = self.search_params.get('connector_timeouts', {}) or {}
             auth_payloads = self.search_params.get('auth_payloads', {}) or {}
             connector_search_hints = (
@@ -1223,7 +1725,7 @@ class _SmartSearchTask(QgsTask if QGIS_AVAILABLE else object):  # type: ignore
                         t = float(connector_timeouts.get(cid) or connector_timeout)
                 except (TypeError, ValueError):
                     t = connector_timeout
-                return max(5.0, min(60.0, t))
+                return max(5.0, min(600.0, t))
 
             def _needs_authentication(ci: Dict[str, Any]) -> bool:
                 caps = ci.get('capabilities', []) if isinstance(ci, dict) else []
@@ -1381,7 +1883,8 @@ class _OverpassTask(QgsTask if QGIS_AVAILABLE else object):  # type: ignore
     def __init__(self, satellites: List[Dict], lat: float, lon: float,
                  aoi_bbox: Optional[Tuple[float, float, float, float]],
                  start_dt: datetime, end_dt: datetime,
-                 max_results: int = 500, max_workers: int = 4):
+                 max_results: int = 500, max_workers: int = 4,
+                 prediction_options=None):
         if QGIS_AVAILABLE:
             super().__init__('Altair Tasking — Overpass Prediction', QgsTask.CanCancel)
         self.satellites = satellites
@@ -1395,6 +1898,8 @@ class _OverpassTask(QgsTask if QGIS_AVAILABLE else object):  # type: ignore
         self.results: List[Dict] = []
         self.error_message: Optional[str] = None
         self.truncated = False
+        self.prediction_options = dict(prediction_options or {})
+        self.diagnostics: List[Dict] = []
 
     def run(self) -> bool:
         try:
@@ -1405,15 +1910,19 @@ class _OverpassTask(QgsTask if QGIS_AVAILABLE else object):  # type: ignore
 
             sat_count = len(satellites)
             done_count = 0
+            network_unavailable = Event()
 
             def _predict_one(sat: Dict[str, Any]):
                 t0 = time.perf_counter()
-                engine = _OverpassEngine()
+                engine = _OverpassEngine(
+                    network_unavailable=network_unavailable,
+                    **self.prediction_options,
+                )
                 passes = engine.predict(
                     sat, self.lat, self.lon, self.aoi_bbox,
                     self.start_dt, self.end_dt,
                 )
-                return sat, (passes or []), (time.perf_counter() - t0)
+                return sat, (passes or []), engine.diagnostics, (time.perf_counter() - t0)
 
             executor = ThreadPoolExecutor(
                 max_workers=min(self.max_workers, sat_count),
@@ -1426,13 +1935,14 @@ class _OverpassTask(QgsTask if QGIS_AVAILABLE else object):  # type: ignore
 
             try:
                 for fut in as_completed(future_map):
-                    if self.isCanceled():
+                    if QGIS_AVAILABLE and self.isCanceled():
                         return False
                     done_count += 1
                     sat_name = str(future_map[fut].get('constellation', '?'))
                     try:
-                        sat, passes, elapsed = fut.result()
+                        sat, passes, diagnostics, elapsed = fut.result()
                         self.results.extend(passes)
+                        self.diagnostics.extend(diagnostics)
                         logger.info(
                             'OverpassTask satellite done name=%s passes=%d elapsed=%.2fs',
                             sat.get('constellation', sat_name),
@@ -1441,23 +1951,26 @@ class _OverpassTask(QgsTask if QGIS_AVAILABLE else object):  # type: ignore
                         )
                     except Exception as exc:
                         logger.warning(f'OverpassTask satellite failed ({sat_name}): {exc}')
-
-                    if len(self.results) >= self.max_results:
-                        self.results = self.results[:self.max_results]
-                        self.truncated = True
-                        logger.info('OverpassTask max_results reached (%d)', self.max_results)
-                        break
+                        self.diagnostics.append(dict(satellite=sat_name, norad_id=None,
+                                                     status='unavailable', reason=str(exc)))
 
                     if hasattr(self, 'setProgress'):
                         self.setProgress((done_count / sat_count) * 100.0)
             finally:
                 executor.shutdown(wait=False, cancel_futures=True)
 
-            if self.isCanceled():
+            if QGIS_AVAILABLE and self.isCanceled():
                 return False
 
             # Sort by time
             self.results.sort(key=lambda p: p.get('datetime_utc', ''))
+            if len(self.results) > self.max_results:
+                self.results = self.results[:self.max_results]
+                self.truncated = True
+                logger.info(
+                    'OverpassTask max_results reached after sort (%d)',
+                    self.max_results,
+                )
             logger.info(
                 'OverpassTask: %d pass(es) predicted in %.2fs (satellites=%d, parallel=%d, truncated=%s)',
                 len(self.results),
@@ -1539,8 +2052,9 @@ class SmartTaskingDockWidget(QDockWidget):
         self._3d_nadir_layer = None
         self._busy_timer: Optional[QTimer] = None
         self._busy_state = 0
-        self._busy_frames = ['⏳', '⌛']
+        self._busy_frames = ['', '…']
         self._busy_text = 'Altair sta cercando...'
+        self._results_dock: Optional[QDockWidget] = None
 
         self._init_connector_manager()
         self._setup_ui()
@@ -1697,12 +2211,7 @@ class SmartTaskingDockWidget(QDockWidget):
 
         root = QWidget()
         scroll.setWidget(root)
-
-        root.setStyleSheet(
-            f'QLabel {{ color: {self._LABEL_COLOR}; }}'
-            f'QGroupBox {{ color: {self._LABEL_COLOR}; font-weight: bold; }}'
-            f'QComboBox {{ color: {self._LABEL_COLOR}; }}'
-        )
+        apply_dock_theme(root)
 
         layout = QVBoxLayout(root)
         layout.setContentsMargins(6, 6, 6, 6)
@@ -1716,14 +2225,14 @@ class SmartTaskingDockWidget(QDockWidget):
         hf.setBold(True)
         header.setFont(hf)
         header.setAlignment(Qt.AlignCenter)
-        header.setStyleSheet('color: #1f1f1f;')
+        set_label_role(header, 'title')
         layout.addWidget(header)
 
         subtitle = QLabel(
             'Explore available Satellite Images and Predict Overpasses for your Area of Interest (AOI). '
         )
         subtitle.setWordWrap(True)
-        subtitle.setStyleSheet(f'color: {self._LABEL_COLOR}; font-size: 10px;')
+        set_label_role(subtitle, 'subtitle')
         layout.addWidget(subtitle)
 
         # --- Quick filters ---
@@ -1741,18 +2250,29 @@ class SmartTaskingDockWidget(QDockWidget):
         date_row.addWidget(self.date_start)
         self.date_end = QDateEdit()
         self.date_end.setCalendarPopup(True)
-        self.date_end.setDate(QDate.currentDate().addDays(14))
+        self.date_end.setDate(QDate.currentDate().addDays(2))
         self.date_end.setDisplayFormat('yyyy-MM-dd')
         date_row.addWidget(QLabel('To:'))
         date_row.addWidget(self.date_end)
         filter_form.addRow('Time Range:', date_row)
 
         self.mode_label = QLabel('')
-        self.mode_label.setStyleSheet('font-weight: bold; font-size: 10px;')
+        set_label_role(self.mode_label, 'status')
+        set_status_state(self.mode_label, 'neutral')
         filter_form.addRow('', self.mode_label)
 
         self.date_start.dateChanged.connect(self._update_mode_label)
         self.date_end.dateChanged.connect(self._update_mode_label)
+
+        self.prediction_use_dates = QCheckBox('Use full date range for predictions')
+        filter_form.addRow('', self.prediction_use_dates)
+
+        self.prediction_offline = QCheckBox('Offline orbital cache only')
+        self.prediction_offline.setChecked(
+            self.settings.value('AltairEOData/predict_offline', False, type=bool))
+        self.prediction_offline.toggled.connect(
+            lambda value: self.settings.setValue('AltairEOData/predict_offline', value))
+        filter_form.addRow('', self.prediction_offline)
 
         # Sensor type
         self.sensor_combo = QComboBox()
@@ -1818,10 +2338,7 @@ class SmartTaskingDockWidget(QDockWidget):
         # --- Fun fact box ---
         self.fun_fact_label = QLabel('')
         self.fun_fact_label.setWordWrap(True)
-        self.fun_fact_label.setStyleSheet(
-            'background-color: #fffde7; color: #5d4037; font-size: 10px; '
-            'padding: 6px; border-radius: 4px; border: 1px solid #ffe082;'
-        )
+        set_label_role(self.fun_fact_label, 'panel')
         layout.addWidget(self.fun_fact_label)
 
         # --- AOI ---
@@ -1844,19 +2361,22 @@ class SmartTaskingDockWidget(QDockWidget):
         # --- Action buttons ---
         buttons = QHBoxLayout()
 
-        self.go_btn = QPushButton('🚀 Search / Predict')
+        self.go_btn = QPushButton('Search / Predict')
         self.go_btn.setToolTip('Archive → search catalogues  |  Tasking → predict overpasses')
         self.go_btn.clicked.connect(self._on_go_clicked)
+        set_button_variant(self.go_btn, 'primary')
         buttons.addWidget(self.go_btn)
 
-        self.reset_btn = QPushButton('🔄 Reset')
+        self.reset_btn = QPushButton('Reset')
         self.reset_btn.clicked.connect(self._reset_all)
+        set_button_variant(self.reset_btn, 'ghost')
         buttons.addWidget(self.reset_btn)
 
         layout.addLayout(buttons)
 
         self.busy_label = QLabel('')
-        self.busy_label.setStyleSheet('color: #b26a00; font-size: 10px; font-weight: bold;')
+        set_label_role(self.busy_label, 'status')
+        set_status_state(self.busy_label, 'warning')
         self.busy_label.hide()
         layout.addWidget(self.busy_label)
 
@@ -1866,7 +2386,8 @@ class SmartTaskingDockWidget(QDockWidget):
         # Tab 0: Archive Results
         archive_tab = QWidget()
         archive_layout = QVBoxLayout(archive_tab)
-        archive_layout.setContentsMargins(0, 0, 0, 0)
+        archive_layout.setContentsMargins(8, 8, 8, 8)
+        archive_layout.setSpacing(8)
 
         self.archive_table = QTableWidget()
         self.archive_table.setColumnCount(6)
@@ -1884,7 +2405,7 @@ class SmartTaskingDockWidget(QDockWidget):
         archive_layout.addWidget(self.archive_table)
 
         self.archive_count_label = QLabel('No search performed')
-        self.archive_count_label.setStyleSheet(f'color: {self._LABEL_COLOR}; font-size: 10px;')
+        set_label_role(self.archive_count_label, 'meta')
         archive_layout.addWidget(self.archive_count_label)
 
         archive_actions = QHBoxLayout()
@@ -1894,21 +2415,25 @@ class SmartTaskingDockWidget(QDockWidget):
         self.select_from_map_btn.setEnabled(False)
         self.select_from_map_btn.setToolTip('Select archive footprints directly from the map')
         self.select_from_map_btn.toggled.connect(self._on_selection_mode_toggled)
+        set_button_variant(self.select_from_map_btn, 'accent')
         archive_actions.addWidget(self.select_from_map_btn)
 
         self.zoom_btn = QPushButton('Zoom to Selection')
         self.zoom_btn.setEnabled(False)
         self.zoom_btn.clicked.connect(self._zoom_to_selected)
+        set_button_variant(self.zoom_btn, 'ghost')
         archive_actions.addWidget(self.zoom_btn)
 
         self.quicklook_btn = QPushButton('Open Quicklook')
         self.quicklook_btn.setEnabled(False)
         self.quicklook_btn.clicked.connect(self._open_quicklook)
+        set_button_variant(self.quicklook_btn, 'ghost')
         archive_actions.addWidget(self.quicklook_btn)
 
         self.load_cog_btn = QPushButton('Load COG')
         self.load_cog_btn.setEnabled(False)
         self.load_cog_btn.clicked.connect(self._load_cog)
+        set_button_variant(self.load_cog_btn, 'primary')
         archive_actions.addWidget(self.load_cog_btn)
 
         self.download_asset_btn = QPushButton('Download asset')
@@ -1917,6 +2442,7 @@ class SmartTaskingDockWidget(QDockWidget):
             'Download the selected scene main asset (COG/download URL) to disk'
         )
         self.download_asset_btn.clicked.connect(self._download_asset)
+        set_button_variant(self.download_asset_btn, 'ghost')
         archive_actions.addWidget(self.download_asset_btn)
 
         archive_layout.addLayout(archive_actions)
@@ -1929,25 +2455,24 @@ class SmartTaskingDockWidget(QDockWidget):
         self.quicklook_preview.setAlignment(Qt.AlignCenter)
         self.quicklook_preview.setMinimumHeight(180)
         self.quicklook_preview.setWordWrap(True)
-        self.quicklook_preview.setStyleSheet(
-            'border: 1px solid #cfcfcf; background: #fafafa; color: #555; padding: 8px;'
-        )
+        set_label_role(self.quicklook_preview, 'panel')
         quicklook_layout.addWidget(self.quicklook_preview)
         archive_layout.addWidget(quicklook_group)
 
-        self.results_tabs.addTab(archive_tab, '📦 Archive Results')
+        self.results_tabs.addTab(archive_tab, 'Archive Results')
 
         # Tab 1: Overpass Predictions
         overpass_tab = QWidget()
         overpass_layout = QVBoxLayout(overpass_tab)
-        overpass_layout.setContentsMargins(0, 0, 0, 0)
+        overpass_layout.setContentsMargins(8, 8, 8, 8)
+        overpass_layout.setSpacing(8)
 
         self.overpass_table = QTableWidget()
-        self.overpass_table.setColumnCount(9)
+        self.overpass_table.setColumnCount(12)
         self.overpass_table.setHorizontalHeaderLabels(
             ['Satellite', 'Operator', 'Date/Time (UTC)', 'Direction',
              'Max Elev (°)', 'Off-Nadir (°)', 'Dist (km)',
-             'Duration (min)', 'Confidence']
+             'Access Window (min)', 'Method', 'Sun Elev (deg)', 'TLE Epoch (UTC)', 'TLE Updated (UTC)']
         )
         ohh = self.overpass_table.horizontalHeader()
         ohh.setSectionResizeMode(QHeaderView.ResizeToContents)
@@ -1958,41 +2483,77 @@ class SmartTaskingDockWidget(QDockWidget):
         self.overpass_table.itemSelectionChanged.connect(self._on_overpass_row_selected)
         overpass_layout.addWidget(self.overpass_table)
 
+        overpass_layout.addWidget(QLabel('SAR geometric candidates - sensor constraints unverified'))
+        self.candidate_table = QTableWidget()
+        self.candidate_table.setColumnCount(self.overpass_table.columnCount())
+        self.candidate_table.setHorizontalHeaderLabels([
+            self.overpass_table.horizontalHeaderItem(index).text()
+            for index in range(self.overpass_table.columnCount())])
+        self.candidate_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.candidate_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.candidate_table.setAlternatingRowColors(True)
+        self.candidate_table.setSortingEnabled(True)
+        self.candidate_table.itemSelectionChanged.connect(self._on_candidate_row_selected)
+        overpass_layout.addWidget(self.candidate_table)
+
         self.overpass_count_label = QLabel('No prediction performed')
-        self.overpass_count_label.setStyleSheet(f'color: {self._LABEL_COLOR}; font-size: 10px;')
+        set_label_role(self.overpass_count_label, 'meta')
         overpass_layout.addWidget(self.overpass_count_label)
 
-        self.results_tabs.addTab(overpass_tab, '🛰️ Predicted Overpasses')
+        self.results_tabs.addTab(overpass_tab, 'Predicted Overpasses')
 
         # Tab 2: Mission Summary
         summary_tab = QWidget()
         summary_layout = QVBoxLayout(summary_tab)
-        summary_layout.setContentsMargins(0, 0, 0, 0)
+        summary_layout.setContentsMargins(8, 8, 8, 8)
+        summary_layout.setSpacing(8)
 
         self.summary_text = QTextEdit()
         self.summary_text.setReadOnly(True)
-        self.summary_text.setStyleSheet(
-            f'color: {self._LABEL_COLOR}; font-size: 10px; font-family: monospace;'
-        )
+        self.summary_text.setFont(QFont('Courier New', 9))
         summary_layout.addWidget(self.summary_text)
-        self.results_tabs.addTab(summary_tab, '📋 Summary')
+        self.results_tabs.addTab(summary_tab, 'Summary')
 
-        layout.addWidget(self.results_tabs)
-
-        # --- Send to Tasking button ---
-        self.send_to_tasking_btn = QPushButton('📨 Send Order')
+        self.send_to_tasking_btn = QPushButton('Compose Email Order')
+        self.send_to_tasking_btn.setEnabled(False)
         self.send_to_tasking_btn.setToolTip(
-            'Pre-fill the Tasking Order form with the selected archive scene '
-            'or predicted overpass.'
+            'Create an email draft from the selected archive scene or predicted overpass.'
         )
-        self.send_to_tasking_btn.clicked.connect(self._send_to_tasking)
-        layout.addWidget(self.send_to_tasking_btn)
+        self.send_to_tasking_btn.clicked.connect(self._compose_result_order_email)
+        set_button_variant(self.send_to_tasking_btn, 'accent')
+        self.results_tabs.currentChanged.connect(self._update_send_order_button_state)
+
+        self._attach_results_panel(layout)
 
         # --- Status ---
         self.status_label = QLabel('Ready — flip switches and pick a satellite.')
-        self.status_label.setStyleSheet(f'color: {self._LABEL_COLOR}; font-size: 10px;')
+        set_label_role(self.status_label, 'status')
+        set_status_state(self.status_label, 'neutral')
         self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
+
+    def _attach_results_panel(self, fallback_layout: QVBoxLayout) -> None:
+        main_window = self.iface.mainWindow() if self.iface else None
+        if main_window is None:
+            fallback_layout.addWidget(self.results_tabs)
+            fallback_layout.addWidget(self.send_to_tasking_btn)
+            return
+
+        self._results_dock = QDockWidget('Results', main_window)
+        self._results_dock.setObjectName('AltairSmartTaskingResultsDock')
+        self._results_dock.setAllowedAreas(
+            Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea
+        )
+        results_root = QWidget()
+        results_layout = QVBoxLayout(results_root)
+        results_layout.setContentsMargins(8, 8, 8, 8)
+        results_layout.setSpacing(8)
+        results_layout.addWidget(self.results_tabs)
+        results_layout.addWidget(self.send_to_tasking_btn)
+        apply_dock_theme(results_root)
+        self._results_dock.setWidget(results_root)
+        main_window.addDockWidget(Qt.RightDockWidgetArea, self._results_dock)
+        self._results_dock.hide()
 
         # Initial mode label update
         self._update_mode_label()
@@ -2088,19 +2649,19 @@ class SmartTaskingDockWidget(QDockWidget):
         sat = next((s for s in self._filtered_catalogue if s['constellation'] == cname), None)
         if sat:
             self.fun_fact_label.setText(
-                f'💡 <b>{sat["constellation"]}</b> ({sat["operator"]}): {sat["fun_fact"]}'
+                f'<b>{sat["constellation"]}</b> ({sat["operator"]}): {sat["fun_fact"]}'
             )
             self.fun_fact_label.show()
         elif cname in ('All constellations', '(none available)'):
             count = len(self._filtered_catalogue)
             if count:
                 self.fun_fact_label.setText(
-                    f'🎯 <b>{count}</b> satellite(s) match your filters. '
+                    f'<b>{count}</b> satellite(s) match your filters. '
                     f'Narrow it down or just go with "All" — we won\'t judge.'
                 )
             else:
                 self.fun_fact_label.setText(
-                    '🤷 Zero matches. Try loosening the switches above, '
+                    'Zero matches. Try loosening the switches above, '
                     'or accept that no satellite can solve everything. Yet.'
                 )
             self.fun_fact_label.show()
@@ -2108,30 +2669,30 @@ class SmartTaskingDockWidget(QDockWidget):
             self.fun_fact_label.hide()
 
         n = len(self._filtered_catalogue)
-        self.status_label.setText(f'{n} satellite(s) match your criteria. Pick one and hit 🚀.')
-        self.status_label.setStyleSheet(f'color: {self._LABEL_COLOR}; font-size: 10px;')
+        self.status_label.setText(f'{n} satellite(s) match your criteria.')
+        set_status_state(self.status_label, 'neutral')
 
     # ------------------------------------------------------------------
     # Mode (archive vs new tasking)
     # ------------------------------------------------------------------
 
     def _update_mode_label(self):
-        today = date.today()
+        today = datetime.now(timezone.utc).date()
         end_py = self.date_end.date().toPyDate()
         start_py = self.date_start.date().toPyDate()
 
         if end_py <= today:
-            self.mode_label.setText('📦 MODE: Archive Search (all dates in the past)')
-            self.mode_label.setStyleSheet('color: #1565c0; font-weight: bold; font-size: 10px;')
-            self.go_btn.setText('🔍 Search Archive')
+            self.mode_label.setText('MODE: Archive Search (all dates in the past)')
+            set_status_state(self.mode_label, 'info')
+            self.go_btn.setText('Search Archive')
         elif start_py > today:
-            self.mode_label.setText('🛰️ MODE: New Tasking — Overpass Prediction')
-            self.mode_label.setStyleSheet('color: #2e7d32; font-weight: bold; font-size: 10px;')
-            self.go_btn.setText('🛰️ Predict Overpasses')
+            self.mode_label.setText('MODE: New Tasking — Overpass Prediction')
+            set_status_state(self.mode_label, 'success')
+            self.go_btn.setText('Predict Overpasses')
         else:
-            self.mode_label.setText('🔀 MODE: Mixed (archive search + overpass prediction)')
-            self.mode_label.setStyleSheet('color: #e65100; font-weight: bold; font-size: 10px;')
-            self.go_btn.setText('🔍 Search + Predict')
+            self.mode_label.setText('MODE: Mixed (archive search + overpass prediction)')
+            set_status_state(self.mode_label, 'warning')
+            self.go_btn.setText('Search + Predict')
 
     @staticmethod
     def _archive_day_start(day: date) -> str:
@@ -2234,10 +2795,10 @@ class SmartTaskingDockWidget(QDockWidget):
         """Central dispatch — detect mode and launch appropriate task(s)."""
         if self._has_active_tasks():
             self.status_label.setText('Operation already running — wait for completion before starting a new search.')
-            self.status_label.setStyleSheet('color: #ffcc00; font-size: 10px;')
+            set_status_state(self.status_label, 'warning')
             return
 
-        today = date.today()
+        today = datetime.now(timezone.utc).date()
         start_py = self.date_start.date().toPyDate()
         end_py = self.date_end.date().toPyDate()
 
@@ -2252,7 +2813,9 @@ class SmartTaskingDockWidget(QDockWidget):
             return
 
         do_archive = end_py <= today or start_py <= today
-        do_tasking = end_py > today
+        do_tasking = end_py >= today
+
+        self._show_results_panel()
 
         if do_archive:
             # Normalize archive date range: ensure start <= end; cap end to today.
@@ -2261,12 +2824,22 @@ class SmartTaskingDockWidget(QDockWidget):
             self._launch_archive_search(selected, bbox, arch_start, arch_end)
 
         if do_tasking:
-            tasking_start = max(start_py, today + timedelta(days=1))
+            tasking_start = max(start_py, today)
             tasking_end = max(end_py, tasking_start)
             self._launch_overpass_prediction(selected, bbox, tasking_start, tasking_end)
 
         # Always generate text summary
         self._generate_summary(selected, bbox)
+
+    def _show_results_panel(self) -> None:
+        if self._results_dock is not None:
+            main_window = self.iface.mainWindow() if self.iface else None
+            if main_window is not None and self not in main_window.tabifiedDockWidgets(
+                self._results_dock
+            ):
+                main_window.tabifyDockWidget(self, self._results_dock)
+            self._results_dock.show()
+            self._results_dock.raise_()
 
     # ------------------------------------------------------------------
     # Archive search
@@ -2331,14 +2904,21 @@ class SmartTaskingDockWidget(QDockWidget):
             )
             return
 
-        base_timeout = float(
-            self.settings.value('AltairEOData/smart_archive_connector_timeout', 60.0)
+        default_timeout = float(
+            self.settings.value('AltairEOData/default_connection_timeout', 60.0)
         )
-        base_timeout = max(5.0, min(60.0, base_timeout))
+        base_timeout = float(
+            self.settings.value(
+                'AltairEOData/smart_archive_connector_timeout', default_timeout
+            )
+        )
+        base_timeout = max(5.0, min(600.0, base_timeout))
         jaxa_timeout = float(self.settings.value('AltairEOData/jaxa_search_timeout', base_timeout))
-        jaxa_timeout = max(5.0, min(60.0, jaxa_timeout))
-        vantor_timeout = float(self.settings.value('AltairEOData/vantor_discovery_timeout', 60.0))
-        vantor_timeout = max(5.0, min(60.0, vantor_timeout))
+        jaxa_timeout = max(5.0, min(600.0, jaxa_timeout))
+        vantor_timeout = float(
+            self.settings.value('AltairEOData/vantor_discovery_timeout', base_timeout)
+        )
+        vantor_timeout = max(5.0, min(600.0, vantor_timeout))
         limit_per_connector = int(self.settings.value('AltairEOData/smart_archive_limit_per_connector', 20))
         limit_per_connector = max(5, min(100, limit_per_connector))
         max_total_results = int(self.settings.value('AltairEOData/smart_archive_max_results', 120))
@@ -2367,7 +2947,7 @@ class SmartTaskingDockWidget(QDockWidget):
             'connector_search_hints': connector_search_hints,
         }
         self.status_label.setText('Searching archives …')
-        self.status_label.setStyleSheet('color: #88ccff; font-size: 10px;')
+        set_status_state(self.status_label, 'info')
         self._start_busy_indicator('Ricerca archivio in corso...')
 
         if QGIS_AVAILABLE and hasattr(QgsApplication, 'taskManager'):
@@ -2407,7 +2987,7 @@ class SmartTaskingDockWidget(QDockWidget):
         self.results_tabs.setCurrentIndex(0)
         n = len(self._search_results)
         self.status_label.setText(f'Archive search complete — {n} scene(s)')
-        self.status_label.setStyleSheet('color: #00ffbf; font-size: 10px;')
+        set_status_state(self.status_label, 'success')
         self._update_go_button_state()
         self._sync_busy_indicator()
 
@@ -2426,7 +3006,11 @@ class SmartTaskingDockWidget(QDockWidget):
             'blacksky gen-3': [r'\bblacksky\b', r'\bgen[-\s]?3\b'],
             'jilin-1 gaofen': [r'\bjilin\b', r'\bgaofen\b'],
             'alos-2 (palsar-2)': [r'\balos[-\s]?2\b', r'\bpalsar[-\s]?2\b'],
-            'sentinel-2': [r'\bsentinel[-\s]?2\b', r'\bs2[a-b]?\b'],
+            'sentinel-2': [
+                r'\bsentinel[-\s]?2\b',
+                r'\bs2[a-b]?\b',
+                r'\bswisseo_s2-sr_v\d+\b',
+            ],
             'landsat 8': [r'\blandsat[-\s]?8\b', r'\blc08\b'],
             'landsat 9': [r'\blandsat[-\s]?9\b', r'\blc09\b'],
             'modis (terra/aqua)': [r'\bmodis\b', r'\bterra\b', r'\baqua\b'],
@@ -2525,7 +3109,7 @@ class SmartTaskingDockWidget(QDockWidget):
         self._active_search_task = None
         msg = task.error_message or 'Unknown error'
         self.status_label.setText(f'Archive search failed: {msg}')
-        self.status_label.setStyleSheet('color: #ff6b6b; font-size: 10px;')
+        set_status_state(self.status_label, 'error')
         self._update_go_button_state()
         self._sync_busy_indicator()
 
@@ -2697,14 +3281,24 @@ class SmartTaskingDockWidget(QDockWidget):
         self.download_asset_btn.setEnabled(
             bool(single_item and self._archive_item_can_download_asset(single_item))
         )
-        self.send_to_tasking_btn.setEnabled(
-            bool(single_item and self._archive_item_can_order(single_item))
-        )
+        self._update_send_order_button_state()
 
         if single_item is not None:
             self._update_quicklook_preview(single_item)
         else:
             self._update_quicklook_preview(None)
+
+    def _update_send_order_button_state(self, *_args):
+        if not hasattr(self, 'send_to_tasking_btn'):
+            return
+        tab_index = self.results_tabs.currentIndex()
+        if tab_index == 0:
+            enabled = len(self._get_selected_archive_items()) == 1
+        elif tab_index == 1:
+            enabled = self._selected_prediction() is not None
+        else:
+            enabled = False
+        self.send_to_tasking_btn.setEnabled(enabled)
 
     def _on_layer_selection_changed(self):
         if self._updating_selection or not self._is_footprints_layer_valid():
@@ -2769,8 +3363,8 @@ class SmartTaskingDockWidget(QDockWidget):
             self._selection_tool = FootprintSelectionTool(canvas, self._footprints_layer)
             self._previous_map_tool = canvas.mapTool()
             canvas.setMapTool(self._selection_tool)
-            self.select_from_map_btn.setText('✓ Map Selection Active')
-            self.select_from_map_btn.setStyleSheet('QPushButton { background-color: #4CAF50; color: white; }')
+            self.select_from_map_btn.setText('Map Selection Active')
+            set_widget_state(self.select_from_map_btn, 'active')
         except Exception as exc:
             logger.warning(f'Could not activate map selection mode: {exc}')
             self.select_from_map_btn.setChecked(False)
@@ -2791,7 +3385,7 @@ class SmartTaskingDockWidget(QDockWidget):
             self._selection_tool = None
             self._previous_map_tool = None
             self.select_from_map_btn.setText('Select from Map')
-            self.select_from_map_btn.setStyleSheet('')
+            set_widget_state(self.select_from_map_btn, 'neutral')
 
     def _zoom_to_selected(self):
         rows = self._get_selected_archive_result_indices()
@@ -2847,7 +3441,7 @@ class SmartTaskingDockWidget(QDockWidget):
                 reason,
             )
             self.status_label.setText('No quicklook URL available for this scene.')
-            self.status_label.setStyleSheet(f'color: {self._LABEL_COLOR}; font-size: 10px;')
+            set_status_state(self.status_label, 'warning')
             return
 
         logger.info(
@@ -2874,7 +3468,7 @@ class SmartTaskingDockWidget(QDockWidget):
             url,
         )
         self.status_label.setText('Quicklook shown in panel (georeferenced map portrayal not available).')
-        self.status_label.setStyleSheet(f'color: {self._LABEL_COLOR}; font-size: 10px;')
+        set_status_state(self.status_label, 'info')
 
     def _extract_quicklook_url(self, item: Dict[str, Any]) -> Optional[str]:
         url, _ = self._extract_quicklook_url_with_reason(item)
@@ -3046,7 +3640,7 @@ class SmartTaskingDockWidget(QDockWidget):
             if layer.isValid():
                 QgsProject.instance().addMapLayer(layer)
                 self.status_label.setText('Quicklook loaded as georeferenced raster in map.')
-                self.status_label.setStyleSheet('color: #00ffbf; font-size: 10px;')
+                set_status_state(self.status_label, 'success')
                 return True
 
         bbox = item.get('bbox')
@@ -3110,7 +3704,7 @@ class SmartTaskingDockWidget(QDockWidget):
         layer.setCrs(QgsCoordinateReferenceSystem('EPSG:4326'))
         QgsProject.instance().addMapLayer(layer)
         self.status_label.setText('Quicklook georeferenced from bbox and loaded in map.')
-        self.status_label.setStyleSheet('color: #00ffbf; font-size: 10px;')
+        set_status_state(self.status_label, 'success')
         return True
 
     _COG_ASSET_PRIORITY = (
@@ -3299,13 +3893,13 @@ class SmartTaskingDockWidget(QDockWidget):
 
         if loaded:
             self.status_label.setText(f'{loaded} COG layer(s) added to map.')
-            self.status_label.setStyleSheet('color: #00ffbf; font-size: 10px;')
+            set_status_state(self.status_label, 'success')
         else:
             msg = 'No valid COG layer loaded.'
             if errors:
                 msg += f' Failed: {", ".join(errors[:3])}'
             self.status_label.setText(msg)
-            self.status_label.setStyleSheet('color: #ff6b6b; font-size: 10px;')
+            set_status_state(self.status_label, 'error')
 
     def _download_asset(self):
         selected_items = self._get_selected_archive_items()
@@ -3321,7 +3915,7 @@ class SmartTaskingDockWidget(QDockWidget):
 
         if not href:
             self.status_label.setText('No downloadable asset URL for selected scene.')
-            self.status_label.setStyleSheet('color: #ff6b6b; font-size: 10px;')
+            set_status_state(self.status_label, 'error')
             logger.info(
                 'Archive download unresolved source=%s scene=%s reason=%s',
                 source,
@@ -3335,7 +3929,13 @@ class SmartTaskingDockWidget(QDockWidget):
         if '.' not in suggested_name:
             suggested_name = f'{suggested_name}.tif'
 
-        default_dir = str(self.settings.value('altair/download_folder', '') or '').strip()
+        default_dir = str(
+            self.settings.value(
+                'AltairEOData/download_folder',
+                self.settings.value('altair/download_folder', ''),
+            )
+            or ''
+        ).strip()
         if not default_dir or not os.path.isdir(default_dir):
             default_dir = os.path.join(os.path.expanduser('~'), 'Downloads')
             if not os.path.isdir(default_dir):
@@ -3354,7 +3954,8 @@ class SmartTaskingDockWidget(QDockWidget):
         try:
             chosen_dir = os.path.dirname(save_path)
             if chosen_dir:
-                self.settings.setValue('altair/download_folder', chosen_dir)
+                self.settings.setValue('AltairEOData/download_folder', chosen_dir)
+                self.settings.remove('altair/download_folder')
         except Exception:
             pass
 
@@ -3380,7 +3981,7 @@ class SmartTaskingDockWidget(QDockWidget):
             self.status_label.setText(
                 f'Asset downloaded: {os.path.basename(save_path)}'
             )
-            self.status_label.setStyleSheet('color: #00ffbf; font-size: 10px;')
+            set_status_state(self.status_label, 'success')
             logger.info(
                 'Archive asset downloaded source=%s scene=%s reason=%s path=%s',
                 source,
@@ -3390,7 +3991,7 @@ class SmartTaskingDockWidget(QDockWidget):
             )
         except Exception as exc:
             self.status_label.setText(f'Download failed: {exc}')
-            self.status_label.setStyleSheet('color: #ff6b6b; font-size: 10px;')
+            set_status_state(self.status_label, 'error')
             logger.error(
                 'Archive asset download failed source=%s scene=%s url=%s: %s',
                 source,
@@ -3405,20 +4006,46 @@ class SmartTaskingDockWidget(QDockWidget):
 
     def _on_overpass_row_selected(self):
         """Visualise the selected overpass in the QGIS 3D view."""
+        if self.overpass_table.selectionModel().selectedRows():
+            self.candidate_table.blockSignals(True)
+            self.candidate_table.clearSelection()
+            self.candidate_table.blockSignals(False)
+        selected = self._selected_prediction()
+        if selected:
+            self._visualize_overpass_3d(selected)
+        else:
+            self._remove_3d_layers()
+        self._update_send_order_button_state()
+
+    def _on_candidate_row_selected(self):
+        if self.candidate_table.selectionModel().selectedRows():
+            self.overpass_table.blockSignals(True)
+            self.overpass_table.clearSelection()
+            self.overpass_table.blockSignals(False)
+        selected = self._selected_prediction()
+        if selected:
+            self._visualize_overpass_3d(selected)
+        else:
+            self._remove_3d_layers()
+        self._update_send_order_button_state()
+
+    def _selected_prediction(self):
+        table = self.overpass_table
+        if self.candidate_table.selectionModel().selectedRows():
+            table = self.candidate_table
         rows = sorted(
-            {idx.row() for idx in self.overpass_table.selectionModel().selectedRows()}
+            {idx.row() for idx in table.selectionModel().selectedRows()}
         )
         if not rows:
-            self._remove_3d_layers()
-            return
+            return None
         vis_row = rows[0]  # one pass at a time
-        item = self.overpass_table.item(vis_row, self._OV_SAT)
+        item = table.item(vis_row, self._OV_SAT)
         if not item:
             return
         orig_idx = item.data(Qt.UserRole)
         if orig_idx is None or orig_idx >= len(self._overpass_results):
             return
-        self._visualize_overpass_3d(self._overpass_results[orig_idx])
+        return self._overpass_results[orig_idx]
 
     def _visualize_overpass_3d(self, op: Dict):
         """Create five memory layers for a single satellite overpass.
@@ -3534,25 +4161,30 @@ class SmartTaskingDockWidget(QDockWidget):
         # ---- 3. Swath corridor (Polygon on surface) ------------------
         swath_layer = None
         if len(swath_ribbon) >= 4:
+            corridor_name = ('Geometric Access Corridor' if op.get('coverage_kind') == 'access_corridor'
+                             else 'Predicted Nadir Swath')
             swath_layer = QgsVectorLayer(
-                'MultiPolygon?crs=EPSG:4326', 'Search and Predict Swath', 'memory',
+                'MultiPolygon?crs=EPSG:4326', corridor_name, 'memory',
             )
             swath_layer.setCrs(QgsCoordinateReferenceSystem('EPSG:4326'))
             swp = swath_layer.dataProvider()
             swp.addAttributes(fld)
             swath_layer.updateFields()
 
-            # Standardize ring to strict WGS84 bounds before geometry creation.
-            clamped = []
-            for pt in swath_ribbon:
-                clon, clat = _normalize_wgs84_lonlat(pt[0], pt[1])
-                clamped.append((clon, clat))
+            polygon_geometries = []
+            for ring in _swath_polygon_parts(swath_ribbon):
+                coords = ', '.join(f'{lon} {lat}' for lon, lat in ring)
+                polygon = QgsGeometry.fromWkt(f'POLYGON(({coords}))')
+                if polygon is not None and not polygon.isEmpty():
+                    polygon_geometries.append(polygon)
 
-            if clamped and clamped[0] != clamped[-1]:
-                clamped.append(clamped[0])
-
-            coords = ', '.join(f'{p[0]} {p[1]}' for p in clamped)
-            raw_geom = QgsGeometry.fromWkt(f'POLYGON(({coords}))')
+            raw_geom = None
+            if polygon_geometries:
+                try:
+                    raw_geom = QgsGeometry.unaryUnion(polygon_geometries)
+                except Exception as exc:
+                    logger.debug(f'Swath polygon union failed; collecting pieces: {exc}')
+                    raw_geom = QgsGeometry.collectGeometry(polygon_geometries)
             swath_geoms: List[QgsGeometry] = []
 
             if raw_geom is not None and not raw_geom.isEmpty():
@@ -3938,8 +4570,20 @@ class SmartTaskingDockWidget(QDockWidget):
             return
 
         lat, lon = center
-        start_dt = datetime(start_d.year, start_d.month, start_d.day, tzinfo=timezone.utc)
-        end_dt = datetime(end_d.year, end_d.month, end_d.day, 23, 59, 59, tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
+        prediction_hours = int(self.settings.value('AltairEOData/predict_hours', 48))
+        minimum_sun_elevation = float(
+            self.settings.value('AltairEOData/predict_min_sun', 10.0)
+        )
+        max_tle_age_hours = int(
+            self.settings.value('AltairEOData/predict_tle_age', 72)
+        )
+        start_dt, end_dt = prediction_window(
+            start_d, end_d, now, hours=prediction_hours,
+            use_dates=self.prediction_use_dates.isChecked())
+        prediction_options = dict(max_tle_age_hours=max_tle_age_hours,
+                                  min_solar_elevation=minimum_sun_elevation,
+                                  offline=self.prediction_offline.isChecked())
         max_days = int(self.settings.value('AltairEOData/smart_predict_max_days', 21))
         max_days = max(1, min(120, max_days))
         requested_days = max(1, (end_dt.date() - start_dt.date()).days + 1)
@@ -3954,7 +4598,7 @@ class SmartTaskingDockWidget(QDockWidget):
         predict_parallelism = max(1, min(8, predict_parallelism))
 
         self.status_label.setText('Predicting overpasses …')
-        self.status_label.setStyleSheet('color: #88ccff; font-size: 10px;')
+        set_status_state(self.status_label, 'info')
         self._start_busy_indicator('Predizione overpass in corso...')
         if horizon_clipped:
             logger.info(
@@ -3973,6 +4617,7 @@ class SmartTaskingDockWidget(QDockWidget):
                 end_dt,
                 max_results=max_overpasses,
                 max_workers=predict_parallelism,
+                prediction_options=prediction_options,
             )
             self._active_overpass_task = task
             task.taskCompleted.connect(lambda: self._on_overpass_done(task))
@@ -3990,6 +4635,7 @@ class SmartTaskingDockWidget(QDockWidget):
                 end_dt,
                 max_results=max_overpasses,
                 max_workers=predict_parallelism,
+                prediction_options=prediction_options,
             )
             self._active_overpass_task = task
             self._update_go_button_state()
@@ -4006,10 +4652,22 @@ class SmartTaskingDockWidget(QDockWidget):
         self._populate_overpass_table()
         self.results_tabs.setCurrentIndex(1)
         n = len(self._overpass_results)
-        method = 'SGP4' if _SGP4_OK else 'analytical model'
+        unavailable = sum(report['status'] == 'unavailable' for report in task.diagnostics)
+        partial = any(report['status'] == 'partial' for report in task.diagnostics)
+        computed = sum(report['status'] != 'unavailable' for report in task.diagnostics)
+        candidates = sum(result.get('prediction_kind') == 'geometric_candidate'
+                         for result in self._overpass_results)
+        if not computed:
+            state = 'Prediction unavailable'
+        elif unavailable or partial:
+            state = 'Partial prediction'
+        else:
+            state = 'Prediction complete' if n else 'No pass predicted'
         suffix = ' (truncated for performance)' if getattr(task, 'truncated', False) else ''
-        self.status_label.setText(f'Prediction complete — {n} overpass(es) ({method}){suffix}')
-        self.status_label.setStyleSheet('color: #00e5ff; font-size: 10px;')
+        self.status_label.setText(
+            f'{state}: {n - candidates} opportunities, {candidates} SAR candidates; '
+            f'{unavailable} orbital records unavailable{suffix}')
+        set_status_state(self.status_label, 'warning' if unavailable or partial or not computed else 'success')
         self._update_go_button_state()
         self._sync_busy_indicator()
 
@@ -4021,44 +4679,63 @@ class SmartTaskingDockWidget(QDockWidget):
         self._active_overpass_task = None
         msg = task.error_message or 'Unknown error'
         self.status_label.setText(f'Overpass prediction failed: {msg}')
-        self.status_label.setStyleSheet('color: #ff6b6b; font-size: 10px;')
+        set_status_state(self.status_label, 'error')
         self._update_go_button_state()
         self._sync_busy_indicator()
 
     def _populate_overpass_table(self):
-        self.overpass_table.blockSignals(True)
-        self.overpass_table.setSortingEnabled(False)
+        for table in (self.overpass_table, self.candidate_table):
+            table.blockSignals(True)
+            table.setSortingEnabled(False)
+            table.setRowCount(0)
         count = len(self._overpass_results)
-        self.overpass_table.setRowCount(count)
 
-        for row_idx, p in enumerate(self._overpass_results):
+        for result_index, p in enumerate(self._overpass_results):
+            table = (self.candidate_table if p.get('prediction_kind') == 'geometric_candidate'
+                     else self.overpass_table)
+            row_idx = table.rowCount()
+            table.insertRow(row_idx)
             sat_item = QTableWidgetItem(str(p.get('satellite', '')))
-            sat_item.setData(Qt.UserRole, row_idx)
-            self.overpass_table.setItem(row_idx, self._OV_SAT, sat_item)
-            self.overpass_table.setItem(row_idx, self._OV_OPERATOR,
+            sat_item.setData(Qt.UserRole, result_index)
+            sat_item.setToolTip(f'NORAD {p.get("norad_id", "-")}; '
+                               f'target={p.get("target_lat")}, {p.get("target_lon")}')
+            table.setItem(row_idx, self._OV_SAT, sat_item)
+            table.setItem(row_idx, self._OV_OPERATOR,
                                         QTableWidgetItem(str(p.get('operator', ''))))
-            self.overpass_table.setItem(row_idx, self._OV_TIME,
-                                        QTableWidgetItem(str(p.get('datetime_utc', ''))))
-            self.overpass_table.setItem(row_idx, self._OV_DIR,
+            time_item = QTableWidgetItem(str(p.get('datetime_utc', '')))
+            time_item.setToolTip(f'{p.get("access_start_utc", "")} / {p.get("access_end_utc", "")}\n'
+                                f'Window clipped: {p.get("access_window_clipped", False)}')
+            table.setItem(row_idx, self._OV_TIME, time_item)
+            table.setItem(row_idx, self._OV_DIR,
                                         QTableWidgetItem(str(p.get('direction', ''))))
             ei = _NumItem(str(p.get('max_elevation', '')))
             ei.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            self.overpass_table.setItem(row_idx, self._OV_ELEV, ei)
+            table.setItem(row_idx, self._OV_ELEV, ei)
             oi = _NumItem(str(p.get('off_nadir_deg', '')))
             oi.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            self.overpass_table.setItem(row_idx, self._OV_ONA, oi)
+            table.setItem(row_idx, self._OV_ONA, oi)
             gi = _NumItem(str(p.get('ground_dist_km', '')))
             gi.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            self.overpass_table.setItem(row_idx, self._OV_DIST, gi)
+            table.setItem(row_idx, self._OV_DIST, gi)
             di = _NumItem(str(p.get('duration_min', '')))
             di.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            self.overpass_table.setItem(row_idx, self._OV_DUR, di)
-            self.overpass_table.setItem(row_idx, self._OV_CONF,
-                                        QTableWidgetItem(str(p.get('confidence', ''))))
+            table.setItem(row_idx, self._OV_DUR, di)
+            method_item = QTableWidgetItem(str(p.get('confidence', '')))
+            method_item.setToolTip(p.get('sensor_warning', 'Geometric access; acquisition not guaranteed'))
+            table.setItem(row_idx, self._OV_CONF, method_item)
+            sun = p.get('solar_elevation_deg')
+            table.setItem(row_idx, 9, QTableWidgetItem(str(sun) if sun is not None else '-'))
+            table.setItem(row_idx, 10, QTableWidgetItem(p.get('tle_epoch', '')))
+            updated = QTableWidgetItem(p.get('tle_fetched_at', ''))
+            updated.setToolTip(p.get('tle_source', 'unknown'))
+            table.setItem(row_idx, 11, updated)
 
-        self.overpass_table.setSortingEnabled(True)
-        self.overpass_table.blockSignals(False)
-        self.overpass_count_label.setText(f'{count} overpass(es) predicted')
+        for table in (self.overpass_table, self.candidate_table):
+            table.setSortingEnabled(True)
+            table.blockSignals(False)
+        self.overpass_count_label.setText(
+            f'{self.overpass_table.rowCount()} point opportunities; '
+            f'{self.candidate_table.rowCount()} unverified SAR candidates')
 
     def _build_archive_auth_payloads(self, connector_ids: List[str]) -> Tuple[List[str], Dict[str, Dict[str, Any]]]:
         """Build non-blocking auth payloads; network auth happens in search task."""
@@ -4137,7 +4814,7 @@ class SmartTaskingDockWidget(QDockWidget):
             if bbox else 'Not defined'
         )
 
-        sgp4_tag = '✅ SGP4 available' if _SGP4_OK else '⚠️ SGP4 not installed — using analytical model'
+        sgp4_tag = 'SGP4 available' if _SGP4_OK else 'SGP4 missing - prediction unavailable'
 
         lines = [
             '═══════════════════════════════════════',
@@ -4181,7 +4858,8 @@ class SmartTaskingDockWidget(QDockWidget):
             lines += [
                 '',
                 '───────────────────────────────────────',
-                f'  Predicted overpasses: {len(self._overpass_results)} pass(es)',
+                f'  Point opportunities: {sum(p.get("prediction_kind") == "opportunity" for p in self._overpass_results)}',
+                f'  Unverified SAR candidates: {sum(p.get("prediction_kind") == "geometric_candidate" for p in self._overpass_results)}',
                 '───────────────────────────────────────',
             ]
             # Top-5 overpasses by elevation
@@ -4189,7 +4867,7 @@ class SmartTaskingDockWidget(QDockWidget):
             for p in top:
                 lines.append(
                     f'  ▸ {p["satellite"]:22s}  {p["datetime_utc"]:20s}  '
-                    f'elev {p["max_elevation"]:5.1f}°  {p["direction"]}'
+                    f'elev {p["max_elevation"]:5.1f}°  {p["direction"]}  {p.get("prediction_kind", "")}'
                 )
 
         lines += [
@@ -4218,8 +4896,8 @@ class SmartTaskingDockWidget(QDockWidget):
         'BlackSky': 'BlackSky',
     }
 
-    def _send_to_tasking(self):
-        """Build a prefill payload from the active tab's selected row and emit *order_requested*."""
+    def _compose_result_order_email(self):
+        """Open an email draft populated from the selected archive or overpass result."""
         tab_idx = self.results_tabs.currentIndex()
 
         payload: Dict[str, Any] = {}
@@ -4250,19 +4928,45 @@ class SmartTaskingDockWidget(QDockWidget):
             # --- Overpass prediction ---
             self._fill_payload_from_overpass(payload)
         else:
-            self.status_label.setText('Switch to Archive or Overpass tab first.')
-            self.status_label.setStyleSheet('color: #ffcc00; font-size: 10px;')
+            self.status_label.setText('Select a row in Archive Results or Predicted Overpasses.')
+            set_status_state(self.status_label, 'warning')
             return
 
         if not payload.get('_source'):
-            self.status_label.setText('Select a row first, then send to Tasking.')
-            self.status_label.setStyleSheet('color: #ffcc00; font-size: 10px;')
+            self.status_label.setText('Select one result row before composing the order email.')
+            set_status_state(self.status_label, 'warning')
             return
 
-        self.order_requested.emit(payload)
-        self.status_label.setText('Sent to Tasking Order dock ✔')
-        self.status_label.setStyleSheet('color: #00ffbf; font-size: 10px;')
-        logger.info(f'Sent to Tasking: {payload.get("_source")} — {payload.get("satellite", "?")}')
+        try:
+            from .tasking_dock import TaskingDockWidget
+
+            subject, body = _build_order_email_content(payload)
+            recipient = TaskingDockWidget.TARGET_EMAIL
+            mailto_url = (
+                f'mailto:{quote(recipient, safe="")}'
+                f'?subject={quote(subject, safe="")}'
+                f'&body={quote(body, safe="")}'
+            )
+            if not QDesktopServices.openUrl(QUrl(mailto_url)):
+                raise RuntimeError('Unable to open the default email client')
+
+            self.status_label.setText(f'Email draft opened for {recipient}.')
+            set_status_state(self.status_label, 'success')
+            logger.info(
+                'Result order email opened source=%s satellite=%s',
+                payload.get('_source'),
+                payload.get('satellite', '?'),
+            )
+        except Exception as exc:
+            logger.error('Could not compose result order email: %s', exc, exc_info=True)
+            self.status_label.setText(f'Could not open email draft: {exc}')
+            set_status_state(self.status_label, 'error')
+            QMessageBox.warning(
+                self,
+                'Email Draft',
+                f'Could not open the email client. Please address the request to '
+                f'{TaskingDockWidget.TARGET_EMAIL if "TaskingDockWidget" in locals() else "the configured recipient"}.',
+            )
 
     # ---- archive row → payload ----------------------------------------
 
@@ -4274,7 +4978,15 @@ class SmartTaskingDockWidget(QDockWidget):
 
         payload['_source'] = 'archive'
         payload['_provider'] = item.get('_provider', '')
-        payload['satellite'] = item.get('_satellite', '')
+        properties = item.get('properties') if isinstance(item.get('properties'), dict) else {}
+        payload['satellite'] = (
+            item.get('_satellite')
+            or properties.get('platform')
+            or properties.get('constellation')
+            or ''
+        )
+        payload['scene_id'] = item.get('id', '')
+        payload['collection'] = item.get('collection', '')
 
         # Sensor type from provider hint or properties
         sensor = 'Optical'
@@ -4284,8 +4996,9 @@ class SmartTaskingDockWidget(QDockWidget):
         payload['sensor_type'] = sensor
 
         # Dates from item
-        props = item.get('properties', {})
+        props = properties
         dt_str = props.get('datetime') or props.get('start_datetime', '')
+        payload['acquisition_datetime'] = dt_str
         if dt_str:
             payload['date'] = dt_str[:10]  # YYYY-MM-DD
 
@@ -4313,20 +5026,17 @@ class SmartTaskingDockWidget(QDockWidget):
     # ---- overpass row → payload ----------------------------------------
 
     def _fill_payload_from_overpass(self, payload: Dict):
-        rows = sorted(
-            {idx.row() for idx in self.overpass_table.selectionModel().selectedRows()}
-        )
-        if not rows:
+        op = self._selected_prediction()
+        if not op:
             return
-        item_widget = self.overpass_table.item(rows[0], self._OV_SAT)
-        if not item_widget:
-            return
-        orig_idx = item_widget.data(Qt.UserRole)
-        if orig_idx is None or orig_idx >= len(self._overpass_results):
-            return
-        op = self._overpass_results[orig_idx]
 
         payload['_source'] = 'overpass'
+        payload['prediction_kind'] = op.get('prediction_kind')
+        payload['sensor_warning'] = op.get('sensor_warning', '')
+        payload['tle_epoch'] = op.get('tle_epoch')
+        payload['target_point'] = [op.get('target_lon'), op.get('target_lat')]
+        payload['access_start_utc'] = op.get('access_start_utc')
+        payload['access_end_utc'] = op.get('access_end_utc')
         payload['satellite'] = op.get('satellite', '')
         payload['operator'] = op.get('operator', '')
 
@@ -4386,11 +5096,18 @@ class SmartTaskingDockWidget(QDockWidget):
         lines = [
             f'Satellite: {payload["satellite"]} ({payload["operator"]})',
             f'Predicted pass: {dt_str}',
+            f'Result type: {op.get("prediction_kind", "opportunity")}',
+            'Geometric access to AOI bounding-box centre; acquisition not guaranteed.',
+            f'Target point: {op.get("target_lat")}, {op.get("target_lon")}',
+            f'Access interval (UTC): {op.get("access_start_utc")} / {op.get("access_end_utc")}',
+            f'TLE epoch (UTC): {op.get("tle_epoch")}  |  Updated: {op.get("tle_fetched_at")}',
             f'Direction: {direction}',
             f'Off-nadir: {off_nadir}°  |  Ground dist: {ground_dist} km',
             f'Max elevation: {elev}°  |  Duration: {duration} min',
             f'Orbit altitude: {alt_km} km  |  Confidence: {confidence}',
         ]
+        if op.get('sensor_warning'):
+            lines.append(f'WARNING: {op["sensor_warning"]}')
         if cat_entry:
             lines.append(
                 f'Sensor model: {cat_entry.get("sensor_model", "?")}  |  '
@@ -4591,6 +5308,16 @@ class SmartTaskingDockWidget(QDockWidget):
                 'tasking_access_token': str(creds.get('tasking_access_token') or '').strip(),
             }
 
+        if connector_id == 'swisstopo_stac':
+            return {
+                'api_root': str(
+                    s.value(
+                        'AltairEOData/swisstopo_stac_api_root',
+                        'https://data.geo.admin.ch/api/stac/v1/collections',
+                    )
+                ).strip() or 'https://data.geo.admin.ch/api/stac/v1/collections',
+            }
+
         if connector_id == 'oneatlas':
             return (ss.get_credentials('oneatlas') if ss else {}) or {}
 
@@ -4703,14 +5430,35 @@ class SmartTaskingDockWidget(QDockWidget):
             password = (creds.get('password') or '').strip()
             token = (creds.get('access_token') or creds.get('token') or '').strip()
             if not username:
-                username = str(s.value('altair/nasa_earthdata_username',
-                                        s.value('altair/nasa_username', ''))).strip()
+                username = str(
+                    s.value(
+                        'AltairEOData/nasa_username',
+                        s.value(
+                            'altair/nasa_earthdata_username',
+                            s.value('altair/nasa_username', ''),
+                        ),
+                    )
+                ).strip()
             if not password:
-                password = str(s.value('altair/nasa_earthdata_password',
-                                        s.value('altair/nasa_password', ''))).strip()
+                password = str(
+                    s.value(
+                        'AltairEOData/nasa_password',
+                        s.value(
+                            'altair/nasa_earthdata_password',
+                            s.value('altair/nasa_password', ''),
+                        ),
+                    )
+                ).strip()
             if not token:
-                token = str(s.value('altair/nasa_earthdata_token',
-                                     s.value('altair/nasa_access_token', ''))).strip()
+                token = str(
+                    s.value(
+                        'AltairEOData/nasa_access_token',
+                        s.value(
+                            'altair/nasa_earthdata_token',
+                            s.value('altair/nasa_access_token', ''),
+                        ),
+                    )
+                ).strip()
             if not (token or (username and password)):
                 return {}
             return {
@@ -4752,7 +5500,7 @@ class SmartTaskingDockWidget(QDockWidget):
             setattr(self, task_attr, None)
 
         self.date_start.setDate(QDate.currentDate().addMonths(-1))
-        self.date_end.setDate(QDate.currentDate().addDays(14))
+        self.date_end.setDate(QDate.currentDate().addDays(2))
         self.sensor_combo.setCurrentIndex(0)
         self.resolution_combo.setCurrentIndex(0)
         self.access_combo.setCurrentIndex(0)
@@ -4767,6 +5515,7 @@ class SmartTaskingDockWidget(QDockWidget):
             )
         self.archive_table.setRowCount(0)
         self.overpass_table.setRowCount(0)
+        self.candidate_table.setRowCount(0)
         self.summary_text.clear()
         self._search_results.clear()
         self._overpass_results.clear()
@@ -4777,7 +5526,7 @@ class SmartTaskingDockWidget(QDockWidget):
         self.overpass_count_label.setText('No prediction performed')
         self._update_quicklook_preview(None)
         self.status_label.setText('Reset complete — switches back to default. Go again!')
-        self.status_label.setStyleSheet(f'color: {self._LABEL_COLOR}; font-size: 10px;')
+        set_status_state(self.status_label, 'neutral')
         self._stop_busy_indicator()
         self._update_go_button_state()
 
@@ -4789,4 +5538,6 @@ class SmartTaskingDockWidget(QDockWidget):
         self._stop_busy_indicator()
         if self.select_from_map_btn.isChecked():
             self._deactivate_selection_mode()
+        if self._results_dock is not None:
+            self._results_dock.close()
         super().closeEvent(event)

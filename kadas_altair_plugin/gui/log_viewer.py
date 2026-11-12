@@ -15,6 +15,7 @@ from qgis.PyQt.QtWidgets import (
 )
 from qgis.PyQt.QtCore import Qt, QTimer
 from qgis.PyQt.QtGui import QFont, QTextCursor
+from .ui_theme import apply_dialog_theme, set_button_variant, set_label_role, set_status_state
 
 
 class LogViewerDialog(QDialog):
@@ -36,12 +37,13 @@ class LogViewerDialog(QDialog):
     
     def _setup_ui(self):
         """Setup user interface"""
+        apply_dialog_theme(self)
         layout = QVBoxLayout(self)
         
         # Header with log file path
         header_layout = QHBoxLayout()
-        header_label = QLabel(f"📄 File di log: {self.log_file_path}")
-        header_label.setStyleSheet("font-weight: bold; color: #2c3e50;")
+        header_label = QLabel(f"File di log: {self.log_file_path}")
+        set_label_role(header_label, "title")
         header_layout.addWidget(header_label)
         header_layout.addStretch()
         layout.addLayout(header_layout)
@@ -86,32 +88,38 @@ class LogViewerDialog(QDialog):
         
         # Status bar
         self.status_label = QLabel("Pronto")
-        self.status_label.setStyleSheet("color: #7f8c8d; font-size: 10px;")
+        set_label_role(self.status_label, "status")
+        set_status_state(self.status_label, "neutral")
         layout.addWidget(self.status_label)
         
         # Buttons
         button_layout = QHBoxLayout()
         
-        self.refresh_btn = QPushButton("🔄 Aggiorna")
+        self.refresh_btn = QPushButton("Aggiorna")
         self.refresh_btn.clicked.connect(self._load_logs)
+        set_button_variant(self.refresh_btn, "primary")
         button_layout.addWidget(self.refresh_btn)
         
-        self.clear_btn = QPushButton("🗑️ Cancella Log")
+        self.clear_btn = QPushButton("Cancella Log")
         self.clear_btn.clicked.connect(self._clear_logs)
+        set_button_variant(self.clear_btn, "accent")
         button_layout.addWidget(self.clear_btn)
         
-        self.export_btn = QPushButton("💾 Esporta")
+        self.export_btn = QPushButton("Esporta")
         self.export_btn.clicked.connect(self._export_logs)
+        set_button_variant(self.export_btn, "ghost")
         button_layout.addWidget(self.export_btn)
         
-        self.open_folder_btn = QPushButton("📁 Apri Cartella")
+        self.open_folder_btn = QPushButton("Apri Cartella")
         self.open_folder_btn.clicked.connect(self._open_log_folder)
+        set_button_variant(self.open_folder_btn, "ghost")
         button_layout.addWidget(self.open_folder_btn)
         
         button_layout.addStretch()
         
         self.close_btn = QPushButton("Chiudi")
         self.close_btn.clicked.connect(self.accept)
+        set_button_variant(self.close_btn, "ghost")
         button_layout.addWidget(self.close_btn)
         
         layout.addLayout(button_layout)
@@ -121,7 +129,8 @@ class LogViewerDialog(QDialog):
         try:
             if not self.log_file_path.exists():
                 self.log_text.setPlainText("File di log non trovato.")
-                self.status_label.setText("⚠️ File di log non esistente")
+                self.status_label.setText("File di log non esistente")
+                set_status_state(self.status_label, "warning")
                 return
             
             # Check file size first to prevent crash
@@ -131,7 +140,7 @@ class LogViewerDialog(QDialog):
             if file_size_mb > self.max_file_size_mb:
                 # File troppo grande - mostra solo le ultime righe
                 self.log_text.setPlainText(
-                    f"⚠️ FILE DI LOG TROPPO GRANDE ({file_size_mb:.1f} MB)\n\n"
+                    f"FILE DI LOG TROPPO GRANDE ({file_size_mb:.1f} MB)\n\n"
                     f"Il file supera il limite di {self.max_file_size_mb} MB e potrebbe causare crash.\n"
                     f"Vengono mostrate solo le ultime {self.max_lines} righe.\n\n"
                     f"Per visualizzare tutto il file, aprilo con un editor di testo esterno.\n"
@@ -156,16 +165,17 @@ class LogViewerDialog(QDialog):
                     # Prendi le ultime N righe
                     lines = lines[-self.max_lines:]
                     self.full_log_content = '\n'.join(lines)
-                    truncated_msg = f"\n⚠️ Mostrate solo le ultime {self.max_lines} righe (file troppo lungo)\n\n"
+                    truncated_msg = f"\nMostrate solo le ultime {self.max_lines} righe (file troppo lungo)\n\n"
                     self.full_log_content = truncated_msg + self.full_log_content
             
             except Exception as read_error:
                 self.log_text.setPlainText(
-                    f"❌ Errore nella lettura del file:\n{read_error}\n\n"
+                    f"Errore nella lettura del file:\n{read_error}\n\n"
                     f"Il file potrebbe essere corrotto o troppo grande.\n"
                     f"Prova a cancellare il log o aprirlo con un editor esterno."
                 )
-                self.status_label.setText(f"❌ Errore di lettura: {str(read_error)[:50]}")
+                self.status_label.setText(f"Errore di lettura: {str(read_error)[:50]}")
+                set_status_state(self.status_label, "error")
                 return
             
             # Apply current filter
@@ -175,9 +185,10 @@ class LogViewerDialog(QDialog):
             file_size_kb = file_size_bytes / 1024
             line_count = len(self.full_log_content.split('\n'))
             self.status_label.setText(
-                f"✅ Caricato: {line_count} righe, {file_size_kb:.1f} KB | "
+                f"Caricato: {line_count} righe, {file_size_kb:.1f} KB | "
                 f"Ultima modifica: {self._get_file_mtime()}"
             )
+            set_status_state(self.status_label, "success")
             
             # Scroll to bottom
             cursor = self.log_text.textCursor()
@@ -186,7 +197,8 @@ class LogViewerDialog(QDialog):
             
         except Exception as e:
             self.log_text.setPlainText(f"Errore nel caricamento del log: {e}")
-            self.status_label.setText(f"❌ Errore: {str(e)[:50]}")
+            self.status_label.setText(f"Errore: {str(e)[:50]}")
+            set_status_state(self.status_label, "error")
     
     def _load_tail_lines(self):
         """Load only the last N lines of a large file to prevent crash"""
@@ -228,16 +240,18 @@ class LogViewerDialog(QDialog):
                 self._apply_filter()
                 
                 self.status_label.setText(
-                    f"⚠️ File grande - mostrate ultime {len(lines)} righe | "
+                    f"File grande - mostrate ultime {len(lines)} righe | "
                     f"Dimensione totale: {file_size / (1024*1024):.1f} MB"
                 )
+                set_status_state(self.status_label, "warning")
                 
         except Exception as e:
             self.log_text.setPlainText(
-                f"❌ Impossibile leggere il file di log:\n{e}\n\n"
+                f"Impossibile leggere il file di log:\n{e}\n\n"
                 f"Il file potrebbe essere bloccato o corrotto."
             )
-            self.status_label.setText(f"❌ Errore: {str(e)[:50]}")
+            self.status_label.setText(f"Errore: {str(e)[:50]}")
+            set_status_state(self.status_label, "error")
     
     def _apply_filter(self):
         """Apply level and text filters to log content with crash protection"""
@@ -273,7 +287,7 @@ class LogViewerDialog(QDialog):
             max_chars = 5 * 1024 * 1024
             if len(filtered_text) > max_chars:
                 filtered_text = (
-                    f"⚠️ RISULTATI TRONCATI (troppo testo)\n\n"
+                    f"RISULTATI TRONCATI (troppo testo)\n\n"
                     f"{filtered_text[-max_chars:]}"
                 )
             
@@ -282,16 +296,18 @@ class LogViewerDialog(QDialog):
             # Update status with filter info
             if level_filter != "TUTTI" or search_text:
                 self.status_label.setText(
-                    f"🔍 Filtrato: {len(filtered_lines)} righe "
+                    f"Filtrato: {len(filtered_lines)} righe "
                     f"(Livello: {level_filter}, Cerca: '{search_text}')"
                 )
+                set_status_state(self.status_label, "info")
         
         except Exception as e:
             self.log_text.setPlainText(
-                f"❌ Errore durante il filtraggio:\n{e}\n\n"
+                f"Errore durante il filtraggio:\n{e}\n\n"
                 f"Il log potrebbe contenere dati corrotti."
             )
-            self.status_label.setText(f"❌ Errore filtro: {str(e)[:50]}")
+            self.status_label.setText(f"Errore filtro: {str(e)[:50]}")
+            set_status_state(self.status_label, "error")
     
     def _get_file_mtime(self) -> str:
         """Get file modification time as string"""
@@ -308,13 +324,15 @@ class LogViewerDialog(QDialog):
             self.refresh_timer = QTimer(self)
             self.refresh_timer.timeout.connect(self._load_logs)
             self.refresh_timer.start(5000)  # 5 seconds
-            self.status_label.setText("🔄 Auto-aggiornamento attivo (ogni 5s)")
+            self.status_label.setText("Auto-aggiornamento attivo (ogni 5s)")
+            set_status_state(self.status_label, "info")
         else:
             # Stop timer
             if self.refresh_timer:
                 self.refresh_timer.stop()
                 self.refresh_timer = None
             self.status_label.setText("Auto-aggiornamento disattivato")
+            set_status_state(self.status_label, "neutral")
     
     def _clear_logs(self):
         """Clear log file after confirmation"""

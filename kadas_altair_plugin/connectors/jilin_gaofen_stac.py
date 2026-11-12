@@ -3,7 +3,12 @@
 This connector targets STAC-compatible catalog/search endpoints that expose
 Jilin-1 Gaofen imagery. Endpoint and optional token can be provided via:
 - authenticate(credentials={...})
-- QSettings (fallback):
+- QSettings (primary):
+    - AltairEOData/jilin_catalog_base_url
+    - AltairEOData/jilin_default_collection
+    - AltairEOData/jilin_access_token
+
+Legacy fallback keys are still read for backward compatibility:
     - altair/jilin_stac_base_url
     - altair/jilin_collection
     - altair/jilin_access_token
@@ -27,6 +32,7 @@ except ImportError:
 
 from .base import ConnectorBase
 from ..logger import get_logger
+from ..utilities.qt_compat import qt_exec
 
 logger = get_logger('connectors.jilin_gaofen_stac')
 
@@ -206,7 +212,7 @@ class JilinGaofenStacConnector(ConnectorBase):
             timer.timeout.connect(loop.quit)
             timer.start(int(timeout * 1000))
 
-            loop.exec_()
+            qt_exec(loop)
 
             if not reply.isFinished():
                 reply.abort()
@@ -301,7 +307,7 @@ class JilinGaofenStacConnector(ConnectorBase):
         limit: int = 100,
     ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
         if not self._base_url:
-            return [], 'Jilin endpoint not configured (set altair/jilin_stac_base_url).'
+            return [], 'Jilin endpoint not configured (set AltairEOData/jilin_catalog_base_url).'
 
         selected_collection = (collection or self._default_collection or '').strip() or None
         max_items = max(1, int(limit))
@@ -403,7 +409,7 @@ class JilinGaofenStacConnector(ConnectorBase):
             timer.setSingleShot(True)
             timer.timeout.connect(loop.quit)
             timer.start(int(self.timeout_search * 1000))
-            loop.exec_()
+            qt_exec(loop)
 
             if not reply.isFinished():
                 reply.abort()

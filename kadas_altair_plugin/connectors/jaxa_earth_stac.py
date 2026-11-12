@@ -47,6 +47,7 @@ except ImportError:
 from .base import ConnectorBase
 from ..logger import get_logger
 from ..utilities.qgis_network import qgis_request_json
+from ..utilities.qt_compat import qt_exec
 
 logger = get_logger('connectors.jaxa_earth_stac')
 
@@ -678,7 +679,7 @@ class JaxaEarthStacConnector(ConnectorBase):
             timer.setSingleShot(True)
             timer.timeout.connect(loop.quit)
             timer.start(int(timeout * 1000))
-            loop.exec_()
+            qt_exec(loop)
 
             if not reply.isFinished():
                 reply.abort()

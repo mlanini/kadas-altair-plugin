@@ -13,6 +13,7 @@ References:
 """
 import json
 import os
+import time
 from typing import List, Dict, Any, Optional, Tuple
 from urllib.parse import urljoin, urlencode
 from urllib.parse import urlparse, parse_qs
@@ -28,6 +29,7 @@ except ImportError:
 
 from .base import ConnectorBase
 from ..logger import get_logger
+from ..utilities.qt_compat import qt_exec
 
 logger = get_logger('connectors.vantor')
 
@@ -402,7 +404,7 @@ class VantorConnector(ConnectorBase):
             timer.setSingleShot(True)
             timer.timeout.connect(loop.quit)
             timer.start(req_timeout * 1000)
-            loop.exec_()
+            qt_exec(loop)
             if not reply.isFinished():
                 reply.abort()
                 logger.error('Vantor tasking request timeout')
@@ -504,7 +506,7 @@ class VantorConnector(ConnectorBase):
         timer.start(timeout * 1000)
         
         # Wait for response
-        loop.exec_()
+        qt_exec(loop)
         
         # Check timeout
         if not reply.isFinished():
@@ -958,7 +960,16 @@ class VantorConnector(ConnectorBase):
         
         return collections
     
-    def load_footprints(self, event_name: str) -> Dict[str, Any]:
+    @staticmethod
+    def _deadline_timeout(timeout: int, deadline: Optional[float]) -> int:
+        if deadline is None:
+            return timeout
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError('Vantor search deadline exceeded')
+        return max(1, min(timeout, int(remaining)))
+
+    def load_footprints(self, event_name: str, deadline: Optional[float] = None) -> Dict[str, Any]:
         """Load footprints for a specific event
         
         Based on kadas-vantor-plugin pattern with GeoJSON from GitHub.
@@ -980,12 +991,14 @@ class VantorConnector(ConnectorBase):
 
         try:
             if mode == 'stac':
-                geojson = self._load_footprints_from_stac_collection(ref)
+                geojson = self._load_footprints_from_stac_collection(ref, deadline=deadline)
             else:
                 # Default GitHub mode
                 url = GEOJSON_URL_TEMPLATE.format(event=event_name)
                 logger.info(f"Loading footprints from: {url}")
-                geojson_data = self._fetch_url(url, timeout=TIMEOUT_FOOTPRINTS)
+                geojson_data = self._fetch_url(
+                    url, timeout=self._deadline_timeout(TIMEOUT_FOOTPRINTS, deadline)
+                )
                 geojson = json.loads(geojson_data)
 
                 # Validate structure
@@ -1003,11 +1016,15 @@ class VantorConnector(ConnectorBase):
 
             return geojson
 
+        except TimeoutError:
+            raise
         except Exception as e:
             logger.error(f"Failed to load footprints for {event_name}: {e}", exc_info=True)
             raise
 
-    def _load_footprints_from_stac_collection(self, collection_href: str) -> Dict[str, Any]:
+    def _load_footprints_from_stac_collection(
+        self, collection_href: str, deadline: Optional[float] = None
+    ) -> Dict[str, Any]:
         """Load item footprints from a STAC collection href.
 
         Follows the qgis-vantor-plugin reference pattern:
@@ -1025,7 +1042,9 @@ class VantorConnector(ConnectorBase):
             Dict[str, Any]: GeoJSON-like FeatureCollection of STAC items
         """
         logger.info(f"Loading STAC collection from: {collection_href}")
-        collection_str = self._fetch_url(collection_href, timeout=TIMEOUT_EVENTS)
+        collection_str = self._fetch_url(
+            collection_href, timeout=self._deadline_timeout(TIMEOUT_EVENTS, deadline)
+        )
         collection_obj = json.loads(collection_str)
 
         if not isinstance(collection_obj, dict):
@@ -1047,12 +1066,16 @@ class VantorConnector(ConnectorBase):
                 if not href.startswith(('http://', 'https://')):
                     href = urljoin(collection_href, href)
                 try:
-                    item_str = self._fetch_url(href, timeout=TIMEOUT_EVENTS)
+                    item_str = self._fetch_url(
+                        href, timeout=self._deadline_timeout(TIMEOUT_EVENTS, deadline)
+                    )
                     item = json.loads(item_str)
                     item_id = item.get('id', '')
                     if item_id not in seen_ids:
                         seen_ids.add(item_id)
                         features.append(item)
+                except TimeoutError:
+                    raise
                 except Exception as e:
                     logger.warning(f"Skipping item {href}: {e}")
                     continue
@@ -1089,7 +1112,9 @@ class VantorConnector(ConnectorBase):
             items_href = urljoin(collection_href, items_href)
 
         logger.info(f"Loading STAC items endpoint: {items_href}")
-        items_str = self._fetch_url(items_href, timeout=TIMEOUT_FOOTPRINTS)
+        items_str = self._fetch_url(
+            items_href, timeout=self._deadline_timeout(TIMEOUT_FOOTPRINTS, deadline)
+        )
         items_obj = json.loads(items_str)
 
         if not isinstance(items_obj, dict):
@@ -1140,6 +1165,7 @@ class VantorConnector(ConnectorBase):
         discovery_active = (
             self.discovery_enabled if use_discovery_api is None else bool(use_discovery_api)
         )
+        deadline = time.monotonic() + float(timeout or self.timeout_search)
 
         # First try Discovery API for archive-style searches.
         if discovery_active:
@@ -1213,7 +1239,7 @@ class VantorConnector(ConnectorBase):
         events_fetched = 0
 
         for event_name in events_to_search:
-            if len(results) >= limit:
+            if len(results) >= limit or time.monotonic() >= deadline:
                 break
 
             in_cache = event_name in self.footprints_cache
@@ -1228,7 +1254,9 @@ class VantorConnector(ConnectorBase):
                 events_fetched += 1
 
             try:
-                geojson = self.load_footprints(event_name)
+                geojson = self.load_footprints(event_name, deadline=deadline)
+            except TimeoutError:
+                break
             except Exception as e:
                 logger.warning(f"Vantor: skipping event {event_name!r}: {e}")
                 continue
@@ -1279,7 +1307,7 @@ class VantorConnector(ConnectorBase):
                 f"expanded cap ({MAX_EVENTS_TO_FETCH_FALLBACK})"
             )
             for event_name in events_to_search:
-                if len(results) >= limit:
+                if len(results) >= limit or time.monotonic() >= deadline:
                     break
                 if event_name in self.footprints_cache:
                     continue
@@ -1288,7 +1316,9 @@ class VantorConnector(ConnectorBase):
 
                 events_fetched += 1
                 try:
-                    geojson = self.load_footprints(event_name)
+                    geojson = self.load_footprints(event_name, deadline=deadline)
+                except TimeoutError:
+                    break
                 except Exception as e:
                     logger.warning(f"Vantor: skipping event {event_name!r}: {e}")
                     continue

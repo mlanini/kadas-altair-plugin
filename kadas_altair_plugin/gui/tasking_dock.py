@@ -20,6 +20,7 @@ from qgis.PyQt.QtWidgets import (
     QDateEdit,
     QDockWidget,
     QDoubleSpinBox,
+    QFrame,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -39,6 +40,7 @@ from qgis.core import (
     QgsProject,
 )
 from .aoi_draw_tool import AoiWidget
+from .ui_theme import apply_dock_theme, set_button_variant, set_label_role, set_status_state
 
 from ..logger import get_logger
 
@@ -76,36 +78,47 @@ class TaskingDockWidget(QDockWidget):
 
         self._setup_ui()
 
-    # Shared label color used by the subtitle and all form labels/group titles
-    _LABEL_COLOR = '#303030'
+    def _setup_form_group(
+        self,
+        group: QGroupBox,
+        form: QFormLayout,
+        hint: str = '',
+    ) -> None:
+        """Apply a consistent visual rhythm to form groups."""
+        form.setSpacing(8)
+        form.setHorizontalSpacing(12)
+        form.setVerticalSpacing(8)
+        form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+        form.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        if hint:
+            hint_label = QLabel(hint)
+            set_label_role(hint_label, 'meta')
+            hint_label.setWordWrap(True)
+            form.insertRow(0, hint_label)
+        group.setFlat(False)
 
     def _setup_ui(self):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
         self.setWidget(scroll)
 
         widget = QWidget()
         scroll.setWidget(widget)
-
-        # Apply light text tone to all labels and group-box titles uniformly,
-        # matching the subtitle style.
-        widget.setStyleSheet(
-            f"QLabel {{ color: {self._LABEL_COLOR}; }}"
-            f"QGroupBox {{ color: {self._LABEL_COLOR}; font-weight: bold; }}"
-        )
+        apply_dock_theme(widget)
 
         layout = QVBoxLayout(widget)
-        layout.setContentsMargins(6, 6, 6, 6)
-        layout.setSpacing(6)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(10)
         layout.setAlignment(Qt.AlignTop)
 
         header = QLabel('DEMO Satellite Tasking Request')
         header_font = QFont()
-        header_font.setPointSize(12)
+        header_font.setPointSize(13)
         header_font.setBold(True)
         header.setFont(header_font)
         header.setAlignment(Qt.AlignCenter)
-        header.setStyleSheet('color: #1f1f1f;')
+        set_label_role(header, 'title')
         layout.addWidget(header)
 
         subtitle = QLabel(
@@ -113,28 +126,51 @@ class TaskingDockWidget(QDockWidget):
             'an email draft. No direct provider API order is sent yet.'
         )
         subtitle.setWordWrap(True)
-        subtitle.setStyleSheet(f'color: {self._LABEL_COLOR}; font-size: 10px;')
+        subtitle.setAlignment(Qt.AlignCenter)
+        set_label_role(subtitle, 'subtitle')
         layout.addWidget(subtitle)
+
+        intro_meta = QLabel(
+            'Qt6-optimized layout: responsive sections, clearer visual '
+            'hierarchy, and safer defaults.'
+        )
+        set_label_role(intro_meta, 'meta')
+        intro_meta.setWordWrap(True)
+        intro_meta.setAlignment(Qt.AlignCenter)
+        layout.addWidget(intro_meta)
 
         requester_group = QGroupBox('Requester')
         requester_form = QFormLayout(requester_group)
+        self._setup_form_group(
+            requester_group,
+            requester_form,
+            'Contact data used to compose the outbound order email.',
+        )
 
         self.requester_name = QLineEdit()
         self.requester_name.setPlaceholderText('Full name')
+        self.requester_name.setClearButtonEnabled(True)
         requester_form.addRow('Name*:', self.requester_name)
 
         self.requester_email = QLineEdit()
         self.requester_email.setPlaceholderText('name@organization.tld')
+        self.requester_email.setClearButtonEnabled(True)
         requester_form.addRow('Email*:', self.requester_email)
 
         self.requester_org = QLineEdit()
         self.requester_org.setPlaceholderText('Organization / Team')
+        self.requester_org.setClearButtonEnabled(True)
         requester_form.addRow('Organization:', self.requester_org)
 
         layout.addWidget(requester_group)
 
         mission_group = QGroupBox('Mission & Provider')
         mission_form = QFormLayout(mission_group)
+        self._setup_form_group(
+            mission_group,
+            mission_form,
+            'Tasking profile and timeline constraints.',
+        )
 
         self.provider_combo = QComboBox()
         self.provider_combo.addItem('Any suitable provider')
@@ -143,8 +179,7 @@ class TaskingDockWidget(QDockWidget):
 
         self.service_type_combo = QComboBox()
         self.service_type_combo.addItems(['Tasking'])
-        self.service_type_combo.setEnabled(False)  # Only mode available
-        # mission_form.addRow('Service Type:', self.service_type_combo)
+        self.service_type_combo.setEnabled(False)
 
         self.sensor_type_combo = QComboBox()
         self.sensor_type_combo.addItems(['Optical', 'SAR', 'Optical + SAR'])
@@ -158,6 +193,7 @@ class TaskingDockWidget(QDockWidget):
 
         self.delivery_date = QDateEdit()
         self.delivery_date.setCalendarPopup(True)
+        self.delivery_date.setDisplayFormat('yyyy-MM-dd')
         self.delivery_date.setDate(QDate.currentDate().addDays(7))
         mission_form.addRow('Desired Delivery Date:', self.delivery_date)
 
@@ -165,9 +201,15 @@ class TaskingDockWidget(QDockWidget):
 
         aoi_group = QGroupBox('Area Of Interest (AOI)')
         aoi_form = QFormLayout(aoi_group)
+        self._setup_form_group(
+            aoi_group,
+            aoi_form,
+            'Use current map extent or draw a specific AOI for the request.',
+        )
 
         self.aoi_name = QLineEdit()
         self.aoi_name.setPlaceholderText('AOI name / operation name')
+        self.aoi_name.setClearButtonEnabled(True)
         aoi_form.addRow('AOI Name:', self.aoi_name)
 
         self.extent_widget = AoiWidget(parent=aoi_group)
@@ -184,20 +226,27 @@ class TaskingDockWidget(QDockWidget):
         self.aoi_wkt = QTextEdit()
         self.aoi_wkt.setMaximumHeight(70)
         self.aoi_wkt.setPlaceholderText('Optional AOI polygon in WKT format')
-        # aoi_form.addRow('AOI WKT (optional):', self.aoi_wkt)
 
         layout.addWidget(aoi_group)
 
         acquisition_group = QGroupBox('Acquisition Requirements')
         acquisition_form = QFormLayout(acquisition_group)
+        self._setup_form_group(
+            acquisition_group,
+            acquisition_form,
+            'Collection window, quality constraints, and sensor-specific '
+            'options.',
+        )
 
         self.start_date = QDateEdit()
         self.start_date.setCalendarPopup(True)
+        self.start_date.setDisplayFormat('yyyy-MM-dd')
         self.start_date.setDate(QDate.currentDate())
         acquisition_form.addRow('Window Start*:', self.start_date)
 
         self.end_date = QDateEdit()
         self.end_date.setCalendarPopup(True)
+        self.end_date.setDisplayFormat('yyyy-MM-dd')
         self.end_date.setDate(QDate.currentDate().addDays(14))
         acquisition_form.addRow('Window End*:', self.end_date)
 
@@ -242,6 +291,12 @@ class TaskingDockWidget(QDockWidget):
 
         product_group = QGroupBox('Delivery - Product')
         product_form = QFormLayout(product_group)
+        self._setup_form_group(
+            product_group,
+            product_form,
+            'Output format, packaging preferences, and special delivery '
+            'notes.',
+        )
 
         self.product_level = QComboBox()
         self.product_level.addItems(['Any', 'Level-1', 'Level-2', 'Ortho-ready', 'Analysis-ready'])
@@ -263,24 +318,34 @@ class TaskingDockWidget(QDockWidget):
         layout.addWidget(product_group)
 
         buttons = QHBoxLayout()
+        buttons.setSpacing(8)
         self.send_btn = QPushButton('Compose Email Order (DEMO ONLY)')
         self.send_btn.clicked.connect(self._compose_email_order)
+        set_button_variant(self.send_btn, 'primary')
         buttons.addWidget(self.send_btn)
 
         self.export_json_btn = QPushButton('Export as JSON')
         self.export_json_btn.clicked.connect(self._export_as_geojson)
+        set_button_variant(self.export_json_btn, 'ghost')
         buttons.addWidget(self.export_json_btn)
 
         self.clear_btn = QPushButton('Clear Form')
         self.clear_btn.clicked.connect(self._clear_form)
+        set_button_variant(self.clear_btn, 'ghost')
         buttons.addWidget(self.clear_btn)
         layout.addLayout(buttons)
 
         self.status_label = QLabel('Ready - Fill the form and click "Compose Email Order (DEMO ONLY)"')
-        self.status_label.setStyleSheet(f'color: {self._LABEL_COLOR}; font-size: 10px;')
+        set_label_role(self.status_label, 'status')
+        self.status_label.setWordWrap(True)
+        set_status_state(self.status_label, 'neutral')
         layout.addWidget(self.status_label)
 
         self._on_sensor_type_changed(self.sensor_type_combo.currentText())
+
+    def _set_status(self, text: str, state: str = 'neutral') -> None:
+        self.status_label.setText(text)
+        set_status_state(self.status_label, state)
 
     # ------------------------------------------------------------------
     # AOI helpers
@@ -432,14 +497,12 @@ class TaskingDockWidget(QDockWidget):
             if not opened:
                 raise RuntimeError('Unable to open default email client with mailto URL')
 
-            self.status_label.setText(f'Email draft opened for {self.TARGET_EMAIL}')
-            self.status_label.setStyleSheet('color: #00ffbf; font-size: 10px;')
+            self._set_status(f'Email draft opened for {self.TARGET_EMAIL}', 'success')
             logger.info('Tasking order email draft opened successfully')
 
         except Exception as e:
             logger.error(f'Failed to compose/send tasking email: {e}', exc_info=True)
-            self.status_label.setText(f'Failed to open email client: {e}')
-            self.status_label.setStyleSheet('color: #ff6b6b; font-size: 10px;')
+            self._set_status(f'Failed to open email client: {e}', 'error')
             QMessageBox.critical(
                 self,
                 'Email Error',
@@ -589,13 +652,11 @@ class TaskingDockWidget(QDockWidget):
                 json.dumps(geojson, indent=2, ensure_ascii=False),
                 encoding='utf-8',
             )
-            self.status_label.setText(f'Exported to {path}')
-            self.status_label.setStyleSheet('color: #00ffbf; font-size: 10px;')
+            self._set_status(f'Exported to {path}', 'success')
             logger.info('Tasking order exported to %s', path)
         except Exception as exc:
             logger.error('Failed to export GeoJSON: %s', exc, exc_info=True)
-            self.status_label.setText(f'Export failed: {exc}')
-            self.status_label.setStyleSheet('color: #ff6b6b; font-size: 10px;')
+            self._set_status(f'Export failed: {exc}', 'error')
             QMessageBox.critical(self, 'Export Error', f'Could not save file:\n{exc}')
 
     def _clear_form(self):
@@ -633,8 +694,7 @@ class TaskingDockWidget(QDockWidget):
         self.delivery_method.setCurrentIndex(0)
         self.notes.clear()
 
-        self.status_label.setText('Form cleared')
-        self.status_label.setStyleSheet(f'color: {self._LABEL_COLOR}; font-size: 10px;')
+        self._set_status('Form cleared')
 
     # ------------------------------------------------------------------
     # Pre-fill from Search and Predict dock
@@ -743,6 +803,7 @@ class TaskingDockWidget(QDockWidget):
 
         source = data.get('_source', 'Search and Predict')
         sat = data.get('satellite', '')
-        self.status_label.setText(
-            f'Pre-filled from {source}: {sat or data.get("_provider", "?")}')
-        self.status_label.setStyleSheet('color: #00e5ff; font-size: 10px;')
+        self._set_status(
+            f'Pre-filled from {source}: {sat or data.get("_provider", "?")}',
+            'info',
+        )

@@ -1,3 +1,4 @@
 requests-oauthlib>=2.0.0
 oauthlib>=3.2.2
 sgp4>=2.23
+ephem>=4.1

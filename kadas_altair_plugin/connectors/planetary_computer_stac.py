@@ -11,6 +11,7 @@ Focus:
 
 from __future__ import annotations
 
+import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -292,7 +293,7 @@ class PlanetaryComputerStacConnector(ConnectorBase):
                 return data, None
             return {'features': data}, None
 
-        logger.warning(
+        logger.debug(
             'Planetary Computer search via QGIS failed (status=%s): %s',
             status,
             err,
@@ -304,6 +305,8 @@ class PlanetaryComputerStacConnector(ConnectorBase):
 
         try:
             response = session.post(search_url, headers=headers, json=payload, timeout=timeout)
+            if response.status_code >= 400:
+                return None, f'HTTP {response.status_code}: {response.text[:500]}'
             response.raise_for_status()
             if not response.content:
                 return {}, None
@@ -422,17 +425,29 @@ class PlanetaryComputerStacConnector(ConnectorBase):
                 float(bbox[3]),
             ]
 
-        data, error = self._request_search(payload, timeout=request_timeout)
-        if error is not None:
-            logger.error(f'Planetary Computer STAC search failed: {error}')
-            return [], error
-
-        if not isinstance(data, dict):
-            return [], 'Invalid STAC response payload'
-
-        features = data.get('features') or []
-        if not isinstance(features, list):
-            features = []
+        pending = [collections]
+        features: List[Dict[str, Any]] = []
+        errors: List[str] = []
+        deadline = time.monotonic() + request_timeout
+        while pending:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                errors.append('Planetary Computer search timed out')
+                break
+            batch = pending.pop()
+            batch_payload = dict(payload, collections=batch)
+            data, error = self._request_search(batch_payload, timeout=remaining)
+            if error is not None:
+                if 'cross-collection searches require all collections to use the same backend' in error.lower() and len(batch) > 1:
+                    midpoint = len(batch) // 2
+                    pending.extend([batch[midpoint:], batch[:midpoint]])
+                    continue
+                errors.append(error)
+                continue
+            if not isinstance(data, dict) or not isinstance(data.get('features'), list):
+                errors.append('Invalid STAC response payload')
+                continue
+            features.extend(data['features'])
 
         items: List[Dict[str, Any]] = []
         for feature in features:
@@ -463,8 +478,10 @@ class PlanetaryComputerStacConnector(ConnectorBase):
         if len(items) > int(limit):
             items = items[: int(limit)]
 
+        if errors:
+            logger.warning('Planetary Computer STAC search incomplete: %s', '; '.join(errors))
         logger.info('Planetary Computer STAC search returned %s item(s)', len(items))
-        return items, None
+        return items, '; '.join(errors) or None
 
     def resolve_cog_url(self, item: dict) -> str:
         """Prefer visual/render/preview RGB assets before generic COG pick."""

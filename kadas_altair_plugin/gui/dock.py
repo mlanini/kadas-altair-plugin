@@ -10,6 +10,7 @@ from qgis.PyQt.QtWidgets import (
     QGroupBox, QTableWidget, QTableWidgetItem, QHeaderView,
     QAbstractItemView, QSplitter, QMessageBox, QDateEdit, QApplication,
     QProgressBar, QSlider, QFileDialog, QTabWidget, QTreeWidget, QTreeWidgetItem,
+    QProgressDialog,
     QScrollArea
 )
 from qgis.PyQt.QtCore import Qt, QDate, QSettings, QTimer, QModelIndex, QVariant
@@ -17,6 +18,13 @@ from qgis.PyQt.QtGui import QFont, QColor
 from ..logger import get_logger
 from .footprint_tool import FootprintSelectionTool
 from .aoi_draw_tool import AoiWidget
+from .ui_theme import (
+    apply_dock_theme,
+    infer_status_state,
+    set_button_variant,
+    set_label_role,
+    set_status_state,
+)
 
 logger = get_logger('gui.dock')
 
@@ -296,11 +304,7 @@ class AltairDockWidget(QDockWidget):
 
         main_widget = QWidget()
         scroll.setWidget(main_widget)
-        main_widget.setStyleSheet(
-            "QLabel { color: #303030; }"
-            "QCheckBox { color: #303030; }"
-            "QGroupBox { color: #303030; font-weight: bold; }"
-        )
+        apply_dock_theme(main_widget)
 
         layout = QVBoxLayout(main_widget)
         layout.setContentsMargins(6, 6, 6, 6)
@@ -314,7 +318,7 @@ class AltairDockWidget(QDockWidget):
         header_font.setBold(True)
         header_label.setFont(header_font)
         header_label.setAlignment(Qt.AlignCenter)
-        header_label.setStyleSheet("color: #1f1f1f;")
+        set_label_role(header_label, "title")
         layout.addWidget(header_label)
 
         # Description
@@ -323,12 +327,11 @@ class AltairDockWidget(QDockWidget):
             "Includes: Landsat, Umbra, Capella, ICEYE and many more."
         )
         desc_label.setWordWrap(True)
-        desc_label.setStyleSheet("color: #404040; font-size: 10px;")
+        set_label_role(desc_label, "subtitle")
         layout.addWidget(desc_label)
 
         # Filters group (including search area)
         filters_group = QGroupBox("Filters")
-        filters_group.setStyleSheet("QGroupBox { color: #303030; font-weight: bold; }")
         filters_layout = QFormLayout(filters_group)
 
         # Connector selection dropdown (NEW)
@@ -341,7 +344,7 @@ class AltairDockWidget(QDockWidget):
         )
         self.connector_combo.currentIndexChanged.connect(self._on_connector_changed)
         connector_label = QLabel("Data Source:")
-        connector_label.setStyleSheet("color: #303030; font-weight: bold;")
+        set_label_role(connector_label, "meta")
         filters_layout.addRow(connector_label, self.connector_combo)
 
         # STAC Endpoint dropdown with reload button (for AWS STAC connector)
@@ -359,10 +362,11 @@ class AltairDockWidget(QDockWidget):
         self.reload_catalog_btn.setMaximumWidth(30)
         self.reload_catalog_btn.setToolTip("Reload AWS catalog endpoints")
         self.reload_catalog_btn.clicked.connect(self.load_aws_endpoints)
+        set_button_variant(self.reload_catalog_btn, "ghost")
         endpoint_layout.addWidget(self.reload_catalog_btn)
         
         self.endpoint_label = QLabel("Catalogue:")
-        self.endpoint_label.setStyleSheet("color: #303030;")
+        set_label_role(self.endpoint_label, "meta")
         self.endpoint_row = filters_layout.rowCount()  # Store row index for show/hide
         filters_layout.addRow(self.endpoint_label, endpoint_layout)
 
@@ -375,7 +379,7 @@ class AltairDockWidget(QDockWidget):
         self.collections_combo.setEnabled(False)  # Disabled until endpoint selected
         self.collections_combo.addItem("N/A - Select endpoint", userData=None)
         collection_label = QLabel("Collection:")
-        collection_label.setStyleSheet("color: #303030;")
+        set_label_role(collection_label, "meta")
         filters_layout.addRow(collection_label, self.collections_combo)
 
         # Search Area - AoiWidget for interactive map drawing
@@ -393,14 +397,13 @@ class AltairDockWidget(QDockWidget):
         area_checkbox_layout = QHBoxLayout()
         self.use_area_check = QCheckBox("Use Search Area")
         self.use_area_check.setChecked(True)
-        self.use_area_check.setStyleSheet("color: #303030;")
         self.use_area_check.stateChanged.connect(self._on_use_area_changed)
         area_checkbox_layout.addWidget(self.use_area_check)
         area_checkbox_layout.addStretch()
         filters_layout.addRow("", area_checkbox_layout)
 
         area_label = QLabel("Search Area:")
-        area_label.setStyleSheet("color: #303030;")
+        set_label_role(area_label, "meta")
         filters_layout.addRow(area_label, self.extent_widget)
 
         logger.info("AoiWidget initialized successfully")
@@ -409,7 +412,6 @@ class AltairDockWidget(QDockWidget):
         date_checkbox_layout = QHBoxLayout()
         self.use_date_check = QCheckBox("Use Date Range")
         self.use_date_check.setChecked(False)
-        self.use_date_check.setStyleSheet("color: #303030;")
         self.use_date_check.stateChanged.connect(self._on_use_date_changed)
         date_checkbox_layout.addWidget(self.use_date_check)
         date_checkbox_layout.addStretch()
@@ -421,7 +423,7 @@ class AltairDockWidget(QDockWidget):
         self.start_date.setCalendarPopup(True)
         self.start_date.setEnabled(False)
         start_label = QLabel("Start Date:")
-        start_label.setStyleSheet("color: #303030;")
+        set_label_role(start_label, "meta")
         filters_layout.addRow(start_label, self.start_date)
         
         self.end_date = QDateEdit()
@@ -429,14 +431,13 @@ class AltairDockWidget(QDockWidget):
         self.end_date.setCalendarPopup(True)
         self.end_date.setEnabled(False)
         end_label = QLabel("End Date:")
-        end_label.setStyleSheet("color: #303030;")
+        set_label_role(end_label, "meta")
         filters_layout.addRow(end_label, self.end_date)
 
         # Cloud cover checkbox and slider
         cloud_checkbox_layout = QHBoxLayout()
         self.use_cloud_check = QCheckBox("Use Cloud Cover Filter")
         self.use_cloud_check.setChecked(False)
-        self.use_cloud_check.setStyleSheet("color: #303030;")
         self.use_cloud_check.stateChanged.connect(self._on_use_cloud_changed)
         cloud_checkbox_layout.addWidget(self.use_cloud_check)
         cloud_checkbox_layout.addStretch()
@@ -455,7 +456,7 @@ class AltairDockWidget(QDockWidget):
         self.cloud_cover_label = QLabel("20%")
         self.cloud_cover_label.setMinimumWidth(40)
         self.cloud_cover_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.cloud_cover_label.setStyleSheet("color: #303030; font-weight: bold;")
+        set_label_role(self.cloud_cover_label, "meta")
         cloud_cover_layout.addWidget(self.cloud_cover_label)
         
         # Update label when slider changes
@@ -464,7 +465,7 @@ class AltairDockWidget(QDockWidget):
         )
         
         cloud_label = QLabel("Max Cloud Cover:")
-        cloud_label.setStyleSheet("color: #303030;")
+        set_label_role(cloud_label, "meta")
         filters_layout.addRow(cloud_label, cloud_cover_layout)
 
         layout.addWidget(filters_group)
@@ -475,6 +476,7 @@ class AltairDockWidget(QDockWidget):
         # Search button with integrated spinner
         self.search_btn = QPushButton("Search")
         self.search_btn.setToolTip("Start search with selected parameters")
+        set_button_variant(self.search_btn, "primary")
         search_layout.addWidget(self.search_btn)
         
         # Clear results button
@@ -482,6 +484,7 @@ class AltairDockWidget(QDockWidget):
         self.clear_results_btn.setToolTip("Clear search results and remove footprints layer")
         self.clear_results_btn.setEnabled(False)  # Disabled until there are results
         self.clear_results_btn.clicked.connect(self._on_clear_results_clicked)
+        set_button_variant(self.clear_results_btn, "ghost")
         search_layout.addWidget(self.clear_results_btn)
         
         layout.addLayout(search_layout)
@@ -493,12 +496,10 @@ class AltairDockWidget(QDockWidget):
 
         # Results table
         results_group = QGroupBox("Results")
-        results_group.setStyleSheet("QGroupBox { color: #303030; font-weight: bold; }")
         results_layout = QVBoxLayout(results_group)
 
         # Create tab widget for Results and WMS/WMTS layers
         self.results_tabs = QTabWidget()
-        self.results_tabs.setStyleSheet("QTabWidget { color: #303030; }")
         
         # Tab 1: Search Results
         search_results_widget = QWidget()
@@ -537,7 +538,7 @@ class AltairDockWidget(QDockWidget):
             "The previous WEkEO HDA flow has been removed."
         )
         wms_info_label.setWordWrap(True)
-        wms_info_label.setStyleSheet("color: #ffb86b; font-size: 9px; padding: 5px;")
+        set_label_role(wms_info_label, "panel")
         wms_layers_layout.addWidget(wms_info_label)
         
         # Refresh button
@@ -546,6 +547,7 @@ class AltairDockWidget(QDockWidget):
         self.wms_refresh_btn.setToolTip("WMS/WMTS layer discovery is currently unavailable")
         self.wms_refresh_btn.clicked.connect(self._on_refresh_wms_layers)
         self.wms_refresh_btn.setEnabled(False)
+        set_button_variant(self.wms_refresh_btn, "ghost")
         wms_refresh_layout.addWidget(self.wms_refresh_btn)
         wms_refresh_layout.addStretch()
         wms_layers_layout.addLayout(wms_refresh_layout)
@@ -567,6 +569,7 @@ class AltairDockWidget(QDockWidget):
         self.wms_add_btn.setToolTip("WMS/WMTS layer discovery is currently unavailable")
         self.wms_add_btn.clicked.connect(self._on_add_wms_layers)
         self.wms_add_btn.setEnabled(False)
+        set_button_variant(self.wms_add_btn, "ghost")
         wms_layers_layout.addWidget(self.wms_add_btn)
         
         self.results_tabs.addTab(wms_layers_widget, "WMS/WMTS Layers")
@@ -578,7 +581,6 @@ class AltairDockWidget(QDockWidget):
 
         # Action buttons group
         actions_group = QGroupBox("Actions")
-        actions_group.setStyleSheet("QGroupBox { color: #303030; font-weight: bold; }")
         actions_layout = QVBoxLayout(actions_group)
 
         # Selection and zoom buttons row (horizontal)
@@ -590,6 +592,7 @@ class AltairDockWidget(QDockWidget):
         self.select_from_map_btn.setToolTip("Click on map to select footprints. Ctrl+Click for multiple selection.")
         self.select_from_map_btn.toggled.connect(self._on_selection_mode_toggled)
         self.select_from_map_btn.setEnabled(False)
+        set_button_variant(self.select_from_map_btn, "accent")
         selection_layout.addWidget(self.select_from_map_btn)
 
         # Zoom to selected
@@ -597,6 +600,7 @@ class AltairDockWidget(QDockWidget):
         self.zoom_btn.setEnabled(False)
         self.zoom_btn.setToolTip("Zoom to selected image(s)")
         self.zoom_btn.clicked.connect(self._zoom_to_selected)
+        set_button_variant(self.zoom_btn, "ghost")
         selection_layout.addWidget(self.zoom_btn)
         
         actions_layout.addLayout(selection_layout)
@@ -609,6 +613,7 @@ class AltairDockWidget(QDockWidget):
         self.preview_btn.setEnabled(False)
         self.preview_btn.setToolTip("Load GeoTIFF/COG raster as activable layer")
         self.preview_btn.clicked.connect(self._preview_imagery)
+        set_button_variant(self.preview_btn, "primary")
         imagery_layout.addWidget(self.preview_btn)
 
         # Download button
@@ -616,6 +621,7 @@ class AltairDockWidget(QDockWidget):
         self.download_btn.setEnabled(False)
         self.download_btn.setToolTip("Download selected COG imagery to local folder")
         self.download_btn.clicked.connect(self._download_imagery)
+        set_button_variant(self.download_btn, "ghost")
         imagery_layout.addWidget(self.download_btn)
 
         actions_layout.addLayout(imagery_layout)
@@ -624,14 +630,16 @@ class AltairDockWidget(QDockWidget):
         self.clear_btn = QPushButton("Clear All Layers")
         self.clear_btn.setToolTip("Remove all layers loaded by Altair")
         self.clear_btn.clicked.connect(self._clear_layers)
+        set_button_variant(self.clear_btn, "ghost")
         actions_layout.addWidget(self.clear_btn)
 
         layout.addWidget(actions_group)
 
         # Status label
         self.status_label = QLabel("Ready - Load a STAC endpoint to begin")
-        self.status_label.setStyleSheet("color: #303030; font-size: 10px; font-weight: 500;")
         self.status_label.setWordWrap(False)  # Disable word wrap to enforce truncation
+        set_label_role(self.status_label, "status")
+        set_status_state(self.status_label, "neutral")
         layout.addWidget(self.status_label)
 
         # Initialize connector manager and register connectors
@@ -667,12 +675,10 @@ class AltairDockWidget(QDockWidget):
             display_text = text
         
         self.status_label.setText(display_text)
-        self.status_label.setStyleSheet(style)
+        set_status_state(self.status_label, infer_status_state(style))
 
     def _start_search_spinner(self):
         """Start spinner animation in search button"""
-        from PyQt5.QtCore import QTimer
-        
         self._search_spinner_state = 0
         spinner_chars = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
         
@@ -898,7 +904,29 @@ class AltairDockWidget(QDockWidget):
             logger.error(f"Failed to register Capella API connector: {e}")
             self.capella_connector = None
         
-        # Connector decommissioned
+        # Register user-configured STAC API connector
+        try:
+            from ..connectors import CustomStacConnector
+            custom_stac_connector = CustomStacConnector()
+            self.connector_manager.register_connector(
+                connector_id='custom_stac',
+                connector_instance=custom_stac_connector,
+                display_name='Custom STAC',
+                capabilities=[
+                    ConnectorCapability.BBOX_SEARCH,
+                    ConnectorCapability.DATE_RANGE,
+                    ConnectorCapability.COLLECTIONS,
+                    ConnectorCapability.CLOUD_COVER,
+                    ConnectorCapability.AUTHENTICATION,
+                    ConnectorCapability.COG_SUPPORT,
+                ],
+                description='User-configured STAC API endpoint',
+            )
+            self.custom_stac_connector = custom_stac_connector
+            logger.info("Registered Custom STAC connector")
+        except Exception as e:
+            self.custom_stac_connector = None
+            logger.warning(f"Custom STAC connector not available: {e}")
         
         # Populate connector dropdown
         self._populate_connector_combo()
@@ -911,7 +939,7 @@ class AltairDockWidget(QDockWidget):
         self.connector_combo.clear()
         
         # Add "All Sources" as first option for aggregated search
-        self.connector_combo.addItem("🌐 All Sources (Aggregated)", userData="__all_sources__")
+        self.connector_combo.addItem("All Sources (Aggregated)", userData="__all_sources__")
         
         # Add separator (visual only, not selectable in most Qt versions)
         # self.connector_combo.insertSeparator(1)  # Would be nice but may not work in all Qt versions
@@ -1041,13 +1069,82 @@ class AltairDockWidget(QDockWidget):
             self._load_umbra_collections()
         elif connector_id in ('capella', 'capella_stac'):
             self._load_capella_collections()
+        elif connector_id == 'custom_stac':
+            self._load_custom_stac_collections()
         
         logger.debug(f"UI updated for connector: {connector_id} (collections={has_collections}, cloud={has_cloud_cover}, bbox={has_bbox})")
+
+    def _get_custom_stac_credentials(self):
+        credentials = self.secure_storage.get_credentials('custom_stac') if self.secure_storage else {}
+        credentials = credentials or {}
+        if not self.secure_storage:
+            credentials = {
+                key: str(self.settings.value(f'AltairEOData/custom_stac_{key}', '') or '')
+                for key in ('username', 'password', 'access_token')
+            }
+        return {
+            'endpoint': str(
+                self.settings.value('AltairEOData/custom_stac_endpoint', '') or ''
+            ).strip(),
+            'username': str(credentials.get('username') or '').strip(),
+            'password': str(credentials.get('password') or ''),
+            'access_token': str(credentials.get('access_token') or '').strip(),
+            'timeout': int(
+                self.settings.value('AltairEOData/custom_stac_timeout', 30, type=int)
+            ),
+        }
+
+    def _authenticate_custom_stac(self):
+        credentials = self._get_custom_stac_credentials()
+        if not credentials['endpoint']:
+            self._set_status(
+                "Configure a Custom STAC endpoint in Settings.",
+                "color: #FF0000; font-size: 10px; font-weight: 500;",
+            )
+            return False
+        authenticated = self.connector_manager.authenticate_connector(
+            'custom_stac', credentials=credentials
+        )
+        if not authenticated:
+            connector = self.custom_stac_connector
+            reason = getattr(connector, 'last_error', None) or 'Connection check failed'
+            self._set_status(
+                f"Custom STAC connection failed: {reason}",
+                "color: #FF0000; font-size: 10px; font-weight: 500;",
+            )
+            return False
+        self.connector_manager.clear_collections_cache()
+        return True
+
+    def _load_custom_stac_collections(self):
+        if not self.custom_stac_connector:
+            return
+        if not self._authenticate_custom_stac():
+            self.collections_combo.clear()
+            self.collections_combo.addItem("Configure endpoint in Settings", userData=None)
+            self.collections_combo.setEnabled(False)
+            return
+
+        collections = self.custom_stac_connector.get_collections()
+        self.collections_combo.clear()
+        self.collections_combo.addItem("All Collections", userData=None)
+        for collection in collections:
+            collection_id = collection.get('id', '')
+            title = collection.get('title') or collection_id
+            self.collections_combo.addItem(title, userData=collection)
+        self.collections_combo.setEnabled(True)
+        self._set_status(
+            f"Loaded {len(collections)} Custom STAC collection(s)",
+            "color: #00FF00; font-size: 10px; font-weight: 500;",
+        )
     
     def _load_all_sources_collections(self):
         """Load collections from ALL available connectors (All Sources mode)"""
         try:
             self._set_status("Loading collections from all sources...", "color: #FFA500;")
+
+            if self._get_custom_stac_credentials()['endpoint']:
+                self._authenticate_custom_stac()
             
             # Get aggregated collections from all connectors
             all_collections = self.connector_manager.get_all_collections()
@@ -2770,8 +2867,10 @@ class AltairDockWidget(QDockWidget):
             canvas.setMapTool(self.selection_tool)
             logger.info("Selection tool set as active map tool")
             
-            self.select_from_map_btn.setText("✓ Map Selection Active")
-            self.select_from_map_btn.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; }")
+            self.select_from_map_btn.setText("Map Selection Active")
+            self.select_from_map_btn.setProperty("altairState", "active")
+            self.select_from_map_btn.style().unpolish(self.select_from_map_btn)
+            self.select_from_map_btn.style().polish(self.select_from_map_btn)
             logger.info("Selection mode activated")
         except Exception as e:
             logger.error(f"Error activating selection mode: {e}", exc_info=True)
@@ -2795,7 +2894,9 @@ class AltairDockWidget(QDockWidget):
                 self._previous_map_tool = None
             
             self.select_from_map_btn.setText("Select from Map")
-            self.select_from_map_btn.setStyleSheet("")
+            self.select_from_map_btn.setProperty("altairState", "default")
+            self.select_from_map_btn.style().unpolish(self.select_from_map_btn)
+            self.select_from_map_btn.style().polish(self.select_from_map_btn)
             logger.info("Selection mode deactivated")
         except Exception as e:
             logger.error(f"Error deactivating selection mode: {e}", exc_info=True)
@@ -2894,6 +2995,40 @@ class AltairDockWidget(QDockWidget):
                 f"Error zooming to selected footprints:\n{str(e)}"
             )
 
+    def _get_connector_for_result(self, item):
+        connector_id = item.get('_source') if isinstance(item, dict) else None
+        if not connector_id or not self.connector_manager:
+            return None
+        connector_info = getattr(self.connector_manager, '_connectors', {}).get(
+            connector_id, {}
+        )
+        return connector_info.get('instance') if connector_info else None
+
+    def _get_asset_auth_headers(self, item, href):
+        connector = self._get_connector_for_result(item)
+        if connector is None:
+            return {}
+        try:
+            headers = connector.get_asset_auth_headers(item, href)
+            if isinstance(headers, dict) and headers:
+                return {str(key): str(value) for key, value in headers.items() if value}
+        except Exception as exc:
+            logger.debug("Connector asset auth lookup failed: %s", exc)
+
+        token = getattr(connector, '_access_token', None) or getattr(connector, '_token', None)
+        return {'Authorization': f'Bearer {token}'} if token else {}
+
+    @staticmethod
+    def _set_gdal_http_headers(headers):
+        try:
+            from osgeo import gdal
+            header_blob = '\r\n'.join(
+                f'{key}: {value}' for key, value in (headers or {}).items()
+            )
+            gdal.SetConfigOption('GDAL_HTTP_HEADERS', header_blob or None)
+        except Exception as exc:
+            logger.debug("GDAL HTTP header setup failed: %s", exc)
+
     def _preview_imagery(self):
         """Load COG (Cloud Optimized GeoTIFF) assets from selected results as activable layers"""
         selected = self._get_selected_results()
@@ -2921,7 +3056,6 @@ class AltairDockWidget(QDockWidget):
         # Create progress dialog for better UX
         progress = None
         if len(selected) > 3:
-            from PyQt5.QtWidgets import QProgressDialog
             progress = QProgressDialog("Loading COG assets...", "Cancel", 0, len(selected), self)
             progress.setWindowModality(Qt.WindowModal)
             progress.setMinimumDuration(0)
@@ -3032,6 +3166,25 @@ class AltairDockWidget(QDockWidget):
                                 asset_name_used = asset_name
                                 asset_type = asset.get('type', 'unknown')
                                 logger.debug(f"COG candidate (by extension): {asset_name} (href={href[:50]}..., score={score})")
+
+                connector = self._get_connector_for_result(result)
+                if connector is not None:
+                    try:
+                        resolved = connector.resolve_cog_url(result)
+                        if resolved:
+                            cog_url = str(resolved)
+                            asset_name_used = next((
+                                name for name, asset in assets.items()
+                                if isinstance(asset, dict)
+                                and str(asset.get('href') or '').strip() == cog_url
+                            ), asset_name_used or 'connector asset')
+                            logger.debug(
+                                "COG URL resolved by %s: %s",
+                                connector.__class__.__name__,
+                                cog_url[:120],
+                            )
+                    except Exception as exc:
+                        logger.debug("Provider COG resolution failed: %s", exc)
                 
                 # Final check: log best match
                 if cog_url:
@@ -3127,7 +3280,9 @@ class AltairDockWidget(QDockWidget):
                 # This follows the Vantor connector pattern: /vsicurl/{https-url}
                 cog_url_gdal = f"/vsicurl/{cog_url}"
                 logger.debug(f"  GDAL path: {cog_url_gdal[:100]}")
-                
+
+                asset_headers = self._get_asset_auth_headers(result, cog_url)
+                self._set_gdal_http_headers(asset_headers)
                 layer = QgsRasterLayer(cog_url_gdal, layer_name, "gdal")
                 
                 if layer.isValid():
@@ -3177,6 +3332,7 @@ class AltairDockWidget(QDockWidget):
                             logger.warning("   S3 access denied - bucket may require authentication")
                         elif is_jp2 and "not recognized" in error_msg.lower():
                             logger.warning("   JPEG2000 driver not available - install GDAL with JP2 support")
+                self._set_gdal_http_headers({})
             # Clean up GDAL configuration options
             from osgeo import gdal
             
@@ -3212,7 +3368,7 @@ class AltairDockWidget(QDockWidget):
             
             if loaded_count > 0:
                 self._set_status(
-                    f"✅ Loaded {loaded_count} COG layer(s) - Click layer to activate/deactivate",
+                    f"Loaded {loaded_count} COG layer(s) - Click layer to activate/deactivate",
                     "color: #00ffbf; font-size: 10px; font-weight: 500;"
                 )
                 
@@ -3220,9 +3376,9 @@ class AltairDockWidget(QDockWidget):
                 QMessageBox.information(
                     self,
                     "COG Layers Loaded",
-                    f"✓ Successfully loaded: {loaded_count} COG layer(s)\n"
-                    + (f"⚠ No COG assets: {no_cog_count}\n" if no_cog_count > 0 else "")
-                    + (f"✗ Failed: {failed_count}\n\n" if failed_count > 0 else "\n")
+                    f"Loaded: {loaded_count} COG layer(s)\n"
+                    + (f"No COG assets: {no_cog_count}\n" if no_cog_count > 0 else "")
+                    + (f"Failed: {failed_count}\n\n" if failed_count > 0 else "\n")
                     + "COG layers loaded with 80% opacity.\n"
                     + "Click on layers in the layer panel to activate/deactivate them.\n"
                     + "Use 'Zoom to Selection' to view the imagery.",
@@ -3269,7 +3425,10 @@ class AltairDockWidget(QDockWidget):
             return
         
         # Get download folder from settings or ask user
-        download_folder = self.settings.value("altair/download_folder", "")
+        download_folder = self.settings.value(
+            "AltairEOData/download_folder",
+            self.settings.value("altair/download_folder", ""),
+        )
         
         if not download_folder or not os.path.exists(download_folder):
             download_folder = QFileDialog.getExistingDirectory(
@@ -3283,7 +3442,8 @@ class AltairDockWidget(QDockWidget):
                 return  # User cancelled
             
             # Save folder to settings
-            self.settings.setValue("altair/download_folder", download_folder)
+            self.settings.setValue("AltairEOData/download_folder", download_folder)
+            self.settings.remove("altair/download_folder")
         
         # Disable buttons during download
         self.download_btn.setEnabled(False)
@@ -3291,7 +3451,6 @@ class AltairDockWidget(QDockWidget):
         QApplication.setOverrideCursor(Qt.WaitCursor)
         
         # Create progress dialog
-        from PyQt5.QtWidgets import QProgressDialog
         progress = QProgressDialog("Downloading COG files...", "Cancel", 0, len(selected), self)
         progress.setWindowModality(Qt.WindowModal)
         progress.setMinimumDuration(0)
@@ -3465,9 +3624,9 @@ class AltairDockWidget(QDockWidget):
                 reply = QMessageBox.question(
                     self,
                     "Download Complete",
-                    f"✓ Downloaded: {downloaded_count} file(s)\n"
-                    + (f"⚠ No COG: {no_cog_count}\n" if no_cog_count > 0 else "")
-                    + (f"✗ Failed: {failed_count}\n\n" if failed_count > 0 else "\n")
+                    f"Downloaded: {downloaded_count} file(s)\n"
+                    + (f"No COG: {no_cog_count}\n" if no_cog_count > 0 else "")
+                    + (f"Failed: {failed_count}\n\n" if failed_count > 0 else "\n")
                     + f"Folder: {download_folder}\n\n"
                     + "Load downloaded files as layers?",
                     QMessageBox.Yes | QMessageBox.No

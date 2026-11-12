@@ -19,6 +19,7 @@ except ImportError:
 
 from .base import ConnectorBase
 from ..logger import get_logger
+from ..utilities.qt_compat import qt_exec
 
 logger = get_logger('connectors.oneatlas')
 
@@ -105,7 +106,7 @@ class OneAtlasConnector(ConnectorBase):
             timer.timeout.connect(loop.quit)
             timer.start(int(self.timeout_auth * 1000))
             
-            loop.exec_()
+            qt_exec(loop)
             
             # Check timeout
             if not reply.isFinished():

@@ -280,11 +280,21 @@ class ConnectorManager:
         
         instance = connector_info['instance']
         try:
-            search_timeout = float(timeout) if timeout is not None else self.DEFAULT_SEARCH_TIMEOUT
+            from qgis.PyQt.QtCore import QSettings
+            configured_timeout = QSettings().value(
+                'AltairEOData/default_connection_timeout',
+                self.DEFAULT_SEARCH_TIMEOUT,
+            )
+            default_timeout = max(5.0, min(float(configured_timeout), 600.0))
+        except Exception:
+            default_timeout = self.DEFAULT_SEARCH_TIMEOUT
+
+        try:
+            search_timeout = float(timeout) if timeout is not None else default_timeout
         except (TypeError, ValueError):
-            search_timeout = self.DEFAULT_SEARCH_TIMEOUT
+            search_timeout = default_timeout
         if search_timeout <= 0:
-            search_timeout = self.DEFAULT_SEARCH_TIMEOUT
+            search_timeout = default_timeout
 
         # Keep connector-level HTTP calls aligned with the unified manager timeout
         # when the connector exposes a timeout_search attribute.

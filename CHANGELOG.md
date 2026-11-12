@@ -5,6 +5,41 @@ All notable changes to KADAS Altair Plugin will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2026-11-12
+
+### Added
+- **Custom STAC connector** with configurable endpoint, Basic/Bearer authentication, collection discovery, connection testing, and archive search.
+- **Tasking Results panel** consolidating archive results, predicted overpasses, and summaries; Send Order can use a selected result.
+
+### Changed
+- **swisstopo STAC** now defaults to API v1 and swissEO S2-SR v200; saved v100 collection selections migrate to v200.
+- **swissEO search and assets** now paginate results, return recent acquisitions first, and prefer the 10 m true-colour COG.
+- **OneAtlas archive search** is no longer presented as available. Settings retain OAuth credential testing, but the connector has no search implementation.
+- **Preview and COG resolution** use shared STAC-aware asset selection and connector-provided authentication.
+
+### Fixed
+- Corrected nadir swath geometry and MODIS polar swath gaps.
+- Fixed Settings panel creation by importing `QDoubleSpinBox`.
+- Fixed swisstopo HTTP 400 errors when Search and Predict supplies complete UTC timestamps.
+- Split Planetary Computer searches when collections use incompatible backends, preserving partial results on failure.
+- Limited Vantor background searches to their deadline and stopped repeated TLE downloads after a shared proxy failure while retaining cached orbital data.
+
+## [0.6.0] - 2026-11-11
+
+### Added
+- **SGP4 point-overpass prediction** (`gui/smart_tasking_dock.py`, `utilities/overpass_support.py`): predicts access to the center of the AOI bounding rectangle, with a 48-hour default window, configurable date ranges, persistent TLE caching, and an offline-only option.
+- **Prediction diagnostics and sensor constraints**: reports unavailable and partial orbital calculations separately from an empty pass result; applies a configurable 10-degree default solar-elevation threshold to optical opportunities and labels SAR results with unverified constraints as geometric candidates.
+
+### Changed
+- **Dock UI refresh** (`gui/ui_theme.py`, `gui/dock.py`, `gui/archive_dock.py`, `gui/settings_dock.py`, `gui/tasking_dock.py`): introduced a shared visual theme with improved hierarchy, table readability, button variants, and status badges across the main plugin panels.
+- **TLE age policy**: rejects orbital records outside the configurable epoch-offset limit, 72 hours by default, rather than generating synthetic prediction times.
+
+### Fixed
+- **Qt6 compatibility in active UI path** (`gui/dock.py`): removed direct `PyQt5` imports from the runtime dock code so the plugin remains compatible with KADAS 2.3+ environments moving toward Qt6.
+
+### Documentation
+- Release documentation updated to version `0.6.0` (`README.md`, `GUIDE.md`, `RELEASE_NOTES.md`, `SHA256SUMS.md`, `metadata.txt`).
+
 ## [0.5.2] - 2026-08-12
 
 ### Added
@@ -344,5 +379,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [GitHub Repository](https://github.com/mlanini/kadas-altair)
 - [Issue Tracker](https://github.com/mlanini/kadas-altair/issues)
 - [Installation Guide](GUIDE.md)
-- [Architecture Documentation](ARCHITECTURE.md)
-- [Contributing Guidelines](CONTRIBUTING.md)

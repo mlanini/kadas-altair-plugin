@@ -14,6 +14,7 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from ..logger import get_logger
+from .ui_theme import set_label_role
 
 logger = get_logger('gui.aoi_draw_tool')
 
@@ -157,7 +158,7 @@ class AoiWidget(QWidget):
         btn_row = QHBoxLayout()
         btn_row.setSpacing(4)
 
-        self._draw_btn = QPushButton('✏ Draw on Map')
+        self._draw_btn = QPushButton('Draw on Map')
         self._draw_btn.setToolTip('Click and drag on the map canvas to define the AOI rectangle')
         self._draw_btn.setCheckable(True)
         self._draw_btn.clicked.connect(self._on_draw_clicked)
@@ -168,7 +169,7 @@ class AoiWidget(QWidget):
         self._view_btn.clicked.connect(self._on_use_view)
         btn_row.addWidget(self._view_btn)
 
-        self._clear_btn = QPushButton('✕ Clear')
+        self._clear_btn = QPushButton('Clear AOI')
         self._clear_btn.setToolTip('Remove the current AOI definition')
         self._clear_btn.clicked.connect(self._on_clear)
         btn_row.addWidget(self._clear_btn)
@@ -177,7 +178,7 @@ class AoiWidget(QWidget):
 
         self._coords_label = QLabel('No AOI defined')
         self._coords_label.setWordWrap(True)
-        self._coords_label.setStyleSheet('font-size: 9px; color: #555555;')
+        set_label_role(self._coords_label, 'meta')
         outer.addWidget(self._coords_label)
 
     # ------------------------------------------------------------------
@@ -270,12 +271,12 @@ class AoiWidget(QWidget):
             self._canvas.unsetMapTool(self._draw_tool)
         self._draw_tool = None
         self._draw_btn.setChecked(False)
-        self._draw_btn.setText('✏ Draw on Map')
+        self._draw_btn.setText('Draw on Map')
 
     def _on_tool_deactivated(self):
         """Handles Escape / external tool change while drawing."""
         self._draw_btn.setChecked(False)
-        self._draw_btn.setText('✏ Draw on Map')
+        self._draw_btn.setText('Draw on Map')
         self._draw_tool = None
 
     def _on_rectangle_drawn(self, rect: 'QgsRectangle'):
@@ -283,7 +284,7 @@ class AoiWidget(QWidget):
         if self._canvas:
             self._crs = self._canvas.mapSettings().destinationCrs()
         self._draw_btn.setChecked(False)
-        self._draw_btn.setText('✏ Draw on Map')
+        self._draw_btn.setText('Draw on Map')
         self._draw_tool = None
         self._refresh_display()
         self.extentChanged.emit()

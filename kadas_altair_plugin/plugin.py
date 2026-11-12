@@ -11,6 +11,7 @@ from qgis.PyQt.QtNetwork import QNetworkProxy, QNetworkProxyFactory
 
 # Setup plugin logging
 from .logger import setup_logging, get_logger
+from .utilities.qt_compat import qt_exec
 
 # Get user profile path for logging
 try:
@@ -794,7 +795,7 @@ class KadasAltair(QObject):
             
             # Create and show dialog
             dialog = LogViewerDialog(log_file, parent=self.iface.mainWindow())
-            dialog.exec_()
+            qt_exec(dialog)
             
             logger.info("Log viewer closed")
             
@@ -815,7 +816,7 @@ class KadasAltair(QObject):
             config.read(metadata_path, encoding='utf-8')
             
             name = config.get('general', 'name', fallback='KADAS Altair')
-            version = config.get('general', 'version', fallback='0.5.2')
+            version = config.get('general', 'version', fallback='0.6.1')
             author = config.get('general', 'author', fallback='Michael Lanini')
             email = config.get('general', 'email', fallback='mlanini@proton.me')
             repository = config.get('general', 'repository', fallback='https://github.com/mlanini/kadas-altair-plugin')
@@ -867,12 +868,12 @@ Licensed under the MIT License.<br>
             if os.path.exists(icon_path):
                 msg_box.setIconPixmap(QIcon(icon_path).pixmap(64, 64))
             
-            msg_box.exec_()
+            qt_exec(msg_box)
             
         except Exception as e:
             logger.error(f"Error showing About dialog: {str(e)}", exc_info=True)
             QMessageBox.about(
                 self.iface.mainWindow(),
                 "About KADAS Altair",
-                f"KADAS Altair EO Data Plugin\n\nVersion: 0.5.2\nAuthor: Michael Lanini\n\nError loading full metadata: {str(e)}"
+                f"KADAS Altair EO Data Plugin\n\nVersion: 0.6.1\nAuthor: Michael Lanini\n\nError loading full metadata: {str(e)}"
             )

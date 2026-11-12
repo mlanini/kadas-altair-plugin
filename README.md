@@ -5,7 +5,7 @@
 [KADAS Albireo 2](https://www.kadas-albireo.ch) is an open-source GIS platform for geospatial planning, analysis and sharing. It is used to visualise maps and satellite data, manage operational scenarios and support rapid decision-making in the defense and security sectors.
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/Version-0.5.2-success.svg)](https://github.com/mlanini/kadas-altair-plugin)
+[![Version](https://img.shields.io/badge/Version-0.6.1-success.svg)](https://github.com/mlanini/kadas-altair-plugin)
 [![Status](https://img.shields.io/badge/Status-Production-success.svg)](https://github.com/mlanini/kadas-altair-plugin)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/mlanini/kadas-altair-plugin)
 
@@ -70,7 +70,7 @@ Some providers require authentication or tokens:
 - **Jilin-1 Gaofen**: bearer token
 - **Commercial providers**: credentials configured in the plugin settings
 
-Public connectors such as **Earth Search (Element84)**, **Microsoft Planetary Computer**, **ICEYE**, **Umbra**, **Capella**, **Vantor Open Data**, **JAXA Earth**, and **swisstopo** can often be used without signing in.
+Public connectors such as **Earth Search (Element84)**, **Microsoft Planetary Computer**, **JAXA Earth**, and **swisstopo** can be used without signing in. Other providers may require credentials. OneAtlas currently supports an OAuth connection test only and is not available for archive search.
 
 ---
 
@@ -78,7 +78,7 @@ Public connectors such as **Earth Search (Element84)**, **Microsoft Planetary Co
 
 ### Connectors
 
-The plugin currently supports 9 production-ready connectors, 1 experimental connector and 2 stub connectors:
+The archive currently registers 12 connectors:
 
 | # | Connector | Type | Notes |
 |---|-----------|------|-------|
@@ -86,14 +86,16 @@ The plugin currently supports 9 production-ready connectors, 1 experimental conn
 | 2 | **Umbra SAR** | Radar | High-resolution SAR imagery and STAC support |
 | 3 | **Capella SAR** | Radar | X-band SAR archive access |
 | 4 | **Vantor Open Data** | Optical | Disaster-event imagery and open-data access |
-| 5 | **swisstopo STAC** | Optical | Swiss national imagery collections, including Special flights |
+| 5 | **swisstopo STAC** | Optical | swissEO S2-SR v200 by default, plus Special flights |
 | 6 | **JAXA Earth STAC** | Multi | Public COG-STAC catalog with no credentials required |
 | 7 | **Earth Search (Element84)** | Multi | Public STAC access for Sentinel and Landsat collections |
 | 8 | **Microsoft Planetary Computer** | Multi | Public STAC access for curated optical and fire collections |
 | 9 | **Jilin-1 Gaofen** | Optical | Commercial STAC connector with bearer-token support |
 | 10 | **NASA EarthData** | Multi | Experimental connector for CMR/earthdata workflows |
-| 11 | **Planet** | Optical | Stub connector for future integration |
-| 12 | **OneAtlas** | Optical | Stub connector for future integration |
+| 11 | **Planet** | Optical | Data API and Tasking API; credentials required |
+| 12 | **Custom STAC** | Multi | User-configured STAC endpoint with optional authentication |
+
+OneAtlas OAuth settings remain available for credential testing, but OneAtlas is not registered as an archive provider because search is not implemented.
 
 ### Search and Visualization
 
@@ -107,11 +109,16 @@ The plugin currently supports 9 production-ready connectors, 1 experimental conn
 ### Search and Predict
 
 - **Satellite catalogue** covering a broad set of EO and SAR constellations
-- **Overpass prediction** using a bearing-convergence workflow tailored to sensor footprint and AOI
+- **SGP4 overpass prediction** for the center of the AOI bounding rectangle; this does not imply coverage of the full AOI or guarantee an acquisition
+- **Configurable prediction window** with a 48-hour default and optional date-range mode
+- **Validated orbital data** with persistent TLE cache, offline mode, a configurable maximum TLE age (72 hours by default), and no synthetic fallback times
+- **Optical daylight filtering** with a configurable minimum solar elevation (10° by default); SAR results with incomplete sensor constraints are labeled geometric candidates
+- **Distinct diagnostics** for no predicted pass, unavailable orbital data, and partial calculations
 - **3D orbit visualisation** with orbit track, ground track, swath corridor and satellite marker
 - **Archive search** for historical scenes by satellite and provider
 - **Busy hourglass indicator** while archive search and overpass prediction run in background
 - **Tasking prefill** to move selected results into the tasking workflow quickly
+- **Tasking Results panel** for archive results, predicted overpasses, summaries, and order requests based on a selected result
 
 ### Tasking Orders
 
@@ -134,19 +141,20 @@ The plugin currently supports 9 production-ready connectors, 1 experimental conn
 # Full package (bundles pip dependencies)
 python package_plugin_full.py
 # → kadas_altair_plugin_full_vX.Y.Z.zip
-
-# Skip pip install (CI / offline)
-$env:KADAS_SKIP_PIP = "1"; python package_plugin_full.py
-
 ```
+
+The full build installs and verifies the dependencies listed in
+`kadas_altair_plugin/requirements.txt`; the build environment needs access to
+its configured Python package index. A successful command creates the
+versioned ZIP in the repository root.
 
 ---
 
 ## Requirements
 
 - **KADAS Albireo 2.3+** (QGIS 3.x based)
-- Internet connection
 - Full package bundles required Python dependencies
+- Internet access is needed to refresh orbital TLE data; saved, age-valid TLEs can be used offline
 
 ---
 
@@ -159,6 +167,7 @@ $env:KADAS_SKIP_PIP = "1"; python package_plugin_full.py
 | No search results | Expand date range / cloud cover; verify AOI on map |
 | Proxy / VPN errors | Auto-configured from KADAS settings — see [GUIDE.md](GUIDE.md) |
 | COG loading fails | Check internet; verify GDAL vsicurl support |
+| Overpass prediction unavailable | Check TLE diagnostics and network access, or enable offline mode when a valid cached TLE exists — see [GUIDE.md](GUIDE.md) |
 | OpenSSL 3.0 legacy error | Auto-configured by plugin — see [GUIDE.md](GUIDE.md) |
 
 Full troubleshooting: [GUIDE.md](GUIDE.md)
@@ -171,7 +180,7 @@ Contributions welcome via issue discussion on GitHub.
 
 **Before submitting issues:**
 - Check logs: `Plugins` → `Altair` → `View Log`
-- Include KADAS version, plugin version (`0.5.2`), and steps to reproduce
+- Include KADAS version, plugin version (`0.6.1`), and steps to reproduce
 
 ---
 

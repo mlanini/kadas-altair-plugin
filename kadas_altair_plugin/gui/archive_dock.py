@@ -55,6 +55,7 @@ from qgis.PyQt.QtWidgets import (
 from ..logger import get_logger
 from .footprint_tool import FootprintSelectionTool
 from .aoi_draw_tool import AoiWidget
+from .ui_theme import apply_dock_theme, set_button_variant, set_label_role, set_status_state
 
 logger = get_logger('gui.archive')
 
@@ -127,13 +128,13 @@ except ImportError:
 # ---------------------------------------------------------------------------
 ARCHIVE_PROVIDERS: Dict[str, str] = {
     'Planet Labs':        'planet',
-    'OneAtlas (Airbus)':  'oneatlas',
     'Jilin-1 Gaofen':     'jilin_gaofen_stac',
     'Umbra SAR':          'umbra',
     'ICEYE SAR':          'iceye',
     'Capella Space':      'capella',
     'Vantor Hub Discovery': 'vantor',
     'NASA EarthData':     'nasa_earthdata',
+    'Custom STAC':        'custom_stac',
     'Earth Search (Element84)': 'element84_stac',
     'Microsoft Planetary Computer': 'planetary_computer_stac',
     'swisstopo S2-SR':    'swisstopo_stac',
@@ -299,26 +300,20 @@ class ArchiveDockWidget(QDockWidget):
 
         root = QWidget()
         scroll.setWidget(root)
-
-        root.setStyleSheet(
-            f'QLabel {{ color: {self._LABEL_COLOR}; }}'
-            f'QGroupBox {{ color: {self._LABEL_COLOR}; font-weight: bold; }}'
-            f'QCheckBox {{ color: {self._LABEL_COLOR}; }}'
-        )
+        apply_dock_theme(root)
 
         layout = QVBoxLayout(root)
         layout.setContentsMargins(6, 6, 6, 6)
         layout.setSpacing(6)
         layout.setAlignment(Qt.AlignTop)
 
-        # --- Header ---
         header = QLabel('Archive Search')
         hf = QFont()
         hf.setPointSize(12)
         hf.setBold(True)
         header.setFont(hf)
         header.setAlignment(Qt.AlignCenter)
-        header.setStyleSheet('color: #1f1f1f;')
+        set_label_role(header, 'title')
         layout.addWidget(header)
 
         subtitle = QLabel(
@@ -326,10 +321,9 @@ class ArchiveDockWidget(QDockWidget):
             'Earth Search, Planetary Computer, NASA). Credentials/endpoints are configured in Settings.'
         )
         subtitle.setWordWrap(True)
-        subtitle.setStyleSheet(f'color: {self._LABEL_COLOR}; font-size: 10px;')
+        set_label_role(subtitle, 'subtitle')
         layout.addWidget(subtitle)
 
-        # --- Providers ---
         prov_group = QGroupBox('Available Providers')
         prov_layout = QVBoxLayout(prov_group)
 
@@ -350,18 +344,15 @@ class ArchiveDockWidget(QDockWidget):
         prov_layout.addLayout(prov_row2)
         layout.addWidget(prov_group)
 
-        # --- Filters ---
         filter_group = QGroupBox('Search Filters')
         filter_form = QFormLayout(filter_group)
         filter_form.setRowWrapPolicy(QFormLayout.WrapAllRows)
 
-        # Sensor type
         self.sensor_combo = QComboBox()
         self.sensor_combo.addItems(['All', 'Optical', 'SAR'])
         self.sensor_combo.currentTextChanged.connect(self._on_sensor_changed)
         filter_form.addRow('Sensor Type:', self.sensor_combo)
 
-        # Date range
         date_row = QHBoxLayout()
         self.date_start = QDateEdit()
         self.date_start.setCalendarPopup(True)
@@ -377,13 +368,10 @@ class ArchiveDockWidget(QDockWidget):
         date_row.addWidget(self.date_end)
         filter_form.addRow('Date Range:', date_row)
 
-        # Free-text dataset query (used by providers that support text search,
-        # notably NASA EarthData catalog short-name/title/concept-id matching).
         self.query_input = QLineEdit()
         self.query_input.setPlaceholderText('Dataset/query (e.g. HLSL30, GEDI, C2021957657-LPCLOUD)')
         filter_form.addRow('Text Query:', self.query_input)
 
-        # Optional advanced provider-side filters used by NASA EarthData.
         self.daynight_combo = QComboBox()
         self.daynight_combo.addItem('Any', None)
         self.daynight_combo.addItem('Day only', 'day')
@@ -403,7 +391,6 @@ class ArchiveDockWidget(QDockWidget):
         self.granule_id_input.setPlaceholderText('Granule ID pattern (e.g. *T11* or HLS.L30.*)')
         filter_form.addRow('Granule ID:', self.granule_id_input)
 
-        # Cloud cover (optical only)
         cloud_row = QHBoxLayout()
         self.cloud_slider = QSlider(Qt.Horizontal)
         self.cloud_slider.setRange(0, 100)
@@ -420,7 +407,6 @@ class ArchiveDockWidget(QDockWidget):
         cloud_row.addWidget(self.cloud_label)
         filter_form.addRow('Max Cloud Cover:', cloud_row)
 
-        # Result limit
         self.limit_combo = QComboBox()
         for v in ['25', '50', '100', '200', '500']:
             self.limit_combo.addItem(v)
@@ -429,7 +415,6 @@ class ArchiveDockWidget(QDockWidget):
 
         layout.addWidget(filter_group)
 
-        # --- AOI ---
         aoi_group = QGroupBox('Area Of Interest')
         aoi_form = QFormLayout(aoi_group)
 
@@ -445,20 +430,20 @@ class ArchiveDockWidget(QDockWidget):
         aoi_form.addRow('Search Area:', self.extent_widget)
         layout.addWidget(aoi_group)
 
-        # --- Search actions ---
         search_row = QHBoxLayout()
         self.search_btn = QPushButton('Search')
         self.search_btn.setToolTip('Run archive search with current filters')
         self.search_btn.clicked.connect(self._on_search_clicked)
+        set_button_variant(self.search_btn, 'primary')
         search_row.addWidget(self.search_btn)
 
         self.clear_btn = QPushButton('Clear Results')
         self.clear_btn.setEnabled(False)
         self.clear_btn.clicked.connect(self._on_clear_results)
+        set_button_variant(self.clear_btn, 'ghost')
         search_row.addWidget(self.clear_btn)
         layout.addLayout(search_row)
 
-        # --- Results table ---
         results_group = QGroupBox('Results')
         results_layout = QVBoxLayout(results_group)
 
@@ -485,19 +470,19 @@ class ArchiveDockWidget(QDockWidget):
         result_filter_row.addWidget(self.result_filter_input, 1)
         clear_filter_btn = QPushButton('Clear Filter')
         clear_filter_btn.clicked.connect(self.result_filter_input.clear)
+        set_button_variant(clear_filter_btn, 'ghost')
         result_filter_row.addWidget(clear_filter_btn)
         results_layout.addLayout(result_filter_row)
 
         result_count_row = QHBoxLayout()
         self.result_count_label = QLabel('No search performed')
-        self.result_count_label.setStyleSheet(f'color: {self._LABEL_COLOR}; font-size: 10px;')
+        set_label_role(self.result_count_label, 'meta')
         result_count_row.addWidget(self.result_count_label)
         result_count_row.addStretch()
         results_layout.addLayout(result_count_row)
 
         layout.addWidget(results_group)
 
-        # --- In-panel quicklook preview (fallback if map georef is not possible) ---
         preview_group = QGroupBox('Quicklook Preview')
         preview_layout = QVBoxLayout(preview_group)
 
@@ -505,14 +490,10 @@ class ArchiveDockWidget(QDockWidget):
         self.quicklook_preview.setAlignment(Qt.AlignCenter)
         self.quicklook_preview.setMinimumHeight(120)
         self.quicklook_preview.setWordWrap(True)
-        self.quicklook_preview.setStyleSheet(
-            f'color: {self._LABEL_COLOR}; background-color: rgba(255,255,255,0.04); '
-            f'border: 1px solid rgba(255,255,255,0.12); font-size: 10px;'
-        )
+        set_label_role(self.quicklook_preview, 'panel')
         preview_layout.addWidget(self.quicklook_preview)
         layout.addWidget(preview_group)
 
-        # --- Action buttons ---
         actions_row = QHBoxLayout()
 
         self.select_from_map_btn = QPushButton('Select from Map')
@@ -520,17 +501,20 @@ class ArchiveDockWidget(QDockWidget):
         self.select_from_map_btn.setEnabled(False)
         self.select_from_map_btn.setToolTip('Click footprints on map to select rows. Ctrl+Click for multi-select.')
         self.select_from_map_btn.toggled.connect(self._on_selection_mode_toggled)
+        set_button_variant(self.select_from_map_btn, 'accent')
         actions_row.addWidget(self.select_from_map_btn)
 
         self.zoom_btn = QPushButton('Zoom to Selection')
         self.zoom_btn.setEnabled(False)
         self.zoom_btn.clicked.connect(self._zoom_to_selected)
+        set_button_variant(self.zoom_btn, 'ghost')
         actions_row.addWidget(self.zoom_btn)
 
         self.quicklook_btn = QPushButton('Open Quicklook')
         self.quicklook_btn.setEnabled(False)
         self.quicklook_btn.setToolTip('Load quicklook georeferenced in map when possible, otherwise show in panel')
         self.quicklook_btn.clicked.connect(self._open_quicklook)
+        set_button_variant(self.quicklook_btn, 'ghost')
         actions_row.addWidget(self.quicklook_btn)
 
         self.load_cog_btn = QPushButton('Load COG')
@@ -540,12 +524,14 @@ class ArchiveDockWidget(QDockWidget):
             'For CDSE Sentinel this is the exact UI action.'
         )
         self.load_cog_btn.clicked.connect(self._load_cog)
+        set_button_variant(self.load_cog_btn, 'primary')
         actions_row.addWidget(self.load_cog_btn)
 
         self.order_btn = QPushButton('Create Tasking Order')
         self.order_btn.setEnabled(False)
         self.order_btn.setToolTip('Open Tasking Order panel pre-filled for this provider')
         self.order_btn.clicked.connect(self._on_order_clicked)
+        set_button_variant(self.order_btn, 'accent')
         actions_row.addWidget(self.order_btn)
 
         layout.addLayout(actions_row)
@@ -554,40 +540,53 @@ class ArchiveDockWidget(QDockWidget):
         self.export_csv_btn = QPushButton('Export CSV')
         self.export_csv_btn.setEnabled(False)
         self.export_csv_btn.clicked.connect(lambda: self._export_results('csv'))
+        set_button_variant(self.export_csv_btn, 'ghost')
         export_row.addWidget(self.export_csv_btn)
 
         self.export_geojson_btn = QPushButton('Export GeoJSON')
         self.export_geojson_btn.setEnabled(False)
         self.export_geojson_btn.clicked.connect(lambda: self._export_results('geojson'))
+        set_button_variant(self.export_geojson_btn, 'ghost')
         export_row.addWidget(self.export_geojson_btn)
 
         self.export_json_btn = QPushButton('Export JSON')
         self.export_json_btn.setEnabled(False)
         self.export_json_btn.clicked.connect(lambda: self._export_results('json'))
+        set_button_variant(self.export_json_btn, 'ghost')
         export_row.addWidget(self.export_json_btn)
 
         self.export_stac_btn = QPushButton('Export STAC')
         self.export_stac_btn.setEnabled(False)
         self.export_stac_btn.clicked.connect(lambda: self._export_results('stac'))
+        set_button_variant(self.export_stac_btn, 'ghost')
         export_row.addWidget(self.export_stac_btn)
 
         self.export_bundle_btn = QPushButton('Bundle')
         self.export_bundle_btn.setEnabled(False)
         self.export_bundle_btn.clicked.connect(lambda: self._export_results('bundle'))
+        set_button_variant(self.export_bundle_btn, 'ghost')
         export_row.addWidget(self.export_bundle_btn)
 
         layout.addLayout(export_row)
 
-        # --- Status ---
-        self.status_label = QLabel('Ready — configure credentials in Settings, then search.')
-        self.status_label.setStyleSheet(f'color: {self._LABEL_COLOR}; font-size: 10px;')
+        self.status_label = QLabel('Ready - configure credentials in Settings, then search.')
         self.status_label.setWordWrap(True)
+        set_label_role(self.status_label, 'status')
+        set_status_state(self.status_label, 'neutral')
         layout.addWidget(self.status_label)
 
-        # Spinner state
         self._spinner_timer: Optional[QTimer] = None
         self._spinner_state: int = 0
         self._spinner_frames = ['◐ Searching', '◓ Searching', '◑ Searching', '◒ Searching']
+
+    def _set_status(self, text: str, state: str = 'neutral') -> None:
+        self.status_label.setText(text)
+        set_status_state(self.status_label, state)
+
+    def _set_selection_button_state(self, active: bool) -> None:
+        self.select_from_map_btn.setProperty('altairState', 'active' if active else 'default')
+        self.select_from_map_btn.style().unpolish(self.select_from_map_btn)
+        self.select_from_map_btn.style().polish(self.select_from_map_btn)
 
     # ------------------------------------------------------------------
     # Connector manager initialisation
@@ -617,24 +616,6 @@ class ArchiveDockWidget(QDockWidget):
                 logger.debug('Planet connector registered')
             except Exception as exc:
                 logger.warning(f'Planet connector unavailable: {exc}')
-
-            # OneAtlas
-            try:
-                from ..connectors.oneatlas import OneAtlasConnector
-                oneatlas = OneAtlasConnector()
-                self._connector_manager.register_connector(
-                        'oneatlas', oneatlas, 'OneAtlas (Airbus)',
-                    capabilities=[
-                        ConnectorCapability.BBOX_SEARCH,
-                        ConnectorCapability.DATE_RANGE,
-                        ConnectorCapability.CLOUD_COVER,
-                        ConnectorCapability.AUTHENTICATION,
-                        ConnectorCapability.COMMERCIAL,
-                    ]
-                )
-                logger.debug('OneAtlas connector registered')
-            except Exception as exc:
-                logger.warning(f'OneAtlas connector unavailable: {exc}')
 
             # ICEYE API
             try:
@@ -762,6 +743,25 @@ class ArchiveDockWidget(QDockWidget):
                 logger.debug('NASA EarthData connector registered')
             except Exception as exc:
                 logger.warning(f'NASA EarthData connector unavailable: {exc}')
+
+            # User-configured STAC API endpoint
+            try:
+                from ..connectors.custom_stac import CustomStacConnector
+                custom_stac = CustomStacConnector()
+                self._connector_manager.register_connector(
+                    'custom_stac', custom_stac, 'Custom STAC',
+                    capabilities=[
+                        ConnectorCapability.BBOX_SEARCH,
+                        ConnectorCapability.DATE_RANGE,
+                        ConnectorCapability.COLLECTIONS,
+                        ConnectorCapability.CLOUD_COVER,
+                        ConnectorCapability.AUTHENTICATION,
+                        ConnectorCapability.COG_SUPPORT,
+                    ]
+                )
+                logger.debug('Custom STAC connector registered')
+            except Exception as exc:
+                logger.warning(f'Custom STAC connector unavailable: {exc}')
 
             # swisstopo SWISSEO S2-SR (open-data STAC)
             try:
@@ -951,7 +951,7 @@ class ArchiveDockWidget(QDockWidget):
             'start_date':    date_from,
             'end_date':      date_to,
             'max_cloud_cover': cloud_max,
-            'collection':    self.collections_combo.currentData(),
+            'collection':    None,
             'limit':         limit,
             'sensor_type':   sensor,
             'connector_ids': ready_providers,
@@ -962,10 +962,10 @@ class ArchiveDockWidget(QDockWidget):
         self._last_search_params = dict(search_params)
 
         if skipped_providers:
-            self.status_label.setText(
-                f'Ready to search. Skipping unauthenticated providers: {", ".join(skipped_providers)}'
+            self._set_status(
+                f'Ready to search. Skipping unauthenticated providers: {", ".join(skipped_providers)}',
+                'warning',
             )
-            self.status_label.setStyleSheet('color: #ffaa00; font-size: 10px;')
 
         self._start_search(search_params)
 
@@ -1028,6 +1028,20 @@ class ArchiveDockWidget(QDockWidget):
                 connector_info['authenticated'] = True
                 return True
 
+        if connector_id == 'custom_stac':
+            try:
+                credentials = self._get_credentials_for_connector('custom_stac') or {}
+                authenticated = self._connector_manager.authenticate_connector(
+                    connector_id='custom_stac',
+                    credentials=credentials,
+                )
+                connector_info['authenticated'] = bool(authenticated)
+                return bool(authenticated)
+            except Exception as exc:
+                logger.warning(f'Archive search: Custom STAC setup failed: {exc}')
+                connector_info['authenticated'] = False
+                return False
+
         if connector_id == 'planetary_computer_stac':
             try:
                 credentials = self._get_credentials_for_connector('planetary_computer_stac') or {}
@@ -1078,7 +1092,7 @@ class ArchiveDockWidget(QDockWidget):
                 'discovery_timeout': int(
                     settings.value(
                         'AltairEOData/vantor_discovery_timeout',
-                        settings.value('AltairEOData/vantor_search_timeout', 30),
+                        settings.value('AltairEOData/vantor_search_timeout', 60),
                         type=int,
                     )
                 ),
@@ -1340,6 +1354,27 @@ class ArchiveDockWidget(QDockWidget):
                 'api_base_url': api_base_url,
             }
 
+        if connector_id == 'custom_stac':
+            settings = QSettings()
+            credentials = self.secure_storage.get_credentials('custom_stac') if self.secure_storage else {}
+            credentials = credentials or {}
+            if not self.secure_storage:
+                credentials = {
+                    key: str(settings.value(f'AltairEOData/custom_stac_{key}', '') or '').strip()
+                    for key in ('username', 'password', 'access_token')
+                }
+            return {
+                'endpoint': str(
+                    settings.value('AltairEOData/custom_stac_endpoint', '') or ''
+                ).strip(),
+                'username': str(credentials.get('username') or '').strip(),
+                'password': str(credentials.get('password') or ''),
+                'access_token': str(credentials.get('access_token') or '').strip(),
+                'timeout': int(
+                    settings.value('AltairEOData/custom_stac_timeout', 30, type=int)
+                ),
+            }
+
         if connector_id == 'nasa_earthdata':
             username = ''
             password = ''
@@ -1358,22 +1393,31 @@ class ArchiveDockWidget(QDockWidget):
             if not username:
                 username = str(
                     settings.value(
-                        'altair/nasa_earthdata_username',
-                        settings.value('altair/nasa_username', ''),
+                        'AltairEOData/nasa_username',
+                        settings.value(
+                            'altair/nasa_earthdata_username',
+                            settings.value('altair/nasa_username', ''),
+                        ),
                     )
                 ).strip()
             if not password:
                 password = str(
                     settings.value(
-                        'altair/nasa_earthdata_password',
-                        settings.value('altair/nasa_password', ''),
+                        'AltairEOData/nasa_password',
+                        settings.value(
+                            'altair/nasa_earthdata_password',
+                            settings.value('altair/nasa_password', ''),
+                        ),
                     )
                 ).strip()
             if not access_token:
                 access_token = str(
                     settings.value(
-                        'altair/nasa_earthdata_token',
-                        settings.value('altair/nasa_access_token', ''),
+                        'AltairEOData/nasa_access_token',
+                        settings.value(
+                            'altair/nasa_earthdata_token',
+                            settings.value('altair/nasa_access_token', ''),
+                        ),
                     )
                 ).strip()
 
@@ -1387,8 +1431,19 @@ class ArchiveDockWidget(QDockWidget):
                 'allow_deferred_validation': True,
             }
 
-        # swisstopo and JAXA Earth are public — no credentials required
-        if connector_id in ('swisstopo_stac', 'jaxa_earth_stac'):
+        if connector_id == 'swisstopo_stac':
+            settings = QSettings()
+            return {
+                'api_root': str(
+                    settings.value(
+                        'AltairEOData/swisstopo_stac_api_root',
+                        'https://data.geo.admin.ch/api/stac/v1/collections',
+                    )
+                ).strip() or 'https://data.geo.admin.ch/api/stac/v1/collections',
+            }
+
+        # JAXA Earth is public — no credentials required
+        if connector_id == 'jaxa_earth_stac':
             return {}
 
         return {}
@@ -1406,8 +1461,7 @@ class ArchiveDockWidget(QDockWidget):
         self.search_btn.setEnabled(False)
         self.clear_btn.setEnabled(False)
         self._start_spinner()
-        self.status_label.setText('Searching …')
-        self.status_label.setStyleSheet('color: #88ccff; font-size: 10px;')
+        self._set_status('Searching …', 'info')
 
         QgsApplication.taskManager().addTask(task)
 
@@ -1421,8 +1475,7 @@ class ArchiveDockWidget(QDockWidget):
             self._populate_results()
         except Exception as exc:
             logger.error(f'Sync search failed: {exc}', exc_info=True)
-            self.status_label.setText(f'Search error: {exc}')
-            self.status_label.setStyleSheet('color: #ff6b6b; font-size: 10px;')
+            self._set_status(f'Search error: {exc}', 'error')
 
     def _on_search_done(self, task: ArchiveSearchTask):
         self._stop_spinner()
@@ -1434,8 +1487,7 @@ class ArchiveDockWidget(QDockWidget):
         self._stop_spinner()
         self.search_btn.setEnabled(True)
         msg = task.error_message or 'Unknown error'
-        self.status_label.setText(f'Search failed: {msg}')
-        self.status_label.setStyleSheet('color: #ff6b6b; font-size: 10px;')
+        self._set_status(f'Search failed: {msg}', 'error')
 
     # ------------------------------------------------------------------
     # Results population
@@ -1483,8 +1535,7 @@ class ArchiveDockWidget(QDockWidget):
         self.export_stac_btn.setEnabled(count > 0)
         self.export_bundle_btn.setEnabled(count > 0)
 
-        self.status_label.setText(f'Search complete — {count} scene(s)')
-        self.status_label.setStyleSheet('color: #00ffbf; font-size: 10px;')
+        self._set_status(f'Search complete — {count} scene(s)', 'success')
 
         if count > 0:
             self._refresh_footprints_layer()
@@ -1742,8 +1793,8 @@ class ArchiveDockWidget(QDockWidget):
             self._selection_tool = FootprintSelectionTool(canvas, self._footprints_layer)
             self._previous_map_tool = canvas.mapTool()
             canvas.setMapTool(self._selection_tool)
-            self.select_from_map_btn.setText('✓ Map Selection Active')
-            self.select_from_map_btn.setStyleSheet('QPushButton { background-color: #4CAF50; color: white; }')
+            self.select_from_map_btn.setText('Map Selection Active')
+            self._set_selection_button_state(True)
         except Exception as exc:
             logger.warning(f'Could not activate map selection mode: {exc}')
             self.select_from_map_btn.setChecked(False)
@@ -1764,7 +1815,7 @@ class ArchiveDockWidget(QDockWidget):
             self._selection_tool = None
             self._previous_map_tool = None
             self.select_from_map_btn.setText('Select from Map')
-            self.select_from_map_btn.setStyleSheet('')
+            self._set_selection_button_state(False)
 
     # ------------------------------------------------------------------
     # Action handlers
@@ -1807,16 +1858,14 @@ class ArchiveDockWidget(QDockWidget):
 
         url = self._extract_quicklook_url(item)
         if not url:
-            self.status_label.setText('No quicklook URL available for this scene.')
-            self.status_label.setStyleSheet(f'color: {self._LABEL_COLOR}; font-size: 10px;')
+            self._set_status('No quicklook URL available for this scene.')
             return
 
         if self._try_load_quicklook_georeferenced(item, url):
             return
 
         # Fallback: keep the preview in panel (already updated on row selection).
-        self.status_label.setText('Quicklook shown in panel (georeferenced map portrayal not available).')
-        self.status_label.setStyleSheet(f'color: {self._LABEL_COLOR}; font-size: 10px;')
+        self._set_status('Quicklook shown in panel (georeferenced map portrayal not available).')
 
     def _extract_quicklook_url(self, item: Dict[str, Any]) -> Optional[str]:
         """Extract quicklook/thumbnail URL from a STAC item."""
@@ -1924,8 +1973,7 @@ class ArchiveDockWidget(QDockWidget):
             layer = QgsRasterLayer(uri, f'{scene_id}_quicklook')
             if layer.isValid():
                 QgsProject.instance().addMapLayer(layer)
-                self.status_label.setText('Quicklook loaded as georeferenced raster in map.')
-                self.status_label.setStyleSheet('color: #00ffbf; font-size: 10px;')
+                self._set_status('Quicklook loaded as georeferenced raster in map.', 'success')
                 return True
 
         # Fallback: build worldfile from bbox for image quicklooks
@@ -1989,8 +2037,7 @@ class ArchiveDockWidget(QDockWidget):
         layer.setCrs(wgs84)
 
         QgsProject.instance().addMapLayer(layer)
-        self.status_label.setText('Quicklook georeferenced from bbox and loaded in map.')
-        self.status_label.setStyleSheet('color: #00ffbf; font-size: 10px;')
+        self._set_status('Quicklook georeferenced from bbox and loaded in map.', 'success')
         return True
 
     # Asset keys to try in priority order when loading a COG layer.
@@ -2154,14 +2201,12 @@ class ArchiveDockWidget(QDockWidget):
                     self._gdal_clear_bearer()
 
         if loaded:
-            self.status_label.setText(f'{loaded} COG layer(s) added to map.')
-            self.status_label.setStyleSheet('color: #00ffbf; font-size: 10px;')
+            self._set_status(f'{loaded} COG layer(s) added to map.', 'success')
         else:
             msg = 'No valid COG layer loaded.'
             if errors:
                 msg += f' Failed: {", ".join(errors[:3])}'
-            self.status_label.setText(msg)
-            self.status_label.setStyleSheet('color: #ff6b6b; font-size: 10px;')
+            self._set_status(msg, 'error')
 
     def _on_order_clicked(self):
         rows = sorted(set(idx.row() for idx in self.results_table.selectedIndexes()))
@@ -2318,8 +2363,7 @@ class ArchiveDockWidget(QDockWidget):
                 with open(file_path, 'w', encoding='utf-8') as fout:
                     json.dump(bundle, fout, indent=2, default=str)
 
-            self.status_label.setText(f'Export complete: {os.path.basename(file_path)}')
-            self.status_label.setStyleSheet('color: #00aa66; font-size: 10px;')
+            self._set_status(f'Export complete: {os.path.basename(file_path)}', 'success')
         except Exception as exc:
             QMessageBox.critical(self, 'Export Error', f'Failed to export results:\n{exc}')
 
@@ -2351,8 +2395,7 @@ class ArchiveDockWidget(QDockWidget):
         self.order_btn.setEnabled(False)
         self._feature_id_to_result_index = {}
         self._result_index_to_feature_id = {}
-        self.status_label.setText('Results cleared.')
-        self.status_label.setStyleSheet(f'color: {self._LABEL_COLOR}; font-size: 10px;')
+        self._set_status('Results cleared.')
         if QGIS_AVAILABLE and self._footprints_layer:
             try:
                 QgsProject.instance().removeMapLayer(self._footprints_layer.id())
